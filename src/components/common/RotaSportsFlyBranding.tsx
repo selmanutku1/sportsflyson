@@ -9,11 +9,13 @@ export interface RotaSportsFlyHeaderBadgeProps {
   effectiveSecondaryHex?: string;
   hideRota?: boolean;
   hideSportsFly?: boolean;
+  firmLogoUrl?: string;
+  firmName?: string;
 }
 
 /**
  * Co-branding header badge:
- * - Analysis Firm: Rota Performans (with official circular logo)
+ * - Analysis Firm: Rota Performans / Analiz Firması (with official circular logo)
  * - Infrastructure Provider: Powered by SportsFly LAB (links to https://sportsfly.com.tr)
  */
 export const RotaSportsFlyHeaderBadge: React.FC<RotaSportsFlyHeaderBadgeProps> = ({
@@ -23,7 +25,12 @@ export const RotaSportsFlyHeaderBadge: React.FC<RotaSportsFlyHeaderBadgeProps> =
   effectiveSecondaryHex,
   hideRota = false,
   hideSportsFly = false,
+  firmLogoUrl,
+  firmName,
 }) => {
+  const effectiveFirmLogo = firmLogoUrl || ROTA_PERFORMANS_LOGO_DATA_URL;
+  const effectiveFirmName = firmName || 'ROTA PERFORMANS';
+
   return (
     <div
       className={`flex items-center justify-between sm:justify-end print:justify-end gap-2.5 px-3 py-1.5 rounded-xl border shrink-0 transition-colors ${
@@ -34,12 +41,12 @@ export const RotaSportsFlyHeaderBadge: React.FC<RotaSportsFlyHeaderBadgeProps> =
     >
       {!hideRota && (
         <>
-          {/* 1. Rota Performans */}
+          {/* 1. Analiz Firması Logosu & İsmi */}
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full overflow-hidden bg-white p-0.5 border border-cyan-400/60 shadow-xs flex items-center justify-center shrink-0">
               <img
-                src="/rota-performans-logo.png"
-                alt="Rota Performans Logo"
+                src={effectiveFirmLogo}
+                alt={effectiveFirmName}
                 className="w-full h-full object-contain"
               />
             </div>
@@ -49,7 +56,16 @@ export const RotaSportsFlyHeaderBadge: React.FC<RotaSportsFlyHeaderBadgeProps> =
                   isDark ? 'text-white' : 'text-slate-900'
                 }`}
               >
-                ROTA <span className="text-cyan-500">PERFORMANS</span>
+                {effectiveFirmName.includes(' ') ? (
+                  <>
+                    {effectiveFirmName.split(' ')[0]}{' '}
+                    <span className="text-cyan-500">
+                      {effectiveFirmName.split(' ').slice(1).join(' ')}
+                    </span>
+                  </>
+                ) : (
+                  effectiveFirmName
+                )}
               </div>
             </div>
           </div>

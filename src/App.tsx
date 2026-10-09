@@ -252,6 +252,10 @@ export default function App() {
       sessionStorage.setItem('sportsfly_auth_active', 'false');
       sessionStorage.removeItem('sportsfly_active_page');
       sessionStorage.removeItem('sportsfly_integration_active');
+      sessionStorage.removeItem('sportsfly_integration_entry_source');
+      sessionStorage.removeItem('sportsfly_active_company_profile');
+      localStorage.removeItem('sportsfly_integration_entry_source');
+      localStorage.removeItem('sportsfly_active_company_profile');
       if (typeof BroadcastChannel !== 'undefined') {
         const ch = new BroadcastChannel('sportsfly_auth_channel');
         ch.postMessage({ type: 'LOGOUT' });

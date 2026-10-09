@@ -1345,6 +1345,71 @@ export function archiveBatchLabReports(
   return nextArchives;
 }
 
+export interface UploadedExcelFileRecord {
+  id: string;
+  fileName: string;
+  uploadedAt: string;
+  athleteCount: number;
+  clubName: string;
+  fileSizeBytes?: number;
+  status: 'İşlendi' | 'Karneler Üretildi' | 'Arşivlendi';
+  groupTitle?: string;
+}
+
+export const LAB_EXCEL_HISTORY_STORAGE_KEY = 'sportsfly_lab_uploaded_excel_history_v1';
+
+export function getStoredLabExcelHistory(): UploadedExcelFileRecord[] {
+  try {
+    const raw = localStorage.getItem(LAB_EXCEL_HISTORY_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+
+  return [
+    {
+      id: 'excel-hist-1',
+      fileName: 'SportsFly_Lab_Toplu_Sporcu_Sablonu (6 Örnek Sporcu).xlsx',
+      uploadedAt: new Date().toLocaleDateString('tr-TR') + ' 11:45',
+      athleteCount: 6,
+      clubName: 'Ataşehir Spor Okulları',
+      status: 'Karneler Üretildi',
+      groupTitle: '2026 Dönemi 3. Ölçüm Taraması',
+    },
+    {
+      id: 'excel-hist-2',
+      fileName: 'U14_Basketbol_Akademi_Performans_Verileri.xlsx',
+      uploadedAt: new Date(Date.now() - 86400000 * 2).toLocaleDateString('tr-TR') + ' 16:20',
+      athleteCount: 14,
+      clubName: 'Gelişim Akademi Basketbol',
+      status: 'İşlendi',
+      groupTitle: 'Antropometri ve Motorik Tarama Seti',
+    },
+    {
+      id: 'excel-hist-3',
+      fileName: 'Yuzme_Kulubu_Sezon_Basi_Fiziksel_Olcum.xlsx',
+      uploadedAt: new Date(Date.now() - 86400000 * 5).toLocaleDateString('tr-TR') + ' 09:15',
+      athleteCount: 8,
+      clubName: 'Marmara Yüzme Kulübü',
+      status: 'Karneler Üretildi',
+      groupTitle: '1. ve 2. Dönem Karşılaştırmalı Karne',
+    },
+  ];
+}
+
+export function saveStoredLabExcelHistory(history: UploadedExcelFileRecord[]): void {
+  try {
+    localStorage.setItem(LAB_EXCEL_HISTORY_STORAGE_KEY, JSON.stringify(history));
+  } catch (e) {}
+}
+
+export function addStoredLabExcelRecord(record: UploadedExcelFileRecord): void {
+  const current = getStoredLabExcelHistory();
+  const next = [record, ...current.filter((item) => item.id !== record.id)];
+  saveStoredLabExcelHistory(next);
+}
+
 /**
  * Sample multi-athlete rows for Batch Excel Template and 1-Click Sample Batch Testing
  * Fully aligned with current 7-page SportsFly Lab report card content (Anthropometry, Heath-Carter Somatotype change table, Motor tests, PACER, PHV, Score progression, Trainer notes).

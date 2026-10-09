@@ -60,6 +60,25 @@ export interface EntegrasyonItem {
   supportUrl?: string;
 }
 
+export type CompanyIntegrationType = 'analiz_firmasi' | 'spor_kulubu' | 'spor_okulu' | 'akademi';
+
+export interface CompanyIntegrationProfile {
+  id?: string;
+  companyName: string;
+  accessCode: string;
+  companyType?: CompanyIntegrationType;
+  authorizedPerson?: string;
+  phone?: string;
+  email?: string;
+  city?: string;
+  branchName?: string;
+  logoDataUrl?: string;
+  activeModules?: Record<string, boolean>;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export type EnvanterKategori =
   | 'Toplar'
   | 'Formalar & Yelekler'

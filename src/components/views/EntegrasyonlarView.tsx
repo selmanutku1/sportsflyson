@@ -193,20 +193,19 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
     let validCodes = ['SPORTSFLY2026', 'ADMIN2026', '123456'];
     let moduleActiveCheck = true;
 
+    let matchedCompanyEntry: any = null;
+
     try {
       const storedAccess = localStorage.getItem('sportsfly_integration_access_list');
       if (storedAccess) {
         const parsed = JSON.parse(storedAccess);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          parsed.forEach(entry => {
+          parsed.forEach((entry: any) => {
             if (entry.accessCode) validCodes.push(entry.accessCode.toUpperCase());
-            if (entry.companyName && entry.companyName.toLowerCase() === enteredPassCode.trim().toLowerCase()) {
-              if (entry.accessCode) validCodes.push(entry.accessCode.toUpperCase());
-            }
-            if (entry.activeModules && passCodeModalItem.id in entry.activeModules) {
-              if (entry.activeModules[passCodeModalItem.id] === false) {
-                // If explicitly disabled in settings for this entry
-              }
+            const codeMatch = entry.accessCode && entry.accessCode.toUpperCase() === enteredPassCode.trim().toUpperCase();
+            const companyMatch = entry.companyName && entry.companyName.toLowerCase() === enteredPassCode.trim().toLowerCase();
+            if (codeMatch || companyMatch) {
+              matchedCompanyEntry = entry;
             }
           });
         }
@@ -214,12 +213,23 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
     } catch (e) {}
 
     const cleanInput = enteredPassCode.trim().toUpperCase();
-    const isMatch = validCodes.includes(cleanInput) || cleanInput === '123456' || cleanInput === passCodeModalItem.name.toUpperCase();
+    const isMatch = validCodes.includes(cleanInput) || cleanInput === '123456' || cleanInput === passCodeModalItem.name.toUpperCase() || Boolean(matchedCompanyEntry);
 
     if (isMatch) {
       const item = passCodeModalItem;
       setPassCodeModalItem(null);
       setEnteredPassCode('');
+
+      // Mark integration entry and store matched company profile
+      try {
+        sessionStorage.setItem('sportsfly_integration_entry_source', 'true');
+        localStorage.setItem('sportsfly_integration_entry_source', 'true');
+        if (matchedCompanyEntry) {
+          sessionStorage.setItem('sportsfly_active_company_profile', JSON.stringify(matchedCompanyEntry));
+          localStorage.setItem('sportsfly_active_company_profile', JSON.stringify(matchedCompanyEntry));
+        }
+      } catch (e) {}
+
       openModuleDirectly(item);
     } else {
       setPassCodeError('Firma adı veya geçiş kodu hatalı! Lütfen geçerli bir geçiş kodu giriniz.');
@@ -342,37 +352,29 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
 
     return (
       <div className="space-y-3 sm:space-y-4 print:space-y-0">
-        {/* Responsive Back Navigation Bar */}
-        <div className="bg-white dark:bg-[#111c2e] p-3 sm:px-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs print:hidden">
-          <div className="flex items-center justify-between sm:justify-start gap-2.5 min-w-0">
+        {/* Responsive Entegrasyon Oturum Çubuğu (Geri Dön butonu kaldırıldı) */}
+        {onLogout && (
+          <div className="bg-white dark:bg-[#111c2e] p-3 sm:px-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2.5 shadow-2xs print:hidden">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              <div className="text-xs font-bold text-slate-700 dark:text-slate-300 truncate">
+                {activeModuleMeta?.fullLabel || 'Aktif Entegrasyon'}
+              </div>
+            </div>
+
             <button
               type="button"
-              onClick={() => setActiveSubModule(null)}
-              className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+              onClick={onLogout}
+              className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
             >
-              <ChevronRight className="w-4 h-4 rotate-180 text-blue-600 dark:text-blue-400" />
-              <span className="sm:hidden">Entegrasyonlar</span>
-              <span className="hidden sm:inline">Entegrasyonlar Sayfasına Geri Dön</span>
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Entegrasyon Panelinden Çıkış Yap</span>
+              <span className="sm:hidden">Çıkış Yap</span>
             </button>
-
-            {onLogout && (
-              <button
-                type="button"
-                onClick={onLogout}
-                className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-              >
-                <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline">Entegrasyon Panelinden Çıkış Yap</span>
-              </button>
-            )}
-
-            <div className="text-xs font-bold text-slate-700 dark:text-slate-300 truncate sm:hidden">
-              {activeModuleMeta?.shortLabel}
-            </div>
           </div>
-        </div>
+        )}
 
-        {activeSubModule === 'sportsfly-lab' && <SportsFlyLabView onToast={onToast} />}
+        {activeSubModule === 'sportsfly-lab' && <SportsFlyLabView onToast={onToast} onLogout={onLogout} />}
         {activeSubModule === 'sporpuan' && <SporpuanSporcuDegerlendirmeView onToast={onToast} />}
         {activeSubModule === 'turnuva' && <TurnuvaYonetimiView onToast={onToast} />}
         {activeSubModule === 'envanter' && <EnvanterYonetimiView onToast={onToast} />}

@@ -156,7 +156,8 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
   };
   const [isDownloading, setIsDownloading] = useState(false);
   const [isPdfPreviewMode, setIsPdfPreviewMode] = useState(false);
-  const [showPerformanceCharts, setShowPerformanceCharts] = useState(true);
+  // Performans grafikleri her zaman kapalı başlar, kullanıcı tıklamadan açık gelmez
+  const [showPerformanceCharts, setShowPerformanceCharts] = useState(false);
   const [isSimplifiedView, setIsSimplifiedView] = useState(false);
   const [pdfZoom, setPdfZoom] = useState(100);
   const [isVeliModalOpen, setIsVeliModalOpen] = useState(false);

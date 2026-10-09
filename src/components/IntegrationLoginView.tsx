@@ -52,17 +52,19 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
       let validCodes = ['SPORTSFLY2026', 'ADMIN2026', '123456'];
       let isAllowedForModule = true;
       let matchedAny = false;
+      let matchedCompanyEntry: any = null;
 
       try {
         const storedAccess = localStorage.getItem('sportsfly_integration_access_list');
         if (storedAccess) {
           const parsed = JSON.parse(storedAccess);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            parsed.forEach(entry => {
+            parsed.forEach((entry: any) => {
               const codeMatch = entry.accessCode && entry.accessCode.trim().toUpperCase() === trimmedCode.toUpperCase();
               const companyMatch = entry.companyName && entry.companyName.trim().toLowerCase() === trimmedCode.toLowerCase();
               if (codeMatch || companyMatch) {
                 matchedAny = true;
+                matchedCompanyEntry = entry;
                 if (entry.accessCode) validCodes.push(entry.accessCode.toUpperCase());
                 if (entry.activeModules && trimmedId in entry.activeModules) {
                   if (entry.activeModules[trimmedId] === false) {
@@ -97,8 +99,16 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
       }
 
       sessionStorage.setItem('sportsfly_integration_active', 'true');
+      sessionStorage.setItem('sportsfly_integration_entry_source', 'true');
+      localStorage.setItem('sportsfly_integration_entry_source', 'true');
       sessionStorage.setItem('sportsfly_integration_name', integrationName);
       sessionStorage.setItem('sportsfly_selected_integration_id', trimmedId);
+
+      if (matchedCompanyEntry) {
+        sessionStorage.setItem('sportsfly_active_company_profile', JSON.stringify(matchedCompanyEntry));
+        localStorage.setItem('sportsfly_active_company_profile', JSON.stringify(matchedCompanyEntry));
+      }
+
       onSuccess();
     } catch (e) {
       console.error('Integration login error details:', e);
