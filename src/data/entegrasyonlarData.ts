@@ -53,89 +53,11 @@ export const INITIAL_INTEGRATIONS: EntegrasyonItem[] = [
     targetPage: 'referans-programi',
     connectedAt: '24.09.2024',
   },
-  {
-    id: 'int-iyzico',
-    name: 'İyzico & Sanal POS',
-    category: 'Ödeme & Finans',
-    description: 'Kredi kartı ile online aidat ve etkinlik ödemeleri, otomatik taksitlendirme ve güvenli ödeme altyapısı.',
-    logoUrl: 'https://images.unsplash.com/photo-1563986768609-322da13575f3?w=200&auto=format&fit=crop&q=80',
-    iconName: 'CreditCard',
-    isRecommended: true,
-    isActive: true,
-    isInternalModule: false,
-    targetPage: 'muhasebe',
-    connectedAt: '10.02.2024',
-  },
-  {
-    id: 'int-whatsapp',
-    name: 'WhatsApp Business API & SMS',
-    category: 'İletişim & Bildirim',
-    description: 'Antrenman hatırlatıcıları, aidat gecikme bildirimleri ve veli bilgilendirme mesajlarının otomatik gönderimi.',
-    logoUrl: 'https://images.unsplash.com/photo-1611746872915-64382b5c76da?w=200&auto=format&fit=crop&q=80',
-    iconName: 'MessageSquare',
-    isRecommended: true,
-    isActive: true,
-    isInternalModule: false,
-    targetPage: 'destek',
-    connectedAt: '05.04.2024',
-  },
 ];
 
 const INTEGRATIONS_STORAGE_KEY = 'sportsfly_integrations_list_v2';
 
 export function getStoredIntegrations(): EntegrasyonItem[] {
-  try {
-    // Check both v2 and legacy storage keys
-    const raw = localStorage.getItem(INTEGRATIONS_STORAGE_KEY) || localStorage.getItem('sportsfly_integrations_list_v1');
-    let items = INITIAL_INTEGRATIONS;
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        items = parsed;
-      }
-    }
-
-    if (items.length === 0) {
-      items = INITIAL_INTEGRATIONS;
-    }
-
-    // Ensure int-referans exists
-    const hasReferans = items.some((i) => i.id === 'int-referans');
-    if (!hasReferans) {
-      const refItem = INITIAL_INTEGRATIONS.find((i) => i.id === 'int-referans');
-      if (refItem) {
-        items = [refItem, ...items];
-      }
-    }
-
-    // Ensure int-sportsfly-lab exists at the top
-    const hasSportsFlyLab = items.some((i) => i.id === 'int-sportsfly-lab');
-    if (!hasSportsFlyLab) {
-      const labItem = INITIAL_INTEGRATIONS.find((i) => i.id === 'int-sportsfly-lab');
-      if (labItem) {
-        items = [labItem, ...items];
-      }
-    }
-
-    // Sanitize items
-    const sanitized: EntegrasyonItem[] = items.map((item: EntegrasyonItem) => {
-      if (item.id === 'int-sporpuan') {
-        return {
-          ...item,
-          name: 'Sporpuan İtibar & Değerlendirme',
-          description: 'Sporcu teknik, taktik, devam ve fair-play puanlama altyapısı. Dijital rozetler ve federasyon onaylı karne entegrasyonu.',
-        };
-      }
-      return {
-        ...item,
-        name: item.name ? item.name.replace(/SporPuan/g, 'Sporpuan').replace(/Spor Puan/g, 'Sporpuan') : item.name,
-        description: item.description ? item.description.replace(/SporPuan/g, 'Sporpuan').replace(/Spor Puan/g, 'Sporpuan') : item.description,
-      };
-    });
-    return sanitized;
-  } catch (e) {
-    console.error('Entegrasyonlar yüklenirken hata:', e);
-  }
   return INITIAL_INTEGRATIONS;
 }
 

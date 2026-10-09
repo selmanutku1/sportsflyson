@@ -807,6 +807,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   };
 
   const handleNativeGooglePopupLogin = async () => {
+    if (isLoading) return;
+    setIsLoading(true);
     setLoginError(null);
     setShowGoogleAccountPicker(false);
 
@@ -852,6 +854,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       } else {
         setLoginError(`Google oturum açma hatası (${err?.code || 'hata'}): Lütfen tekrar deneyin veya Hızlı Giriş seçeneğini kullanın.`);
       }
+    } finally {
+      setIsLoading(false);
     }
   };
 
