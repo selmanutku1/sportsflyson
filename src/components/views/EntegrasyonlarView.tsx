@@ -35,6 +35,8 @@ import { TurnuvaYonetimiView } from './moduller/TurnuvaYonetimiView';
 import { EnvanterYonetimiView } from './moduller/EnvanterYonetimiView';
 import { SportsFlyLabView } from './moduller/SportsFlyLabView';
 import { SportsFlyVectorMark } from '../SportsFlyLogo';
+import { getStoredUserProfile } from '../../data/userProfile';
+import { isSuperAdminUser } from '../../data/packagePermissions';
 
 interface EntegrasyonlarViewProps {
   onNavigate?: (page: NavPage) => void;
@@ -49,6 +51,9 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
   onLogout,
   isReadOnly = false,
 }) => {
+  const userProfile = useMemo(() => getStoredUserProfile(), []);
+  const isSuperAdmin = isSuperAdminUser(userProfile?.role, userProfile?.email);
+
   const [integrations, setIntegrations] = useState<EntegrasyonItem[]>(() =>
     getStoredIntegrations()
   );
@@ -142,12 +147,39 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
     );
   };
 
-  // Open integration action (prompts for pass code without closing integration page)
+  // Open module directly without pass code (used for Super Admin or after successful pass code verification)
+  const openModuleDirectly = (item: EntegrasyonItem) => {
+    showNotification(`"${item.name}" modülü açılıyor...`);
+    if (item.id === 'int-sportsfly-lab') {
+      setActiveSubModule('sportsfly-lab');
+    } else if (item.id === 'int-sporpuan') {
+      setActiveSubModule('sporpuan');
+    } else if (item.id === 'int-turnuva') {
+      setActiveSubModule('turnuva');
+    } else if (item.id === 'int-envanter') {
+      setActiveSubModule('envanter');
+    } else if (item.id === 'int-referans') {
+      if (onNavigate) onNavigate('referans-programi');
+    } else {
+      setSettingsModalItem(item);
+      setApiKeyInput(item.apiKey || '');
+      setApiSecretInput('••••••••••••••••');
+    }
+  };
+
+  // Open integration action (bypasses pass code completely for Super Admin)
   const handleOpenIntegration = (item: EntegrasyonItem) => {
     if (!item.isActive) {
       showNotification(`"${item.name}" entegrasyonu ayarlardan pasif durumda olduğu için açılamaz.`);
       return;
     }
+
+    // Süper Admin için geçiş kodu sorulmaz, doğrudan açılır!
+    if (isSuperAdmin) {
+      openModuleDirectly(item);
+      return;
+    }
+
     setPassCodeModalItem(item);
     setEnteredPassCode('');
     setPassCodeError(null);
@@ -174,7 +206,6 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
             if (entry.activeModules && passCodeModalItem.id in entry.activeModules) {
               if (entry.activeModules[passCodeModalItem.id] === false) {
                 // If explicitly disabled in settings for this entry
-                // We can flag it
               }
             }
           });
@@ -189,23 +220,7 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
       const item = passCodeModalItem;
       setPassCodeModalItem(null);
       setEnteredPassCode('');
-      showNotification(`"${item.name}" geçiş kodu doğrulandı. Modül açılıyor...`);
-
-      if (item.id === 'int-sportsfly-lab') {
-        setActiveSubModule('sportsfly-lab');
-      } else if (item.id === 'int-sporpuan') {
-        setActiveSubModule('sporpuan');
-      } else if (item.id === 'int-turnuva') {
-        setActiveSubModule('turnuva');
-      } else if (item.id === 'int-envanter') {
-        setActiveSubModule('envanter');
-      } else if (item.id === 'int-referans') {
-        if (onNavigate) onNavigate('referans-programi');
-      } else {
-        setSettingsModalItem(item);
-        setApiKeyInput(item.apiKey || '');
-        setApiSecretInput('••••••••••••••••');
-      }
+      openModuleDirectly(item);
     } else {
       setPassCodeError('Firma adı veya geçiş kodu hatalı! Lütfen geçerli bir geçiş kodu giriniz.');
     }
@@ -757,8 +772,8 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
         </div>
       </div>
 
-      {/* Pass Code Verification Modal (Geçiş Kodu Sorma Modalı - Entegrasyon sayfası kapanmadan açılır) */}
-      {passCodeModalItem && (
+      {/* Pass Code Verification Modal (Geçiş Kodu Sorma Modalı - Süper Admin için açılmaz) */}
+      {!isSuperAdmin && passCodeModalItem && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-[#111c2e] w-full max-w-md rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 relative animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-4">

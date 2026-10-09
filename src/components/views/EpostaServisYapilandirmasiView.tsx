@@ -121,8 +121,6 @@ export const EpostaServisYapilandirmasiView: React.FC = () => {
       if (res.success) {
         if (res.isSandbox) {
           showToast('Sandbox simülasyonu başarılı! (Gerçek e-posta gönderilmedi)', 'info');
-        } else {
-          showToast('Test e-postası başarıyla gönderildi.', 'success');
         }
       } else {
         showToast(res.message || 'Test gönderimi başarısız oldu.', 'error');

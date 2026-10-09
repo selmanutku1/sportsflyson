@@ -99,6 +99,19 @@ export const PointEarnedPushToast: React.FC<PointEarnedPushToastProps> = ({
       const data: PointEarnedData = e.detail;
       if (!data) return;
 
+      // Exclude test notifications
+      const checkStr = `${data.sporcuName || ''} ${data.ruleName || ''} ${data.note || ''} ${data.category || ''}`.toLowerCase();
+      if (
+        checkStr.includes('test') ||
+        checkStr.includes('demo') ||
+        checkStr.includes('örnek') ||
+        checkStr.includes('ornek') ||
+        checkStr.includes('deneme') ||
+        checkStr.includes('simülasyon')
+      ) {
+        return;
+      }
+
       // Trigger sensory feedbacks
       playRewardSound();
       triggerHaptic();

@@ -283,7 +283,6 @@ export const VeliKarneGonderimModal: React.FC<VeliKarneGonderimModalProps> = ({
     setTestSmsStatus('Gönderiliyor...');
     setTimeout(() => {
       setTestSmsStatus(`Test SMS'i ${testPhoneNumber} numarasına "${smsConfig.baslik}" başlığıyla başarıyla ulaştı!`);
-      showToast('Test SMS gönderimi başarılı!');
       setTimeout(() => setTestSmsStatus(null), 4000);
     }, 1000);
   };

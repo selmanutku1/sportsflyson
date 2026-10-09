@@ -9,6 +9,8 @@ import { LoginView } from './components/LoginView';
 import { IntegrationSelectorView } from './components/views/IntegrationSelectorView';
 import { PointEarnedPushToast } from './components/notifications/PointEarnedPushToast';
 import { ReminderPushToast } from './components/notifications/ReminderPushToast';
+import { RealUserApprovedPushToast } from './components/notifications/RealUserApprovedPushToast';
+import { subscribeToRealDatabaseUserNotifications } from './services/realDatabaseNotificationService';
 import {
   getActiveSessionPlan,
   isPageAllowedForPlan,
@@ -356,6 +358,9 @@ export default function App() {
     window.addEventListener('popstate', handlePopState);
     window.addEventListener('keydown', handleKeyDown);
 
+    // Subscribe to verified real user approval notifications from Firestore database
+    const unsubscribeRealDbNotifs = subscribeToRealDatabaseUserNotifications();
+
     // Firebase Auth session listener & Firestore sync
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
@@ -373,6 +378,7 @@ export default function App() {
     });
 
     return () => {
+      unsubscribeRealDbNotifs();
       unsubscribeAuth();
       if (authChannel) authChannel.close();
       window.removeEventListener('storage', handlePlanUpdate);
@@ -724,6 +730,8 @@ export default function App() {
 
   return (
     <div className="h-screen h-[100dvh] print:h-auto print:overflow-visible print:static bg-slate-50 dark:bg-[#0b1320] text-slate-800 dark:text-slate-100 flex flex-col antialiased relative transition-colors duration-200 overflow-hidden">
+      {/* Real Approved User Database Push Notification Toast */}
+      <RealUserApprovedPushToast onNavigate={handlePageSelect} />
       {/* Mobile/Desktop Instant Point Award Push Notification Toast */}
       <PointEarnedPushToast onNavigate={handlePageSelect} />
       {/* Mobile/Desktop Automatic Yoklama Reminder Push Toast */}

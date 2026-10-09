@@ -88,6 +88,19 @@ export const ReminderPushToast: React.FC<ReminderPushToastProps> = ({ onNavigate
       const data: ReminderEventDetail = e.detail;
       if (!data) return;
 
+      // Exclude test / demo reminders
+      const checkStr = `${data.athleteNamesText || ''} ${data.groupName || ''} ${data.message || ''}`.toLowerCase();
+      if (
+        checkStr.includes('test') ||
+        checkStr.includes('demo') ||
+        checkStr.includes('örnek') ||
+        checkStr.includes('ornek') ||
+        checkStr.includes('deneme') ||
+        checkStr.includes('simülasyon')
+      ) {
+        return;
+      }
+
       playBellSound();
       triggerHaptic();
 

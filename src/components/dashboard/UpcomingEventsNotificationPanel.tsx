@@ -34,7 +34,6 @@ import { NavPage } from '../../types';
 import {
   SportsFlyNotification,
   getStoredNotifications,
-  saveStoredNotifications,
 } from '../../data/notifications';
 import { getStoredUserProfile } from '../../data/userProfile';
 
@@ -492,21 +491,8 @@ export const UpcomingEventsNotificationPanel: React.FC<UpcomingEventsNotificatio
         localStorage.setItem('sportsfly_contract_renewals_v1', JSON.stringify(updated));
       } catch (e) {}
 
-      // Add to system notifications
+      // Update local state and contracts storage
       const target = contracts.find((c) => c.id === contractId);
-      if (target) {
-        const notif: SportsFlyNotification = {
-          id: `renewal-success-${Date.now()}`,
-          category: 'payment',
-          title: `Sözleşme Yenilendi: ${target.athleteName}`,
-          description: `${target.athleteName} sporcusunun ${target.contractType} sözleşmesi +${renewalPeriodMonths} ay başarıyla uzatıldı ve aidat planı yenilendi.`,
-          time: 'Şimdi',
-          isUnread: true,
-          actionUrl: 'kullanici-sozlesmeleri',
-        };
-        const currentNotifs = getStoredNotifications(userProfile.role);
-        saveStoredNotifications(userProfile.role, [notif, ...currentNotifs]);
-      }
 
       setRenewing(false);
       setSelectedContractForRenew(null);

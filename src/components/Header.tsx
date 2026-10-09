@@ -61,9 +61,7 @@ import {
   getStoredNotifications,
   saveStoredNotifications,
   SportsFlyNotification,
-  addSporPuanNotification
 } from '../data/notifications';
-import { basvurularService } from '../services/firestoreService';
 import { ProfileSettingsModal } from './modals/ProfileSettingsModal';
 import { UpdatesModal } from './modals/UpdatesModal';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -132,38 +130,8 @@ export const Header: React.FC<HeaderProps> = ({
     };
   }, [userProfile.role]);
 
-  // Real-time Firestore listener for new spor-okulu-basvurulari documents
-  useEffect(() => {
-    let unsub: (() => void) | undefined;
-    try {
-      unsub = basvurularService.subscribeToPending((pendingCount, items) => {
-        if (pendingCount > 0 && items.length > 0) {
-          const latestItem = items[0];
-          const notifId = `notif-basvuru-${latestItem.id}`;
-
-          setNotifications((prev) => {
-            if (prev.some((n) => n.id === notifId)) return prev;
-            const newNotif: SportsFlyNotification = {
-              id: notifId,
-              title: 'Yeni Spor Okulu Başvurusu',
-              description: `${latestItem.clubName || 'Yeni Kulüp'} (${latestItem.managerName || 'Yönetici'}) tarafından başvuru oluşturuldu.`,
-              time: 'Bugün',
-              category: 'system',
-              isUnread: false,
-            };
-            const updated = [newNotif, ...prev];
-            saveStoredNotifications(userProfile.role, updated);
-            return updated;
-          });
-        }
-      });
-    } catch (e) {
-      console.error('Header realtime application notification error:', e);
-    }
-    return () => {
-      if (unsub) unsub();
-    };
-  }, [userProfile.role]);
+  // Real-time verified approved database notifications are synchronized across tabs and components
+  // Notifications state stays automatically synchronized via 'sportsfly_notifications_updated'
 
   const handleMarkAllAsRead = () => {
     const updated = notifications.map((n) => ({ ...n, isUnread: false }));
@@ -202,134 +170,6 @@ export const Header: React.FC<HeaderProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  const handleSimulateNotification = () => {
-    const categories: ('system' | 'support' | 'payment' | 'message' | 'birthday' | 'training')[] = [
-      'system', 'support', 'payment', 'message', 'birthday', 'training'
-    ];
-    const category = categories[Math.floor(Math.random() * categories.length)];
-    
-    let title = '';
-    let description = '';
-    
-    const roleLower = userProfile.role.toLowerCase();
-    if (roleLower.includes('veli') || roleLower.includes('ebeveyn') || roleLower.includes('parent')) {
-      // Parent
-      switch(category) {
-        case 'system':
-          title = 'Veli Portalı Güncellemesi';
-          description = 'Sporcu gelişim analiz motoru başarıyla güncellendi.';
-          break;
-        case 'support':
-          title = 'Yeni Destek Mesajı';
-          description = 'Müşteri temsilcisi biletinize yeni bir açıklama ekledi.';
-          break;
-        case 'payment':
-          title = 'Ödeme Planı Hatırlatması';
-          description = 'Ekim dönemi spor okulu taksit son ödeme tarihine 3 gün kaldı.';
-          break;
-        case 'message':
-          title = 'Antrenör Mesajı';
-          description = 'Ali Özcan: "Yarın akşamki ek voleybol seansına herkesi bekliyoruz."';
-          break;
-        case 'birthday':
-          title = 'Doğum Günü Sürprizi';
-          description = 'SportsFly Club, sporcumuza özel %20 doğum günü indirim kuponu tanımladı!';
-          break;
-        case 'training':
-          title = 'Antrenman İptal Bilgisi';
-          description = 'Aşırı hava muhalefeti sebebiyle yarınki açık saha yüzme seansı ertelenmiştir.';
-          break;
-      }
-    } else if (roleLower.includes('antrenör') || roleLower.includes('antrenor') || roleLower.includes('eğitmen') || roleLower.includes('coach') || roleLower.includes('trainer')) {
-      // Coach
-      switch(category) {
-        case 'system':
-          title = 'Antrenör Mobil Performans Yaması';
-          description = 'Tablet cihazlarında yoklama listesi dikey kaydırma iyileştirmesi yapıldı.';
-          break;
-        case 'support':
-          title = 'Destek Talebi Güncellendi';
-          description = '"Yeni antrenman yeleği siparişi" talebiniz satın alma birimine iletildi.';
-          break;
-        case 'payment':
-          title = 'Grup Aidat Raporu Hazır';
-          description = 'Basketbol A grubunun aidat ödeme oranları muhasebe tarafından onaylandı.';
-          break;
-        case 'message':
-          title = 'Yönetici Duyurusu';
-          description = 'Selman Utku: "Ekim ayı teknik antrenör seminer katılım formunu doldurun."';
-          break;
-        case 'birthday':
-          title = '🎂 Sporcu Doğum Günü Uyarısı';
-          description = 'U14 Basketbol takımından Kaan Güneş bugün yeni yaşına bastı.';
-          break;
-        case 'training':
-          title = 'Yeni Antrenman Müfredatı';
-          description = 'U14 Basketbol takımı için "Baskılı Defans ve Hücum Geçişleri" müfredatı aktif edildi.';
-          break;
-      }
-    } else {
-      // Manager/Admin
-      switch(category) {
-        case 'system':
-          title = 'Sunucu Bakım Bilgilendirmesi';
-          description = 'Bu gece saat 02:00 - 03:00 arasında veri tabanı yedekleme çalışması yapılacaktır.';
-          break;
-        case 'support':
-          title = 'Yeni Destek Bileti';
-          description = 'Veli Mehmet Yılmaz: "Uygulamada ödeme ekranında limit hatası alıyorum."';
-          break;
-        case 'payment':
-          title = 'Yüksek Tutarlı Aidat Tahsilatı';
-          description = 'Basketbol A grubundan Caner Solak, 1 yıllık toplu aidat ödemesini gerçekleştirdi.';
-          break;
-        case 'message':
-          title = 'Eğitmen İzin Başvurusu';
-          description = 'Hakan Öztürk: "14-16 Ekim tarihleri arasında yıllık izin talep ediyorum."';
-          break;
-        case 'birthday':
-          title = '🎂 Sporcu Doğum Günü Bildirimi';
-          description = 'Kulübünüzdeki voleybol sporcularından Selin Kaya bugün yeni yaşına bastı.';
-          break;
-        case 'training':
-          title = 'Grup Katılım Alarmı';
-          description = 'Kadıköy Basketbol B Grubu katılım oranı üst üste 3 seans %95\'in üzerinde gerçekleşti.';
-          break;
-      }
-    }
-
-    const newNotification: SportsFlyNotification = {
-      id: `simulated-${Date.now()}`,
-      category,
-      title,
-      description,
-      time: 'Şimdi',
-      isUnread: true
-    };
-
-    const updated = [newNotification, ...notifications];
-    setNotifications(updated);
-    saveStoredNotifications(userProfile.role, updated);
-  };
-
-  const handleSimulateSporPuan = () => {
-    const sampleAthletes = [
-      { name: 'Ali Yılmaz', rule: 'Fair-play ve örnek davranış', points: 50, cat: 'Davranış', note: 'Maç sonunda rakip takımı tebrik etme' },
-      { name: 'Ece Demir', rule: 'Haftalık tam antrenman devamı', points: 25, cat: 'Devam', note: 'Haftanın tüm seanslarına eksiksiz katılım' },
-      { name: 'Mert Kaya', rule: 'Gelişim testinde kişisel rekor', points: 40, cat: 'Gelişim', note: 'Çeviklik testinde 0.4 sn hızlanma' },
-      { name: 'Zeynep Akın', rule: 'Turnuva katılımı ve kulüp temsili', points: 75, cat: 'Etkinlik', note: 'Bölge şampiyonası takım temsili' },
-      { name: 'Caner Solak', rule: 'Antrenmana vaktinde katılım', points: 15, cat: 'Devam', note: 'Isınma öncesi hazırlık' },
-    ];
-    const picked = sampleAthletes[Math.floor(Math.random() * sampleAthletes.length)];
-    addSporPuanNotification({
-      sporcuName: picked.name,
-      ruleName: picked.rule,
-      points: picked.points,
-      category: picked.cat,
-      note: picked.note,
-    });
-  };
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [profileModalTab, setProfileModalTab] = useState<'genel' | 'guvenlik' | 'bildirimler' | 'tercihler'>('genel');

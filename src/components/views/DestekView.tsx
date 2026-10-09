@@ -39,11 +39,6 @@ import {
 } from '../../data/mockDestekData';
 import { getStoredUserProfile } from '../../data/userProfile';
 import { getActiveSessionPlan, PACKAGE_DETAILS, isSuperAdminUser } from '../../data/packagePermissions';
-import {
-  getStoredNotifications,
-  saveStoredNotifications,
-  SportsFlyNotification,
-} from '../../data/notifications';
 import { NewTicketModal } from './destek/NewTicketModal';
 import { TicketDetailModal } from './destek/TicketDetailModal';
 import { FAQKnowledgeBaseView } from './destek/FAQKnowledgeBaseView';
@@ -108,25 +103,6 @@ export const DestekView: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const addSupportNotification = (ticketId: string, subject: string, messagePreview: string) => {
-    try {
-      const adminNotifications = getStoredNotifications('admin');
-      const newNotif: SportsFlyNotification = {
-        id: `support-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        category: 'support',
-        title: 'Destek Talebi Cevaplandı',
-        description: `Talep No #${ticketId} ("${subject}"): "${messagePreview.length > 70 ? messagePreview.substring(0, 70) + '...' : messagePreview}"`,
-        time: 'Şimdi',
-        isUnread: true,
-        actionUrl: 'destek'
-      };
-      const updated = [newNotif, ...adminNotifications];
-      saveStoredNotifications('admin', updated);
-    } catch (err) {
-      console.error('Failed to add support notification:', err);
-    }
-  };
-
   const handleCreateTicket = (newTicket: SupportTicketFull) => {
     const updated = [newTicket, ...tickets];
     setTickets(updated);
@@ -143,9 +119,6 @@ export const DestekView: React.FC = () => {
         target.status = 'Yanitlandi';
         target.updatedAt = autoReply.createdAt;
         saveStoredSupportTickets([...ticketsNow]);
-        
-        // Trigger instant notification alert
-        addSupportNotification(newTicket.id, newTicket.subject, autoReply.message);
       }
     }, 2000);
   };
@@ -178,8 +151,7 @@ export const DestekView: React.FC = () => {
         }
 
         if (isSystem) {
-          // If a superadmin responds, trigger instant notification alert for club administrator
-          addSupportNotification(t.id, t.subject, messageText);
+          // If a superadmin responds, message is updated in the ticket thread
         }
 
         return updatedTicket;
@@ -223,9 +195,6 @@ export const DestekView: React.FC = () => {
     setTickets(updated);
     saveStoredSupportTickets(updated);
     triggerToast('SportsFly uzmanından yeni bir yanıt geldi.');
-
-    // Add support notification to the club manager (admin)
-    addSupportNotification(targetTicket.id, targetTicket.subject, autoReply.message);
   };
 
   const handleUpdateStatus = (

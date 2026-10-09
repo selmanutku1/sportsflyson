@@ -1,4 +1,5 @@
-import { getStoredNotifications, saveStoredNotifications, SportsFlyNotification } from '../data/notifications';
+// Yoklama Reminder Service
+
 
 export interface ReminderRecipient {
   memberId: string;
@@ -172,53 +173,8 @@ export function executeYoklamaReminderTrigger(payload: TriggerReminderPayload): 
       ? `Sayın Eğitmen, ${groupName} grubunda ${recipients.length} sporcu (${athleteNamesText}) henüz yoklamaya katılmadı.`
       : `Hatırlatma: ${groupName} grubunda ${recipients.length} sporcu (${athleteNamesText}) antrenmana giriş yapmadı.`);
 
-  // 1. Create notification for Parent feeds
-  if (targetAudience === 'parent' || targetAudience === 'both') {
-    recipients.forEach((rec) => {
-      const parentNotif: SportsFlyNotification = {
-        id: `rem-parent-${Date.now()}-${rec.memberId}`,
-        category: 'training',
-        title: '⚠️ Antrenman Devamsızlık / Yoklama Hatırlatması',
-        description: `Sayın Veli, çocuğunuz ${rec.athleteName} bugün (${trainingDate}) ${groupName} antrenmanına henüz katılım sağlamadı. Sporstfly QR ile giriş yapabilir veya antrenöre mazeret bildirebilirsiniz.`,
-        time: 'Şimdi',
-        isUnread: true,
-        actionUrl: 'yoklama',
-        sporcuName: rec.athleteName,
-        sporcuId: rec.memberId,
-      };
-
-      const currentParent = getStoredNotifications('parent');
-      saveStoredNotifications('parent', [parentNotif, ...currentParent]);
-    });
-  }
-
-  // 2. Create notification for Trainer feed
-  if (targetAudience === 'trainer' || targetAudience === 'both') {
-    const trainerNotif: SportsFlyNotification = {
-      id: `rem-trainer-${Date.now()}`,
-      category: 'training',
-      title: '🚨 Antrenör Yoklama Uyarısı',
-      description: `${groupName} antrenmanında ${recipients.length} sporcu (${athleteNamesText}) yoklamada görünmüyor. Velilere hatırlatma gönderildi.`,
-      time: 'Şimdi',
-      isUnread: true,
-      actionUrl: 'yoklama',
-    };
-    const currentTrainer = getStoredNotifications('trainer');
-    saveStoredNotifications('trainer', [trainerNotif, ...currentTrainer]);
-  }
-
-  // 3. Create notification for Admin feed
-  const adminNotif: SportsFlyNotification = {
-    id: `rem-admin-${Date.now()}`,
-    category: 'system',
-    title: `🔔 Otomatik Yoklama Hatırlatması Gönderildi (${groupName})`,
-    description: `${recipients.length} sporcunun (${athleteNamesText}) velisine/eğitmenine devamsızlık hatırlatması [${activeChannelsList.join(', ')}] kanallarıyla başarıyla iletildi.`,
-    time: 'Şimdi',
-    isUnread: true,
-    actionUrl: 'yoklama',
-  };
-  const currentAdmin = getStoredNotifications('admin');
-  saveStoredNotifications('admin', [adminNotif, ...currentAdmin]);
+  // Note: Only real database user notifications are preserved in the system notification feed.
+  // Test reminders and simulated alerts are logged for reports without polluting the user's notification center.
 
   // 4. Create log record
   const newLog: ReminderLogItem = {

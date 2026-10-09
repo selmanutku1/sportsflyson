@@ -1,4 +1,5 @@
-import { addSporPuanNotification } from '../data/notifications';
+// SporPuan Automation System
+
 
 export interface AutomatedPuanResult {
   sporcuId: string;
@@ -147,25 +148,7 @@ export function processAttendanceAutomation(
           note: 'Sistem tarafından haftalık %100 devamlılık tespit edildi.',
         });
 
-        // Trigger notification
-        addSporPuanNotification({
-          sporcuId: item.memberId,
-          sporcuName: item.memberName,
-          ruleName: 'Haftalık Tam Devam Bonusu (Otomatik)',
-          points: 50,
-          category: 'Devam',
-          note: 'Haftalık tüm antrenmanlara eksiksiz katılım sağladığın için tebrikler!',
-        });
-      } else {
-        // Trigger standard attendance notification
-        addSporPuanNotification({
-          sporcuId: item.memberId,
-          sporcuName: item.memberName,
-          ruleName: 'Antrenmana Katılım',
-          points: 25,
-          category: 'Devam',
-          note: `${groupName} dersine katılım puanı tanımlandı.`,
-        });
+        // Points are calculated and logged for reports without triggering mock notification toasts
       }
     }
   });

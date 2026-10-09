@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Package, KeyRound, ArrowRight } from 'lucide-react';
 import { getStoredIntegrations } from '../data/entegrasyonlarData';
+import { getStoredUserProfile } from '../data/userProfile';
+import { isSuperAdminUser } from '../data/packagePermissions';
 import { EntegrasyonItem } from '../types';
 
 interface IntegrationLoginViewProps {
@@ -11,6 +13,9 @@ interface IntegrationLoginViewProps {
 }
 
 export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSuccess, onError, setIsLoading, onBack }) => {
+  const userProfile = getStoredUserProfile();
+  const isSuperAdmin = isSuperAdminUser(userProfile?.role, userProfile?.email);
+
   const [integrations, setIntegrations] = useState<EntegrasyonItem[]>([]);
   const [selectedIntegrationId, setSelectedIntegrationId] = useState('');
   const [code, setCode] = useState('');
@@ -32,7 +37,7 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
       return;
     }
 
-    if (!trimmedCode) {
+    if (!isSuperAdmin && !trimmedCode) {
       onError('Lütfen geçiş kodunu giriniz.');
       return;
     }
@@ -71,7 +76,7 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
       } catch (e) {}
 
       const cleanInput = trimmedCode.toUpperCase();
-      const isMatch = validCodes.includes(cleanInput) || cleanInput === '123456' || (selectedItem && cleanInput === selectedItem.name.toUpperCase()) || matchedAny;
+      const isMatch = isSuperAdmin || validCodes.includes(cleanInput) || cleanInput === '123456' || (selectedItem && cleanInput === selectedItem.name.toUpperCase()) || matchedAny;
 
       if (!isMatch) {
         onError('Geçiş kodu hatalı!');
@@ -79,7 +84,7 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
         return;
       }
 
-      if (!isAllowedForModule) {
+      if (!isSuperAdmin && !isAllowedForModule) {
         onError(`"${integrationName}" entegrasyonu için bu geçiş koduna yetki tanımlanmamış / entegrasyon aktif değil.`);
         setIsLoading(false);
         return;

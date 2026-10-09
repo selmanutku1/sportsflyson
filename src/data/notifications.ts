@@ -9,202 +9,173 @@ export interface SportsFlyNotification {
   points?: number;
   sporcuName?: string;
   sporcuId?: string;
+  source?: 'database' | 'system';
+  userId?: string;
+  verifiedRealUser?: boolean;
 }
 
 export const DEFAULT_NOTIFICATIONS: Record<string, SportsFlyNotification[]> = {
-  admin: [
-    {
-      id: 'admin-1',
-      category: 'system',
-      title: 'Sistem Güncellemesi v3.4',
-      description: 'Finansal Gelir-Gider raporlama hızı %40 artırıldı. Tüm şube hareketleri artık anlık hesaplanmaktadır.',
-      time: '5 dakika önce',
-      isUnread: false,
-    },
-    {
-      id: 'admin-2',
-      category: 'support',
-      title: 'Destek Talebi Cevaplandı',
-      description: 'Destek No #1084: "QR Yoklama entegrasyonu donanım uyumluluğu" talebiniz onaylandı.',
-      time: '1 saat önce',
-      isUnread: false,
-    },
-    {
-      id: 'admin-3',
-      category: 'payment',
-      title: 'Kadıköy Şubesi Aidat Girişi',
-      description: 'Eylül ayı için toplam 14.500 TL yeni aidat tahsil edildi. Ödeme planları güncellendi.',
-      time: '3 saat önce',
-      isUnread: false,
-    },
-    {
-      id: 'admin-4',
-      category: 'message',
-      title: 'Yeni Veli Mesajı',
-      description: 'Veli Hande Demirci: "Ödeme Planı ve taksit seçenekleri hakkında bilgi alabilir miyim?"',
-      time: '5 saat önce',
-      isUnread: false,
-    },
-    {
-      id: 'admin-5',
-      category: 'birthday',
-      title: '🎂 Bugün 3 Doğum Günü Var!',
-      description: 'Yiğit Yılmaz, Ömer Çelik ve Ege Demir bugün yeni yaşlarına bastılar. Kutlama SMS\'i göndermek için tıklayın.',
-      time: 'Bugün',
-      isUnread: false,
-    },
-    {
-      id: 'admin-6',
-      category: 'training',
-      title: 'Karaköy Şubesi Yoklaması',
-      description: 'Karaköy Voleybol B Grubu antrenman yoklaması girildi. Antrenör Ali Özcan (Katılan: 12/15).',
-      time: 'Dün',
-      isUnread: false,
-    },
-  ],
-  trainer: [
-    {
-      id: 'trainer-1',
-      category: 'system',
-      title: 'Mobil Yoklama Optimizasyonu',
-      description: 'Zayıf internet koşullarında internetsiz (offline) yoklama alma ve QR tarayıcı algılama hızı artırıldı.',
-      time: '15 dakika önce',
-      isUnread: false,
-    },
-    {
-      id: 'trainer-2',
-      category: 'support',
-      title: 'Eğitmen Değerlendirme Güncellemesi',
-      description: 'Gelişim karne şablonunuza yeni motor becerileri ve sporpuan kriterleri eklendi.',
-      time: '3 saat önce',
-      isUnread: false,
-    },
-    {
-      id: 'trainer-3',
-      category: 'training',
-      title: 'Haftalık Müfredat Hedefleri',
-      description: 'Sorumlu olduğunuz grupların "Sıçrama ve Pas Koordinasyonu" antrenman kazanım değerlendirmelerini girin.',
-      time: '5 saat önce',
-      isUnread: false,
-    },
-    {
-      id: 'trainer-4',
-      category: 'message',
-      title: 'Yönetici Selman Utku: Toplantı Ertelendi',
-      description: '"Yarın saat 10:00\'daki haftalık teknik koordinasyon toplantısı salon tadilatı sebebiyle 11:30\'a ertelenmiştir."',
-      time: '7 saat önce',
-      isUnread: false,
-    },
-    {
-      id: 'trainer-5',
-      category: 'birthday',
-      title: '🎂 Grubunuzda Doğum Günü!',
-      description: 'Sizin grubunuzda yer alan sporcu Can Erten\'in bugün doğum günü! Antrenmanda tebrik etmeyi unutmayın.',
-      time: 'Bugün',
-      isUnread: false,
-    },
-    {
-      id: 'trainer-6',
-      category: 'message',
-      title: 'Veli Mehmet Kaya: Aras Katılamayacak',
-      description: '"Hocam iyi günler, Aras hafif gribal enfeksiyon geçirdiği için bugün antrenmana katılamayacaktır."',
-      time: 'Dün',
-      isUnread: false,
-    },
-  ],
-  parent: [
-    {
-      id: 'parent-1',
-      category: 'system',
-      title: 'Yeni Mobil Veli Portalı',
-      description: 'Geliştirilmiş mobil karne, anlık yoklama bildirimleri ve sporpuan gelişim grafikleri yayına alındı.',
-      time: '10 dakika önce',
-      isUnread: false,
-    },
-    {
-      id: 'parent-2',
-      category: 'payment',
-      title: 'Eylül Ayı Aidat Ödemesi Alındı',
-      description: 'Eylül ayı Basketbol branşı aidat ödemesi (3.200 TL) başarıyla tahsil edilmiştir. Makbuzunuz hazır.',
-      time: '2 saat önce',
-      isUnread: false,
-    },
-    {
-      id: 'parent-3',
-      category: 'training',
-      title: 'Antrenman Yoklama Bildirimi',
-      description: 'Çocuğunuz bugün "Kadıköy Basketbol A Grubu" antrenmanına katılım sağladı (Yoklama: Katıldı).',
-      time: '4 saat önce',
-      isUnread: false,
-    },
-    {
-      id: 'parent-4',
-      category: 'message',
-      title: 'Yönetici Duyurusu: Cumhuriyet Kupası',
-      description: 'Selman Utku: "29 Ekim Cumhuriyet Kupası basketbol turnuvası kayıtlarımız başladı. Son katılım 15 Ekim."',
-      time: '6 saat önce',
-      isUnread: false,
-    },
-    {
-      id: 'parent-5',
-      category: 'birthday',
-      title: '🎂 Mutlu Yıllar Sevgili Sporcumuz! 🎉',
-      description: 'SportsFly ailesi olarak sevgili sporcumuzun doğum gününü kutlar, sağlık ve başarı dolu yeni bir yaş dileriz!',
-      time: 'Bugün',
-      isUnread: false,
-    },
-    {
-      id: 'parent-6',
-      category: 'support',
-      title: 'Kardeş İndirimi Başvurunuz Onaylandı',
-      description: 'Muhasebe onayı: İki çocuğunuz için geçerli %15 kardeş indirimi bir sonraki dönem aidatınıza yansıtıldı.',
-      time: 'Dün',
-      isUnread: false,
-    },
-  ],
+  admin: [],
+  trainer: [],
+  parent: [],
 };
 
 const STORAGE_KEY_PREFIX = 'sportsfly_notifications_';
 
+/**
+ * Validates whether a notification is a genuine, verified user notification from the database.
+ * Strictly excludes any test, demo, mock, simulated, or synthetic notifications.
+ */
+export function isRealDatabaseNotification(notif: SportsFlyNotification): boolean {
+  if (!notif) return false;
+
+  const idLower = String(notif.id || '').toLowerCase();
+  const titleLower = String(notif.title || '').toLowerCase();
+  const descLower = String(notif.description || '').toLowerCase();
+
+  // Explicitly reject any test / mock / demo keywords
+  if (
+    idLower.includes('test') ||
+    idLower.includes('demo') ||
+    idLower.includes('ornek') ||
+    idLower.includes('sample') ||
+    idLower.includes('simulated') ||
+    idLower.includes('mock') ||
+    idLower.startsWith('rem-') ||
+    idLower.startsWith('sporpuan-auto')
+  ) {
+    return false;
+  }
+
+  if (
+    titleLower.includes('test') ||
+    titleLower.includes('demo') ||
+    titleLower.includes('simülasyon') ||
+    titleLower.includes('örnek') ||
+    titleLower.includes('deneme')
+  ) {
+    return false;
+  }
+
+  if (
+    descLower.includes('test') ||
+    descLower.includes('demo@') ||
+    descLower.includes('simüle') ||
+    descLower.includes('örnek') ||
+    descLower.includes('deneme')
+  ) {
+    return false;
+  }
+
+  // Must originate from a verified database source or approved user record
+  if (
+    notif.source === 'database' ||
+    notif.verifiedRealUser === true ||
+    idLower.startsWith('notif-approved-') ||
+    idLower.startsWith('db-user-')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Returns true if the notification is a test / simulated notification.
+ */
+export function isTestNotification(notif: SportsFlyNotification): boolean {
+  return !isRealDatabaseNotification(notif);
+}
+
+/**
+ * Purges all test and simulated notifications from localStorage across all roles.
+ */
+export function purgeAllTestNotifications(): void {
+  if (typeof window === 'undefined') return;
+  const roles = ['admin', 'trainer', 'parent'];
+  roles.forEach((r) => {
+    try {
+      const cached = localStorage.getItem(STORAGE_KEY_PREFIX + r);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          const clean = parsed.filter((n) => isRealDatabaseNotification(n));
+          localStorage.setItem(STORAGE_KEY_PREFIX + r, JSON.stringify(clean));
+        }
+      }
+    } catch (e) {
+      // Ignore
+    }
+  });
+}
+
 export function getStoredNotifications(role: string): SportsFlyNotification[] {
-  if (typeof window === 'undefined') return DEFAULT_NOTIFICATIONS.admin;
-  
-  // Detect category from role string
+  if (typeof window === 'undefined') return [];
+
   let key = 'admin';
-  const roleLower = role.toLowerCase();
+  const roleLower = (role || '').toLowerCase();
   if (roleLower.includes('veli') || roleLower.includes('ebeveyn') || roleLower.includes('parent')) {
     key = 'parent';
-  } else if (roleLower.includes('antrenör') || roleLower.includes('antrenor') || roleLower.includes('eğitmen') || roleLower.includes('coach') || roleLower.includes('trainer')) {
+  } else if (
+    roleLower.includes('antrenör') ||
+    roleLower.includes('antrenor') ||
+    roleLower.includes('eğitmen') ||
+    roleLower.includes('coach') ||
+    roleLower.includes('trainer')
+  ) {
     key = 'trainer';
   }
 
   try {
     const cached = localStorage.getItem(STORAGE_KEY_PREFIX + key);
     if (cached) {
-      return JSON.parse(cached);
+      const parsed: SportsFlyNotification[] = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        // Exclude all test and simulated notifications - allow ONLY verified real database notifications
+        const realOnly = parsed.filter((n) => isRealDatabaseNotification(n));
+        
+        // If there were stale test notifications in localStorage, rewrite with clean list
+        if (realOnly.length !== parsed.length) {
+          localStorage.setItem(STORAGE_KEY_PREFIX + key, JSON.stringify(realOnly));
+        }
+
+        return realOnly;
+      }
     }
   } catch (err) {
     console.error('Failed to parse notifications', err);
   }
-  
-  return DEFAULT_NOTIFICATIONS[key] || DEFAULT_NOTIFICATIONS.admin;
+
+  return [];
 }
 
 export function saveStoredNotifications(role: string, notifications: SportsFlyNotification[]): void {
   if (typeof window === 'undefined') return;
 
   let key = 'admin';
-  const roleLower = role.toLowerCase();
+  const roleLower = (role || '').toLowerCase();
   if (roleLower.includes('veli') || roleLower.includes('ebeveyn') || roleLower.includes('parent')) {
     key = 'parent';
-  } else if (roleLower.includes('antrenör') || roleLower.includes('antrenor') || roleLower.includes('eğitmen') || roleLower.includes('coach') || roleLower.includes('trainer')) {
+  } else if (
+    roleLower.includes('antrenör') ||
+    roleLower.includes('antrenor') ||
+    roleLower.includes('eğitmen') ||
+    roleLower.includes('coach') ||
+    roleLower.includes('trainer')
+  ) {
     key = 'trainer';
   }
 
+  // Strictly exclude any test notifications before persisting
+  const cleanNotifications = (notifications || []).filter((n) => isRealDatabaseNotification(n));
+
   try {
-    localStorage.setItem(STORAGE_KEY_PREFIX + key, JSON.stringify(notifications));
-    // Dispatch custom event to notify components
-    window.dispatchEvent(new CustomEvent('sportsfly_notifications_updated', { detail: { role, notifications } }));
+    localStorage.setItem(STORAGE_KEY_PREFIX + key, JSON.stringify(cleanNotifications));
+    window.dispatchEvent(
+      new CustomEvent('sportsfly_notifications_updated', {
+        detail: { role, notifications: cleanNotifications },
+      })
+    );
   } catch (err) {
     console.error('Failed to save notifications', err);
   }
@@ -217,9 +188,23 @@ export function addSporPuanNotification(detail: {
   category: string;
   note?: string;
   sporcuId?: string;
-}): SportsFlyNotification {
+  isTest?: boolean;
+}): SportsFlyNotification | null {
+  // If detail indicates a test or mock event, do not save to notifications or dispatch
+  const checkStr = `${detail.sporcuName || ''} ${detail.ruleName || ''} ${detail.note || ''}`.toLowerCase();
+  if (
+    detail.isTest ||
+    checkStr.includes('test') ||
+    checkStr.includes('demo') ||
+    checkStr.includes('ornek') ||
+    checkStr.includes('örnek') ||
+    checkStr.includes('deneme')
+  ) {
+    return null;
+  }
+
   const newNotification: SportsFlyNotification = {
-    id: `sporpuan-${Date.now()}`,
+    id: `notif-sporpuan-${Date.now()}`,
     category: 'sporpuan',
     title: 'Yeni Puan Kazanımı',
     description: `${detail.sporcuName} sporcusuna "${detail.ruleName}" kapsamında +${detail.points} SP puanı tanımlandı.${detail.note ? ` (Not: ${detail.note})` : ''}`,
@@ -229,28 +214,9 @@ export function addSporPuanNotification(detail: {
     sporcuName: detail.sporcuName,
     sporcuId: detail.sporcuId,
     actionUrl: 'sporpuan-sporcu-degerlendirme',
+    source: 'database',
+    verifiedRealUser: true,
   };
-
-  // Add notification for admin, trainer and parent so all user roles see it in the notification center
-  const roles = ['admin', 'trainer', 'parent'];
-  roles.forEach((r) => {
-    const current = getStoredNotifications(r);
-    const updated = [newNotification, ...current];
-    saveStoredNotifications(r, updated);
-  });
-
-  // Dispatch custom push event for instant mobile/desktop toast notification and haptic vibration
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(
-      new CustomEvent('sportsfly_point_earned', {
-        detail: {
-          ...detail,
-          notificationId: newNotification.id,
-          notification: newNotification,
-        },
-      })
-    );
-  }
 
   return newNotification;
 }
