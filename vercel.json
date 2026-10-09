@@ -1,5 +1,5 @@
 {
-  "outputDirectory": "output",
+  "outputDirectory": "dist",
   "headers": [
     {
       "source": "/api/(.*)",
