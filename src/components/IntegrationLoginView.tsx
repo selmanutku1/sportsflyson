@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, KeyRound, ArrowRight, Eye, EyeOff, ShieldCheck, Sparkles, Building2, CheckCircle2 } from 'lucide-react';
+import { Package, KeyRound, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { getStoredIntegrations } from '../data/entegrasyonlarData';
 import { getStoredUserProfile } from '../data/userProfile';
 import { isSuperAdminUser } from '../data/packagePermissions';
@@ -86,7 +86,7 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
       const isMatch = isSuperAdmin || validCodes.includes(cleanInput) || cleanInput === '123456' || (selectedItem && cleanInput === selectedItem.name.toUpperCase()) || matchedAny;
 
       if (!isMatch) {
-        onError('Geçiş kodu hatalı! Lütfen size verilen kodu veya tanımlı firma adını giriniz.');
+        onError('Geçiş kodu hatalı! Lütfen geçerli bir kod giriniz.');
         setIsLoading(false);
         return;
       }
@@ -122,18 +122,8 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
     }
   };
 
-  const selectedIntegration = integrations.find((i) => i.id === selectedIntegrationId);
-
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-300">
-      {/* Informative Banner */}
-      <div className="p-3 rounded-xl bg-sky-50/80 border border-sky-100 flex items-start gap-2.5 text-left">
-        <Building2 className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
-        <p className="text-[11px] sm:text-xs text-sky-900 leading-relaxed font-medium">
-          Spor kulüpleri, akademiler veya analiz firmaları (Rota Performans vb.) için tahsis edilen entegrasyon modüllerine doğrudan erişin.
-        </p>
-      </div>
-
       {/* Integration Select */}
       <div className="space-y-1.5 text-left">
         <label className="block text-[11px] sm:text-xs font-bold text-slate-700">
@@ -159,23 +149,13 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
             )}
           </select>
         </div>
-        {selectedIntegration && (
-          <p className="text-[10.5px] sm:text-[11px] text-slate-500 px-1 truncate">
-            {selectedIntegration.description}
-          </p>
-        )}
       </div>
 
       {/* Pass Code Input */}
       <div className="space-y-1.5 text-left">
-        <div className="flex items-center justify-between">
-          <label className="block text-[11px] sm:text-xs font-bold text-slate-700">
-            Geçiş Kodu / Firma Anahtarı
-          </label>
-          <span className="text-[10px] text-slate-400 font-medium">
-            Örn: Rota Performans, SPORTSFLY2026
-          </span>
-        </div>
+        <label className="block text-[11px] sm:text-xs font-bold text-slate-700">
+          Geçiş Kodu
+        </label>
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
             <KeyRound className="w-4 h-4 text-sky-600" />
@@ -205,30 +185,6 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
         </div>
       </div>
 
-      {/* Quick Test / Demo Pass Codes Badges (Mobile Tap-Friendly) */}
-      <div className="pt-0.5 text-left">
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-          Hızlı Geçiş Kodları (Tek Dokunuşla Doldur):
-        </span>
-        <div className="flex flex-wrap gap-1.5">
-          {[
-            { label: 'SPORTSFLY2026', code: 'SPORTSFLY2026' },
-            { label: '123456', code: '123456' },
-            { label: 'Rota Performans', code: 'Rota Performans' },
-          ].map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              onClick={() => setCode(item.code)}
-              className="px-2.5 py-1 min-h-[30px] rounded-lg bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-[11px] font-mono font-bold transition-all cursor-pointer flex items-center gap-1"
-            >
-              <Sparkles className="w-3 h-3 text-sky-600 shrink-0" />
-              <span>{item.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Buttons */}
       <div className="flex flex-col-reverse sm:flex-row gap-2 pt-2">
         {onBack && (
@@ -245,7 +201,7 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
           onClick={handleIntegrationLogin}
           className="w-full sm:w-auto sm:flex-[2] py-3 px-6 min-h-[46px] rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-bold text-xs sm:text-sm tracking-wide transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 group"
         >
-          <span>Entegrasyon Girişi Yap</span>
+          <span>Giriş Yap</span>
           <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
         </button>
       </div>
