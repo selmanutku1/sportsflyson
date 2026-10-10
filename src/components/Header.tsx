@@ -178,8 +178,16 @@ export const Header: React.FC<HeaderProps> = ({
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
   const isGoogleRestricted = isGoogleRestrictedUser(userProfile.role, userProfile.email);
+  const isUnapprovedOrRestricted =
+    isGoogleRestricted ||
+    (userProfile as any).status === 'onay_bekliyor' ||
+    (userProfile as any).status === 'reddedildi' ||
+    userProfile.hasActivePackage === false ||
+    userProfile.role?.toLowerCase().includes('onay_bekliyor') ||
+    userProfile.role?.toLowerCase().includes('yeni');
+
   const isSuperAdmin =
-    !isGoogleRestricted &&
+    !isUnapprovedOrRestricted &&
     (userProfile.email?.trim().toLowerCase() === 'selmanutkumarmara@gmail.com' ||
       userProfile.role.toLowerCase().includes('admin') ||
       userProfile.role.toLowerCase().includes('süper'));
@@ -430,9 +438,9 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Side: Branch Switcher, Theme Switcher, Notifications & Profile Pill */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          {/* Multi-Branch Quick Switcher */}
-          <div className="relative" ref={branchMenuRef}>
-              {isSuperAdmin ? (
+          {/* Multi-Branch Quick Switcher - Sadece onaylı Süper Admin için görünür. Yeni kayıtlı, onaysız veya normal kulüp/kullanıcılara kesinlikle görünmez */}
+          {isSuperAdmin && !isUnapprovedOrRestricted && (
+            <div className="relative" ref={branchMenuRef}>
               <button
                 onClick={() => {
                   setShowBranchMenu(!showBranchMenu);
@@ -451,106 +459,95 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
                 <ChevronDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 shrink-0" />
               </button>
-            ) : (
-              <div
-                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl border border-slate-200/90 dark:border-slate-700 bg-slate-50 dark:bg-[#162238]/60 text-slate-600 dark:text-slate-300 text-xs font-semibold select-none"
-                title="Kendi Şubeniz (Değiştirilemez)"
-              >
-                <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                <span className="hidden md:inline text-slate-400 font-medium text-[11px]">Şube:</span>
-                <span className="hidden sm:inline max-w-[80px] md:max-w-[120px] truncate font-bold text-slate-800 dark:text-slate-200">
-                  {subeler.find((s) => s.id === 'sube-kadikoy')?.ad || 'Kadıköy'}
-                </span>
-              </div>
-            )}
 
-            {isSuperAdmin && showBranchMenu && (
-              <div className="fixed inset-0 sm:absolute sm:inset-auto sm:right-auto sm:left-0 sm:mt-3 w-full sm:w-[360px] sm:max-w-[calc(100vw-32px)] bg-white dark:bg-[#111c2e] sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-700 py-4 z-[9999] animate-in fade-in overflow-hidden">
-                {/* Mobile Header for closing */}
-                <div className="sm:hidden px-6 pb-4 flex justify-end">
-                   <button onClick={() => setShowBranchMenu(false)} className="p-2 bg-slate-100 rounded-full">
-                     <X className="w-5 h-5 text-slate-600" />
-                   </button>
-                </div>
-                <div className="px-6 pb-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    Kulüp Şubeleri
-                  </span>
-                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                    {subeler.length} Şube
-                  </span>
-                </div>
+              {showBranchMenu && (
+                <div className="fixed inset-0 sm:absolute sm:inset-auto sm:right-auto sm:left-0 sm:mt-3 w-full sm:w-[360px] sm:max-w-[calc(100vw-32px)] bg-white dark:bg-[#111c2e] sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-700 py-4 z-[9999] animate-in fade-in overflow-hidden">
+                  {/* Mobile Header for closing */}
+                  <div className="sm:hidden px-6 pb-4 flex justify-end">
+                     <button onClick={() => setShowBranchMenu(false)} className="p-2 bg-slate-100 rounded-full">
+                       <X className="w-5 h-5 text-slate-600" />
+                     </button>
+                  </div>
+                  <div className="px-6 pb-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                      Kulüp Şubeleri
+                    </span>
+                    <span className="text-xs font-bold px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                      {subeler.length} Şube
+                    </span>
+                  </div>
 
-                <div className="p-2 space-y-1 max-h-[60vh] overflow-y-auto">
-                  <button
-                    onClick={() => {
-                      setActiveSubeId('all');
-                      setActiveBranchIdState('all');
-                      setShowBranchMenu(false);
-                    }}
-                    className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm font-semibold transition-all cursor-pointer ${
-                      activeBranchId === 'all'
-                        ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
-                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-2xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">
-                        <Building2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                      </div>
-                      <span>Tüm Şubeler (Konsolide)</span>
-                    </div>
-                    {activeBranchId === 'all' && <Check className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
-                  </button>
-
-                  {subeler.map((sube) => (
+                  <div className="p-2 space-y-1 max-h-[60vh] overflow-y-auto">
                     <button
-                      key={sube.id}
                       onClick={() => {
-                        setActiveSubeId(sube.id);
-                        setActiveBranchIdState(sube.id);
+                        setActiveSubeId('all');
+                        setActiveBranchIdState('all');
                         setShowBranchMenu(false);
                       }}
                       className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm font-semibold transition-all cursor-pointer ${
-                        activeBranchId === sube.id
+                        activeBranchId === 'all'
                           ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
                           : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
                       }`}
                     >
-                      <div className="flex items-center gap-3 text-left">
-                        <div className="w-9 h-9 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                           <Building2 className="w-5 h-5 text-slate-500" />
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-2xl bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">
+                          <Building2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                         </div>
-                        <div>
-                          <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{sube.ad}</div>
-                          <div className="text-xs text-slate-500">{sube.sporcuSayisi} Sporcu</div>
-                        </div>
+                        <span>Tüm Şubeler (Konsolide)</span>
                       </div>
-                      {activeBranchId === sube.id && <Check className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
+                      {activeBranchId === 'all' && <Check className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
                     </button>
-                  ))}
-                </div>
 
-                <div className="px-6 pt-4 border-t border-slate-100 dark:border-slate-800 mt-2 space-y-3">
-                  <button
-                    onClick={() => { setShowBranchMenu(false); onNavigate?.('sube-ozet'); }}
-                    className="w-full flex items-center justify-between text-blue-600 dark:text-blue-400 text-sm font-bold hover:underline"
-                  >
-                    Şube Özeti & Finansal Rapor <ArrowRight className="w-4 h-4" />
-                  </button>
-                  <button 
-                     onClick={() => { setShowBranchMenu(false); onNavigate?.('subeler'); }}
-                     className="w-full text-left text-slate-600 dark:text-slate-400 text-sm font-semibold hover:text-slate-900 dark:hover:text-slate-100"
-                  >
-                    Şube Listesi & Tesis Yönetimi
-                  </button>
+                    {subeler.map((sube) => (
+                      <button
+                        key={sube.id}
+                        onClick={() => {
+                          setActiveSubeId(sube.id);
+                          setActiveBranchIdState(sube.id);
+                          setShowBranchMenu(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm font-semibold transition-all cursor-pointer ${
+                          activeBranchId === sube.id
+                            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
+                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 text-left">
+                          <div className="w-9 h-9 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                             <Building2 className="w-5 h-5 text-slate-500" />
+                          </div>
+                          <div>
+                            <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{sube.ad}</div>
+                            <div className="text-xs text-slate-500">{sube.sporcuSayisi} Sporcu</div>
+                          </div>
+                        </div>
+                        {activeBranchId === sube.id && <Check className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="px-6 pt-4 border-t border-slate-100 dark:border-slate-800 mt-2 space-y-3">
+                    <button
+                      onClick={() => { setShowBranchMenu(false); onNavigate?.('sube-ozet'); }}
+                      className="w-full flex items-center justify-between text-blue-600 dark:text-blue-400 text-sm font-bold hover:underline"
+                    >
+                      Şube Özeti & Finansal Rapor <ArrowRight className="w-4 h-4" />
+                    </button>
+                    <button 
+                       onClick={() => { setShowBranchMenu(false); onNavigate?.('subeler'); }}
+                       className="w-full text-left text-slate-600 dark:text-slate-400 text-sm font-semibold hover:text-slate-900 dark:hover:text-slate-100"
+                    >
+                      Şube Listesi & Tesis Yönetimi
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           {/* Minimal Package Plan Quick Switcher in Header */}
-          {!isGoogleRestricted && (
+          {!isUnapprovedOrRestricted && (
           <div className="relative hidden sm:block" ref={planMenuRef}>
             <button
               id="header-package-plan-btn"

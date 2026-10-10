@@ -111,11 +111,6 @@ const EnvanterYonetimiView = lazy(() =>
     default: m.EnvanterYonetimiView,
   }))
 );
-const ReferralProgramView = lazy(() =>
-  import('./components/views/moduller/ReferralProgramView').then((m) => ({
-    default: m.ReferralProgramView,
-  }))
-);
 import { EntegrasyonlarView } from './components/views/EntegrasyonlarView';
 const PaketlerView = lazy(() =>
   import('./components/views/PaketlerView').then((m) => ({ default: m.PaketlerView }))
@@ -708,8 +703,6 @@ export default function App() {
         return <TurnuvaYonetimiView />;
       case 'envanter-yonetimi':
         return <EnvanterYonetimiView />;
-      case 'referans-programi':
-        return <ReferralProgramView onNavigate={handlePageSelect} />;
       case 'eposta-servis-yapilandirmasi':
         return <EpostaServisYapilandirmasiView />;
       case 'entegrasyonlar':

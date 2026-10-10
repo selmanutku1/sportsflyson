@@ -52,7 +52,6 @@ export const ALL_CONFIGURABLE_SYSTEM_AREAS: ConfigurableAreaItem[] = [
   { page: 'sporpuan-raporlar', label: 'Sporpuan · Analitik Raporlar', category: 'Sporpuan & Modüller', description: 'Sporpuan gelişim ve ödül analitik raporları' },
   { page: 'turnuva-yonetimi', label: 'Turnuva & Lig Yönetimi', category: 'Sporpuan & Modüller', description: 'Fikstür, maç sonuçları ve turnuva organizasyonu' },
   { page: 'envanter-yonetimi', label: 'Envanter & Malzeme', category: 'Sporpuan & Modüller', description: 'Forma, malzeme ve ekipman stok takibi' },
-  { page: 'referans-programi', label: 'Referans Programı', category: 'Sporpuan & Modüller', description: 'Arkadaşını getir indirim ve sadakat yönetimi' },
 ];
 
 export interface GoogleUserAccessRecord {

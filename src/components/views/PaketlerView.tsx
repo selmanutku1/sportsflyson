@@ -349,29 +349,7 @@ export const PaketlerView: React.FC = () => {
         </div>
       )}
 
-      {/* Google Restricted Account Banner */}
-      {isGoogleRestricted && (
-        <div className="bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-2xs">
-          <div className="flex items-start gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/60 border border-amber-300 dark:border-amber-700 flex items-center justify-center text-amber-700 dark:text-amber-300 shrink-0 mt-0.5">
-              <Lock className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-slate-100">
-                  Google Girişi ile Kayıt Oldunuz — Sistem Özellikleri Kilitli
-                </h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-200/80 text-amber-900 uppercase tracking-wider">
-                  Paket Seçimi Gerekli
-                </span>
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
-                Google girişi ile kayıt olan kullanıcılar yalnızca <strong>Paketler</strong> bölümünü görüntüleyebilir ve sol menüdeki tüm kategoriler kilitlidir. Sistemdeki tüm özellikleri kullanabilmek için aşağıdan kulübünüze uygun paketi seçebilirsiniz.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* Top Header & Overview */}
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs">

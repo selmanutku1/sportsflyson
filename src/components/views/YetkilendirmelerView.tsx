@@ -57,6 +57,7 @@ import { getStoredUserProfile } from '../../data/userProfile';
 import { isSuperAdminUser } from '../../data/packagePermissions';
 import { GoogleUsersAccessManagerPanel } from '../admin/GoogleUsersAccessManagerPanel';
 import { IntegrationAccessManagerPanel } from '../admin/IntegrationAccessManagerPanel';
+import { SportsFlyLogoSettingsCard } from '../admin/SportsFlyLogoSettingsCard';
 import {
   secureFetch,
   encryptSensitivePII,
@@ -472,6 +473,9 @@ export const YetkilendirmelerView: React.FC = () => {
           <span className="flex-1">{toastMessage}</span>
         </div>
       )}
+
+      {/* SportsFly Platform Logosu Ayarları */}
+      <SportsFlyLogoSettingsCard onToast={showToast} />
 
       {/* Google İle Giriş Yapan Kullanıcılar & Aktif Alan Yönetimi */}
       <GoogleUsersAccessManagerPanel />

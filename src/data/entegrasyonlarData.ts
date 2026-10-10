@@ -40,19 +40,6 @@ export const INITIAL_INTEGRATIONS: EntegrasyonItem[] = [
     targetPage: 'turnuva-yonetimi',
     connectedAt: '01.03.2024',
   },
-  {
-    id: 'int-referans',
-    name: 'Arkadaşını Tavsiye Et & %20 İndirim Programı',
-    category: 'Kulüp & Spor Modülleri',
-    description: 'Veli ve sporcuların kulübümüze yönlendirdiği yeni aileler için otomatik referans linki oluşturur. Tavsiye edilen sporcu devam ettiği sürece her ay %20 aidat indirimi tanımlar.',
-    logoUrl: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=200&auto=format&fit=crop&q=80',
-    iconName: 'Sparkles',
-    isRecommended: true,
-    isActive: true,
-    isInternalModule: true,
-    targetPage: 'referans-programi',
-    connectedAt: '24.09.2024',
-  },
 ];
 
 const INTEGRATIONS_STORAGE_KEY = 'sportsfly_integrations_list_v2';

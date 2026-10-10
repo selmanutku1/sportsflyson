@@ -39,7 +39,6 @@ export type NavPage =
   | 'kulup-galerisi'
   | 'turnuva-yonetimi'
   | 'envanter-yonetimi'
-  | 'referans-programi'
   | 'entegrasyonlar'
   | 'eposta-servis-yapilandirmasi';
 

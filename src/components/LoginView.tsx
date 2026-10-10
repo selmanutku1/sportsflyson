@@ -39,7 +39,9 @@ import {
   Award,
   Fingerprint,
   Package,
+  Trophy,
 } from 'lucide-react';
+import { SportsFlyVectorMark } from './SportsFlyLogo';
 import { signInWithPopup, GoogleAuthProvider, User, sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../firebase';
 import { basvurularService } from '../services/firestoreService';
@@ -1068,21 +1070,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         }}
       />
 
-      {/* Centralized Corporate Logo & Identity Header */}
-      <div className="relative z-10 flex flex-col items-center text-center mb-5 sm:mb-6 mt-2 animate-in fade-in slide-in-from-top-3 duration-300">
-        <div className="w-20 h-20 sm:w-28 sm:h-28 mb-3 relative flex items-center justify-center p-2.5 sm:p-3 rounded-2xl bg-white border border-slate-200/60 shadow-md">
-          <img
-            src="/sportsfly-logo.svg"
-            alt="SportsFly Corporate Logo"
-            className="w-full h-full object-contain"
-          />
-        </div>
-        <h1 className="text-2xl sm:text-4xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-          SportsFly
-        </h1>
-        <p className="text-xs sm:text-sm font-semibold text-slate-500 mt-1 max-w-[340px] px-2">
-          Spor Okulu, Akademi &amp; Tesis Yönetim Sistemi
-        </p>
+
+
+      {/* Corporate Logo & Brand Header */}
+      <div className="relative z-10 flex flex-col items-center text-center mb-5 sm:mb-6">
+        <SportsFlyVectorMark className="w-16 h-16 sm:w-20 sm:h-20 mb-2.5 drop-shadow-sm" />
+        <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">SportsFly</h1>
+        <p className="text-xs sm:text-sm text-slate-500 font-medium">Kulüp & Spor Yönetim Sistemi</p>
       </div>
 
       {/* Main Login Card - Crisp White Minimalist Card with Elegant Shadow */}
@@ -1092,7 +1086,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         <div className="mb-5 sm:mb-6 text-left pb-3.5 sm:pb-4 border-b border-slate-100 flex items-start justify-between gap-2">
           <div>
             <h2 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">
-              {is2FAStepActive ? 'İki Faktörlü Doğrulama (2FA)' : 'Kullanıcı Girişi'}
+              {is2FAStepActive ? 'İki Faktörlü Doğrulama (2FA)' : 'Kulüp Girişi'}
             </h2>
             <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-relaxed">
               {is2FAStepActive

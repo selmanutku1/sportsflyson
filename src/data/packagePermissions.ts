@@ -756,7 +756,6 @@ export function isPageAllowedForPlan(
       'sporcu-karnesi',
       'antrenman-takvimi',
       'odeme-plani',
-      'referans-programi',
       'kulup-galerisi',
       'anasayfa',
     ];
@@ -768,7 +767,6 @@ export function isPageAllowedForPlan(
       'sporsepeti-user',
       'antrenman-takvimi',
       'turnuva-yonetimi',
-      'referans-programi',
       'kulup-galerisi',
       'destek',
       'anasayfa',
@@ -785,7 +783,6 @@ export function isPageAllowedForPlan(
       'envanter-yonetimi',
       'sporcular',
       'entegrasyonlar',
-      'referans-programi',
       'destek',
       'anasayfa',
     ];

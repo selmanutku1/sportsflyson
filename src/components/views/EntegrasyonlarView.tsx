@@ -101,8 +101,6 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
           setActiveSubModule('turnuva');
         } else if (selectedId === 'int-envanter') {
           setActiveSubModule('envanter');
-        } else if (selectedId === 'int-referans') {
-          if (onNavigate) onNavigate('referans-programi');
         } else {
           const found = integrations.find((i) => i.id === selectedId);
           if (found) {
@@ -160,8 +158,6 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
       setActiveSubModule('turnuva');
     } else if (item.id === 'int-envanter') {
       setActiveSubModule('envanter');
-    } else if (item.id === 'int-referans') {
-      if (onNavigate) onNavigate('referans-programi');
     } else {
       setSettingsModalItem(item);
       setApiKeyInput(item.apiKey || '');

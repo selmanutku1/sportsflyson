@@ -143,7 +143,7 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
             ) : (
               integrations.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.name} {item.category ? `· ${item.category}` : ''}
+                  {item.name}
                 </option>
               ))
             )}

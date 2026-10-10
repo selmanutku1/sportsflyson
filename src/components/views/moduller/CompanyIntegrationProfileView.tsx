@@ -1129,7 +1129,6 @@ export const CompanyIntegrationProfileView: React.FC<CompanyIntegrationProfileVi
                   'int-sporpuan': 'SporPuan (Sporcu Değerlendirme)',
                   'int-turnuva': 'Turnuva Yönetimi',
                   'int-envanter': 'Kulüp Envanteri',
-                  'int-referans': 'Referans Programı',
                 };
                 return (
                   <div
