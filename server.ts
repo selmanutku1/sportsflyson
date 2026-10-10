@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -11,7 +11,7 @@ import {
   sendMutlucellBulkSms,
   getMutlucellCreditStatus,
   sendEmailNotification,
-} from './src/services/smsService';
+} from './src/services/smsService.ts';
 
 dotenv.config();
 

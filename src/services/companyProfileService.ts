@@ -57,8 +57,22 @@ export function saveStoredLocalCompanyProfile(profile: CompanyIntegrationProfile
   if (typeof window === 'undefined') return;
   try {
     const serialized = JSON.stringify(profile);
-    sessionStorage.setItem(COMPANY_PROFILE_STORAGE_KEY, serialized);
-    localStorage.setItem(COMPANY_PROFILE_STORAGE_KEY, serialized);
+    try {
+      sessionStorage.setItem(COMPANY_PROFILE_STORAGE_KEY, serialized);
+    } catch (e) {
+      // ignore session storage quota
+    }
+    try {
+      localStorage.setItem(COMPANY_PROFILE_STORAGE_KEY, serialized);
+    } catch (e) {
+      // If localStorage quota exceeded due to large logo data URL, save without heavy logo data URL in localStorage
+      const minimalProfile = { ...profile, logoDataUrl: profile.logoDataUrl && profile.logoDataUrl.length > 50000 ? '' : profile.logoDataUrl };
+      try {
+        localStorage.setItem(COMPANY_PROFILE_STORAGE_KEY, JSON.stringify(minimalProfile));
+      } catch (innerErr) {
+        console.warn('[CompanyProfile] LocalStorage quota exceeded completely:', innerErr);
+      }
+    }
 
     // Also sync to active user profile
     const currentProf = getStoredUserProfile();

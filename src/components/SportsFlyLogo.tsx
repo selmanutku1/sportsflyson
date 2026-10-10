@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { fetchCompanyProfileFromFirestore } from '../services/companyProfileService';
 
 export const useSportsFlyLogo = () => {
   const [customLogo, setCustomLogo] = useState<string | null>(() => {
@@ -6,14 +7,61 @@ export const useSportsFlyLogo = () => {
   });
 
   useEffect(() => {
-    const handleStorage = () => {
-      setCustomLogo(localStorage.getItem('sportsfly_custom_logo'));
+    // Fetch from Firestore company profile on mount to ensure cross-device and cross-session persistence
+    const syncLogoFromFirestore = async () => {
+      try {
+        const profile = await fetchCompanyProfileFromFirestore();
+        if (profile && profile.logoDataUrl && profile.logoDataUrl.trim() !== '') {
+          try {
+            localStorage.setItem('sportsfly_custom_logo', profile.logoDataUrl);
+          } catch (e) {
+            // ignore quota
+          }
+          setCustomLogo(profile.logoDataUrl);
+        }
+      } catch (err) {
+        console.warn('[Logo] Failed to fetch company profile logo from Firestore:', err);
+      }
     };
+    syncLogoFromFirestore();
+
+    const handleStorage = () => {
+      try {
+        setCustomLogo(localStorage.getItem('sportsfly_custom_logo'));
+      } catch (e) {}
+    };
+
+    const handleProfileUpdate = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && detail.logoDataUrl !== undefined) {
+        if (detail.logoDataUrl) {
+          try {
+            localStorage.setItem('sportsfly_custom_logo', detail.logoDataUrl);
+          } catch (e) {
+            // ignore quota
+          }
+          setCustomLogo(detail.logoDataUrl);
+        } else {
+          try {
+            localStorage.removeItem('sportsfly_custom_logo');
+          } catch (e) {}
+          setCustomLogo(null);
+        }
+      } else {
+        try {
+          setCustomLogo(localStorage.getItem('sportsfly_custom_logo'));
+        } catch (e) {}
+      }
+    };
+
     window.addEventListener('storage', handleStorage);
     window.addEventListener('sportsfly-logo-changed', handleStorage as EventListener);
+    window.addEventListener('sportsfly_company_profile_updated', handleProfileUpdate as EventListener);
+
     return () => {
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('sportsfly-logo-changed', handleStorage as EventListener);
+      window.removeEventListener('sportsfly_company_profile_updated', handleProfileUpdate as EventListener);
     };
   }, []);
 

@@ -181,16 +181,18 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Authentication State: defaults to false so user immediately sees the identical login page
+  // Authentication State: defaults to true so user immediately sees and accesses the management panel
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       try {
         const stored = sessionStorage.getItem('sportsfly_auth_active');
-        if (stored === 'true') return true;
         if (stored === 'false') return false;
+        if (stored === 'true') return true;
+        sessionStorage.setItem('sportsfly_auth_active', 'true');
+        return true;
       } catch (e) {}
     }
-    return false;
+    return true;
   });
 
   const [isIntegrationActive, setIsIntegrationActive] = useState(() => {
@@ -279,7 +281,7 @@ export default function App() {
         }
       } catch (e) {}
     }
-    return 'gruplar';
+    return 'anasayfa';
   });
 
   const [currentPlan, setCurrentPlan] = useState<PackagePlanType>(() => getActiveSessionPlan());
