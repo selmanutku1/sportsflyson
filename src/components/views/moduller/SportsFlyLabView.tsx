@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { exportReportPagesToA4Pdf, BatchA4PdfBuilder } from '../../../utils/pdfExportHelper';
 import { SomatotypeRadarAndChart } from '../../charts/SomatotypeRadarAndChart';
 import {
@@ -112,6 +112,11 @@ import {
 import { getStoredKarneler, saveStoredKarneler } from '../../../data/mockKarneData';
 import { CompanyIntegrationProfileView } from './CompanyIntegrationProfileView';
 import { CompanyIntegrationProfile } from '../../../types';
+import {
+  getStoredLocalCompanyProfile,
+  fetchCompanyProfileFromFirestore,
+  saveCompanyProfileToFirestore,
+} from '../../../services/companyProfileService';
 
 interface SportsFlyLabViewProps {
   onToast?: (msg: string) => void;
@@ -307,16 +312,32 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     }
   })();
 
-  const [activeCompanyProfile, setActiveCompanyProfile] = useState<CompanyIntegrationProfile | null>(() => {
-    try {
-      const stored =
-        sessionStorage.getItem('sportsfly_active_company_profile') ||
-        localStorage.getItem('sportsfly_active_company_profile');
-      return stored ? JSON.parse(stored) : null;
-    } catch (e) {
-      return null;
-    }
+  const [activeCompanyProfile, setActiveCompanyProfile] = useState<CompanyIntegrationProfile>(() => {
+    return getStoredLocalCompanyProfile();
   });
+
+  // Sync company profile with Firestore 'company_profile' collection on mount
+  useEffect(() => {
+    fetchCompanyProfileFromFirestore()
+      .then((prof) => {
+        if (prof) {
+          setActiveCompanyProfile(prof);
+        }
+      })
+      .catch((err) => {
+        console.warn('[SportsFlyLabView] Firestore company profile sync warning:', err);
+      });
+
+    const handleProfileUpdate = (e: any) => {
+      if (e?.detail) {
+        setActiveCompanyProfile(e.detail);
+      }
+    };
+    window.addEventListener('sportsfly_company_profile_updated', handleProfileUpdate);
+    return () => {
+      window.removeEventListener('sportsfly_company_profile_updated', handleProfileUpdate);
+    };
+  }, []);
 
   // Main module tab: 'studio', 'batch', 'archive', or 'company-profile' (Company Profile only in integration entry)
   const [activeLabTab, setActiveLabTab] = useState<'studio' | 'batch' | 'archive' | 'company-profile'>('studio');
@@ -5026,7 +5047,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
           {/* Right: Workspace Mode Tabs + Primary PDF Download & Output Dropdown */}
           <div className="flex flex-wrap items-center justify-between xl:justify-end gap-2 shrink-0">
             {/* Primary Module Section Tabs */}
-            <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/90 rounded-xl border border-slate-200/80 dark:border-slate-700">
+            <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/90 rounded-xl border border-slate-200/80 dark:border-slate-700 overflow-x-auto scrollbar-none max-w-full">
               <button
                 type="button"
                 onClick={() => setActiveLabTab('studio')}
@@ -5074,8 +5095,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 </span>
               </button>
 
-              {/* SADECE ENTEGRASYON GİRİŞİNDEN GİRİNCE GÖRÜNEN FİRMA PROFİLİ BUTONU */}
-              {isIntegrationEntry && activeCompanyProfile && (
+              {/* FİRMA PROFİLİ BUTONU - ENTEGRASYONDA VE LAB'DA HER ZAMAN ERİŞİLEBİLİR */}
+              {activeCompanyProfile && (
                 <button
                   type="button"
                   onClick={() => setActiveLabTab('company-profile')}
@@ -5084,7 +5105,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       ? 'bg-indigo-600 text-white shadow-2xs'
                       : 'text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
                   }`}
-                  title="Firma &amp; Kulüp Entegrasyon Profilinizi İnceleyin"
+                  title="Firma & Kulüp Entegrasyon Profilinizi İnceleyin"
                 >
                   <Building2 className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 shrink-0" />
                   <span>Firma Profili</span>
@@ -6029,8 +6050,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         )}
       </div>
 
-      {/* FIRMA PROFIL ALANI - SADECE ENTEGRASYON GİRİŞİNDEN GİRİNCE GÖRÜNÜR */}
-      {activeLabTab === 'company-profile' && isIntegrationEntry && activeCompanyProfile && (
+      {/* FIRMA PROFIL ALANI - ENTEGRASYONDA VE LAB'DA HER ZAMAN GÖRÜNÜR */}
+      {activeLabTab === 'company-profile' && activeCompanyProfile && (
         <div className="print:hidden">
           <CompanyIntegrationProfileView
             companyProfile={activeCompanyProfile}

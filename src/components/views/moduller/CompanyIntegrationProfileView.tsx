@@ -32,8 +32,11 @@ import {
   Printer,
   ChevronRight,
   School,
+  Edit3,
+  X,
 } from 'lucide-react';
 import { CompanyIntegrationProfile } from '../../../types';
+import { saveCompanyProfileToFirestore } from '../../../services/companyProfileService';
 import {
   SportsFlyLabReport,
   SportsFlyLabArchivedReport,
@@ -149,6 +152,70 @@ export const CompanyIntegrationProfileView: React.FC<CompanyIntegrationProfileVi
   useEffect(() => {
     setExcelHistory(getStoredLabExcelHistory());
   }, []);
+
+  // Company Profile Editing State & Handlers
+  const [isEditingCompanyModal, setIsEditingCompanyModal] = useState(false);
+  const [editCompanyName, setEditCompanyName] = useState(companyProfile.companyName || '');
+  const [editAuthorizedPerson, setEditAuthorizedPerson] = useState(companyProfile.authorizedPerson || '');
+  const [editPhone, setEditPhone] = useState(companyProfile.phone || '');
+  const [editEmail, setEditEmail] = useState(companyProfile.email || '');
+  const [editCity, setEditCity] = useState(companyProfile.city || '');
+  const [editBranchName, setEditBranchName] = useState(companyProfile.branchName || '');
+  const [editLogoDataUrl, setEditLogoDataUrl] = useState(companyProfile.logoDataUrl || '');
+  const [isSavingCompany, setIsSavingCompany] = useState(false);
+  const companyLogoInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setEditCompanyName(companyProfile.companyName || '');
+    setEditAuthorizedPerson(companyProfile.authorizedPerson || '');
+    setEditPhone(companyProfile.phone || '');
+    setEditEmail(companyProfile.email || '');
+    setEditCity(companyProfile.city || '');
+    setEditBranchName(companyProfile.branchName || '');
+    setEditLogoDataUrl(companyProfile.logoDataUrl || '');
+  }, [companyProfile]);
+
+  const handleCompanyLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Lütfen geçerli bir görsel dosyası seçiniz.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setEditLogoDataUrl(ev.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveCompanyInfo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editCompanyName.trim()) {
+      alert('Lütfen firma adını giriniz.');
+      return;
+    }
+    setIsSavingCompany(true);
+    try {
+      await saveCompanyProfileToFirestore({
+        ...companyProfile,
+        companyName: editCompanyName.trim(),
+        authorizedPerson: editAuthorizedPerson.trim(),
+        phone: editPhone.trim(),
+        email: editEmail.trim(),
+        city: editCity.trim(),
+        branchName: editBranchName.trim(),
+        logoDataUrl: editLogoDataUrl,
+      });
+      if (onToast) onToast('Firma profili ve bilgileri Firestore veritabanına başarıyla kaydedildi.');
+      setIsEditingCompanyModal(false);
+    } catch (err) {
+      console.error(err);
+      if (onToast) onToast('Firma profili kaydedilirken hata oluştu.');
+    } finally {
+      setIsSavingCompany(false);
+    }
+  };
 
   const handleCopyCode = () => {
     if (navigator?.clipboard && companyProfile.accessCode) {
@@ -984,10 +1051,20 @@ export const CompanyIntegrationProfileView: React.FC<CompanyIntegrationProfileVi
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* İletişim Detayları */}
         <div className="bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-2xs">
-          <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-indigo-600" />
-            <span>Firma İletişim Bilgileri</span>
-          </h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-indigo-600" />
+              <span>Firma İletişim Bilgileri</span>
+            </h3>
+            <button
+              type="button"
+              onClick={() => setIsEditingCompanyModal(true)}
+              className="text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 transition-colors cursor-pointer"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>Bilgileri Düzenle</span>
+            </button>
+          </div>
           <div className="space-y-2 text-xs">
             <div className="flex items-center justify-between py-1 border-b border-slate-100 dark:border-slate-800">
               <span className="text-slate-400">Yetkili Kişi</span>
@@ -1071,6 +1148,173 @@ export const CompanyIntegrationProfileView: React.FC<CompanyIntegrationProfileVi
           </div>
         </div>
       </div>
+
+      {/* Hidden file input for company logo */}
+      <input
+        ref={companyLogoInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+        onChange={handleCompanyLogoUpload}
+        className="hidden"
+      />
+
+      {/* Modal: Firma Bilgilerini ve Logosunu Düzenle */}
+      {isEditingCompanyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#111c2e] rounded-3xl border border-slate-200 dark:border-slate-800 w-full max-w-xl p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                    Firma Bilgilerini ve Logosunu Düzenle
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Bilgiler anında Firestore veritabanına ve tarayıcı hafızasına kaydedilir.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEditingCompanyModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCompanyInfo} className="space-y-4">
+              {/* Firma Logosu */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Firma / Analiz Laboratuvarı Logosu
+                </label>
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
+                    {editLogoDataUrl ? (
+                      <img src={editLogoDataUrl} alt="Logo" className="w-full h-full object-contain" />
+                    ) : (
+                      <Building2 className="w-7 h-7 text-slate-400" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => companyLogoInputRef.current?.click()}
+                      className="px-3 py-2 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{editLogoDataUrl ? 'Logoyu Değiştir' : 'Logo Yükle'}</span>
+                    </button>
+                    {editLogoDataUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setEditLogoDataUrl('')}
+                        className="px-3 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
+                      >
+                        Kaldır
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Firma Adı */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Firma / Kulüp Adı *
+                </label>
+                <input
+                  type="text"
+                  value={editCompanyName}
+                  onChange={(e) => setEditCompanyName(e.target.value)}
+                  placeholder="Örn: Rota Performans & Sporcu Analiz LAB"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Yetkili Kişi */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Yetkili Kişi
+                  </label>
+                  <input
+                    type="text"
+                    value={editAuthorizedPerson}
+                    onChange={(e) => setEditAuthorizedPerson(e.target.value)}
+                    placeholder="Yetkili Adı Soyadı"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                {/* Telefon */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Telefon
+                  </label>
+                  <input
+                    type="text"
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    placeholder="0216 850 1907"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                {/* E-posta */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    E-posta
+                  </label>
+                  <input
+                    type="email"
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    placeholder="ornek@firma.com"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                {/* Şube & İl */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Şube / Şehir
+                  </label>
+                  <input
+                    type="text"
+                    value={editBranchName}
+                    onChange={(e) => setEditBranchName(e.target.value)}
+                    placeholder="Merkez Şube, İstanbul"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingCompanyModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingCompany}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isSavingCompany ? 'Kaydediliyor...' : 'Firma Bilgilerini Kaydet'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

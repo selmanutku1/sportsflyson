@@ -19,6 +19,16 @@ export interface UserProfileData {
   twoFactorEnabled: boolean;
   authProvider?: 'google' | 'standard' | 'integration';
   hasActivePackage?: boolean;
+  // Company & Analysis Firm Profile Fields
+  companyName?: string;
+  companyType?: string;
+  companyLogoUrl?: string;
+  companyAuthorizedPerson?: string;
+  companyCity?: string;
+  companyPhone?: string;
+  companyEmail?: string;
+  companyNotes?: string;
+  companyAccessCode?: string;
   notifications: {
     newRegistrationEmail: boolean;
     newRegistrationSms: boolean;
@@ -48,6 +58,13 @@ export const DEFAULT_USER_PROFILE: UserProfileData = {
   twoFactorEnabled: true,
   authProvider: 'standard',
   hasActivePackage: true,
+  companyName: 'Rota Performans & Sporcu Analiz LAB',
+  companyType: 'analiz_firmasi',
+  companyAuthorizedPerson: 'Selman Utku Marmara',
+  companyCity: 'İstanbul',
+  companyPhone: '0216 850 1907',
+  companyEmail: 'selmanutkumarmara@gmail.com',
+  companyAccessCode: 'LAB-2026',
   notifications: {
     newRegistrationEmail: true,
     newRegistrationSms: true,
@@ -73,6 +90,17 @@ export function getStoredUserProfile(): UserProfileData {
     return DEFAULT_USER_PROFILE;
   }
   try {
+    // Read local active company profile if available
+    let companyData: any = null;
+    try {
+      const rawComp =
+        sessionStorage.getItem('sportsfly_active_company_profile') ||
+        localStorage.getItem('sportsfly_active_company_profile');
+      if (rawComp) {
+        companyData = JSON.parse(rawComp);
+      }
+    } catch (e) {}
+
     const stored = secureStorageGet<Partial<UserProfileData> | null>(STORAGE_KEY, null);
     if (stored && typeof stored === 'object') {
       const cleanEmail = sanitizeInputString(stored.email || DEFAULT_USER_PROFILE.email, 160);
@@ -82,7 +110,7 @@ export function getStoredUserProfile(): UserProfileData {
         ? 'Süper Admin'
         : rawRole;
 
-      return {
+      const baseResult: UserProfileData = {
         ...DEFAULT_USER_PROFILE,
         ...stored,
         name: sanitizeInputString(stored.name || DEFAULT_USER_PROFILE.name, 100),
@@ -94,9 +122,38 @@ export function getStoredUserProfile(): UserProfileData {
           : sanitizeInputString(stored.title || DEFAULT_USER_PROFILE.title, 100),
         club: isAdminEmail && (stored.club || '').includes('Paket Seçimi')
           ? DEFAULT_USER_PROFILE.club
-          : sanitizeInputString(stored.club || DEFAULT_USER_PROFILE.club, 140),
+          : sanitizeInputString(stored.club || (companyData?.companyName || DEFAULT_USER_PROFILE.club), 140),
         hasActivePackage: isAdminEmail ? true : stored.hasActivePackage,
       };
+
+      if (companyData) {
+        baseResult.companyName = companyData.companyName || baseResult.companyName;
+        baseResult.companyType = companyData.companyType || baseResult.companyType;
+        baseResult.companyLogoUrl = companyData.logoDataUrl || baseResult.companyLogoUrl;
+        baseResult.companyAuthorizedPerson = companyData.authorizedPerson || baseResult.companyAuthorizedPerson;
+        baseResult.companyCity = companyData.city || baseResult.companyCity;
+        baseResult.companyPhone = companyData.phone || baseResult.companyPhone;
+        baseResult.companyEmail = companyData.email || baseResult.companyEmail;
+        baseResult.companyAccessCode = companyData.accessCode || baseResult.companyAccessCode;
+      }
+
+      return baseResult;
+    } else {
+      // First visit on Vercel deployment: return default enriched with company profile
+      if (companyData) {
+        return {
+          ...DEFAULT_USER_PROFILE,
+          club: companyData.companyName || DEFAULT_USER_PROFILE.club,
+          companyName: companyData.companyName,
+          companyType: companyData.companyType,
+          companyLogoUrl: companyData.logoDataUrl,
+          companyAuthorizedPerson: companyData.authorizedPerson,
+          companyCity: companyData.city,
+          companyPhone: companyData.phone,
+          companyEmail: companyData.email,
+          companyAccessCode: companyData.accessCode,
+        };
+      }
     }
   } catch (err) {
     console.error('Failed to parse stored user profile:', err);

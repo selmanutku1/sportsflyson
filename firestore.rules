@@ -386,6 +386,12 @@ service cloud.firestore {
       allow write: if isAdmin(); // Only admins can manage integrations
     }
 
+    match /company_profile/{docId} {
+      allow get, list: if true; // Allow reading company and school profile
+      allow create, update: if true; // Allow updating company profile data and school branding
+      allow delete: if isAdmin();
+    }
+
     match /registered_users/{userId} {
       allow get, list: if true;
       allow create: if true;

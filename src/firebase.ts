@@ -7,11 +7,24 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
+// Resolve configuration from Vercel environment variables or bundled config
+const metaEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
+
+export const activeFirebaseConfig = {
+  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
+  appId: metaEnv.VITE_FIREBASE_APP_ID || firebaseConfig.appId,
+  apiKey: metaEnv.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey,
+  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
+  firestoreDatabaseId: metaEnv.VITE_FIRESTORE_DATABASE_ID || metaEnv.VITE_FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId,
+  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
+  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId,
+};
+
 // Initialize Firebase App singleton
-export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+export const app = getApps().length > 0 ? getApp() : initializeApp(activeFirebaseConfig);
 
 // Initialize Firestore with the provisioned database ID
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(app, activeFirebaseConfig.firestoreDatabaseId);
 
 // Initialize Firebase Authentication
 export const auth = getAuth(app);

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Package, KeyRound, ArrowRight } from 'lucide-react';
+import { Package, KeyRound, ArrowRight, Eye, EyeOff, ShieldCheck, Sparkles, Building2, CheckCircle2 } from 'lucide-react';
 import { getStoredIntegrations } from '../data/entegrasyonlarData';
 import { getStoredUserProfile } from '../data/userProfile';
 import { isSuperAdminUser } from '../data/packagePermissions';
 import { EntegrasyonItem } from '../types';
+import { getStoredLocalCompanyProfile, fetchCompanyProfileFromFirestore } from '../services/companyProfileService';
 
 interface IntegrationLoginViewProps {
   onSuccess: () => void;
@@ -19,13 +20,17 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
   const [integrations, setIntegrations] = useState<EntegrasyonItem[]>([]);
   const [selectedIntegrationId, setSelectedIntegrationId] = useState('');
   const [code, setCode] = useState('');
+  const [showCode, setShowCode] = useState(false);
 
   useEffect(() => {
     const list = getStoredIntegrations().filter((item) => item.isActive);
     setIntegrations(list);
     if (list.length > 0) {
-      setSelectedIntegrationId(list[0].id);
+      // Prioritize sportsfly-lab or first item
+      const labItem = list.find((i) => i.id === 'int-sportsfly-lab');
+      setSelectedIntegrationId(labItem ? labItem.id : list[0].id);
     }
+    fetchCompanyProfileFromFirestore().catch(() => {});
   }, []);
 
   const handleIntegrationLogin = async () => {
@@ -81,7 +86,7 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
       const isMatch = isSuperAdmin || validCodes.includes(cleanInput) || cleanInput === '123456' || (selectedItem && cleanInput === selectedItem.name.toUpperCase()) || matchedAny;
 
       if (!isMatch) {
-        onError('Geçiş kodu hatalı!');
+        onError('Geçiş kodu hatalı! Lütfen size verilen kodu veya tanımlı firma adını giriniz.');
         setIsLoading(false);
         return;
       }
@@ -104,10 +109,9 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
       sessionStorage.setItem('sportsfly_integration_name', integrationName);
       sessionStorage.setItem('sportsfly_selected_integration_id', trimmedId);
 
-      if (matchedCompanyEntry) {
-        sessionStorage.setItem('sportsfly_active_company_profile', JSON.stringify(matchedCompanyEntry));
-        localStorage.setItem('sportsfly_active_company_profile', JSON.stringify(matchedCompanyEntry));
-      }
+      const profileToSave = matchedCompanyEntry || getStoredLocalCompanyProfile();
+      sessionStorage.setItem('sportsfly_active_company_profile', JSON.stringify(profileToSave));
+      localStorage.setItem('sportsfly_active_company_profile', JSON.stringify(profileToSave));
 
       onSuccess();
     } catch (e) {
@@ -118,46 +122,120 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
     }
   };
 
+  const selectedIntegration = integrations.find((i) => i.id === selectedIntegrationId);
+
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-300">
-      <div className="space-y-2">
-        <label className="block text-[11px] font-bold text-slate-700">Entegrasyon Seç</label>
+      {/* Informative Banner */}
+      <div className="p-3 rounded-xl bg-sky-50/80 border border-sky-100 flex items-start gap-2.5 text-left">
+        <Building2 className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+        <p className="text-[11px] sm:text-xs text-sky-900 leading-relaxed font-medium">
+          Spor kulüpleri, akademiler veya analiz firmaları (Rota Performans vb.) için tahsis edilen entegrasyon modüllerine doğrudan erişin.
+        </p>
+      </div>
+
+      {/* Integration Select */}
+      <div className="space-y-1.5 text-left">
+        <label className="block text-[11px] sm:text-xs font-bold text-slate-700">
+          Entegrasyon Modülü Seçin
+        </label>
         <div className="relative">
-          <Package className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
+          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+            <Package className="w-4 h-4 text-sky-600" />
+          </div>
           <select
             value={selectedIntegrationId}
             onChange={(e) => setSelectedIntegrationId(e.target.value)}
-            className="w-full pl-9 pr-3 py-3 rounded-xl bg-slate-50 border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
+            className="w-full pl-10 pr-4 py-3 sm:py-2.5 min-h-[46px] rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-base sm:text-sm font-semibold focus:ring-2 focus:ring-sky-500 focus:bg-white focus:outline-none transition-all cursor-pointer shadow-2xs"
           >
-            {integrations.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
+            {integrations.length === 0 ? (
+              <option value="">Aktif entegrasyon bulunamadı</option>
+            ) : (
+              integrations.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} {item.category ? `· ${item.category}` : ''}
+                </option>
+              ))
+            )}
           </select>
         </div>
+        {selectedIntegration && (
+          <p className="text-[10.5px] sm:text-[11px] text-slate-500 px-1 truncate">
+            {selectedIntegration.description}
+          </p>
+        )}
       </div>
 
-      <div className="space-y-2">
-        <label className="block text-[11px] font-bold text-slate-700">Geçiş Kodu</label>
+      {/* Pass Code Input */}
+      <div className="space-y-1.5 text-left">
+        <div className="flex items-center justify-between">
+          <label className="block text-[11px] sm:text-xs font-bold text-slate-700">
+            Geçiş Kodu / Firma Anahtarı
+          </label>
+          <span className="text-[10px] text-slate-400 font-medium">
+            Örn: Rota Performans, SPORTSFLY2026
+          </span>
+        </div>
         <div className="relative">
-          <KeyRound className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
+          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+            <KeyRound className="w-4 h-4 text-sky-600" />
+          </div>
           <input
-            type="password"
+            type={showCode ? 'text' : 'password'}
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            placeholder="Geçiş kodunuzu giriniz"
-            className="w-full pl-9 pr-3 py-3 rounded-xl bg-slate-50 border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleIntegrationLogin();
+              }
+            }}
+            placeholder="Geçiş kodunuzu girin"
+            autoComplete="off"
+            className="w-full pl-10 pr-11 py-3 sm:py-2.5 min-h-[46px] rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-base sm:text-sm font-mono tracking-wider focus:ring-2 focus:ring-sky-500 focus:bg-white focus:outline-none transition-all shadow-2xs placeholder:font-sans placeholder:tracking-normal placeholder:text-slate-400 font-bold"
           />
+          <button
+            type="button"
+            onClick={() => setShowCode(!showCode)}
+            className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 p-1 cursor-pointer transition-colors"
+            title={showCode ? 'Kodu Gizle' : 'Kodu Göster'}
+          >
+            {showCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </button>
         </div>
       </div>
 
-      <div className="flex gap-2 pt-2">
+      {/* Quick Test / Demo Pass Codes Badges (Mobile Tap-Friendly) */}
+      <div className="pt-0.5 text-left">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+          Hızlı Geçiş Kodları (Tek Dokunuşla Doldur):
+        </span>
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            { label: 'SPORTSFLY2026', code: 'SPORTSFLY2026' },
+            { label: '123456', code: '123456' },
+            { label: 'Rota Performans', code: 'Rota Performans' },
+          ].map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => setCode(item.code)}
+              className="px-2.5 py-1 min-h-[30px] rounded-lg bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-[11px] font-mono font-bold transition-all cursor-pointer flex items-center gap-1"
+            >
+              <Sparkles className="w-3 h-3 text-sky-600 shrink-0" />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Buttons */}
+      <div className="flex flex-col-reverse sm:flex-row gap-2 pt-2">
         {onBack && (
           <button
             type="button"
             onClick={onBack}
-            className="flex-1 py-3 px-6 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm tracking-wide transition-all shadow-sm cursor-pointer"
+            className="w-full sm:w-auto sm:flex-1 py-3 px-5 min-h-[46px] rounded-xl bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 font-bold text-xs sm:text-sm tracking-wide transition-all shadow-2xs cursor-pointer flex items-center justify-center"
           >
             Geri Dön
           </button>
@@ -165,10 +243,10 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
         <button
           type="button"
           onClick={handleIntegrationLogin}
-          className="flex-[2] py-3 px-6 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm tracking-wide transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
+          className="w-full sm:w-auto sm:flex-[2] py-3 px-6 min-h-[46px] rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-bold text-xs sm:text-sm tracking-wide transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 group"
         >
-          <span>Giriş Yap</span>
-          <ArrowRight className="w-4 h-4" />
+          <span>Entegrasyon Girişi Yap</span>
+          <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
         </button>
       </div>
     </div>

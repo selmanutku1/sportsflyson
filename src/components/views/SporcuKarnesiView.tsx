@@ -610,6 +610,7 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
           pageNo={pageNo}
           totalReportPages={5}
           effectiveSecondaryHex="#0284c7"
+          hideRota={true}
         />
       </div>
     </div>

@@ -24,6 +24,7 @@ import { auth } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { fetchAndMergeGoogleUsersFromFirestore } from './data/googleUsersAccess';
 import { syncGoogleProfileData } from './services/userService';
+import { fetchCompanyProfileFromFirestore } from './services/companyProfileService';
 
 // Lazy-loaded view modules for instant initial load & code splitting
 const DashboardView = lazy(() =>
@@ -358,9 +359,13 @@ export default function App() {
     window.addEventListener('sportsfly_plan_changed', handlePlanUpdate);
     window.addEventListener('sportsfly_plan_updated', handlePlanUpdate);
     window.addEventListener('sportsfly_profile_updated', handleProfileUpdate);
+    window.addEventListener('sportsfly_company_profile_updated', handleProfileUpdate);
     window.addEventListener('sportsfly_google_users_updated', handleGoogleUsersUpdate);
     window.addEventListener('popstate', handlePopState);
     window.addEventListener('keydown', handleKeyDown);
+
+    // Initial sync of company profile from Firestore
+    fetchCompanyProfileFromFirestore().catch(() => {});
 
     // Subscribe to verified real user approval notifications from Firestore database
     const unsubscribeRealDbNotifs = subscribeToRealDatabaseUserNotifications();
@@ -373,6 +378,7 @@ export default function App() {
           setIsAuthenticated(true);
         }
         fetchAndMergeGoogleUsersFromFirestore().catch(() => {});
+        fetchCompanyProfileFromFirestore().catch(() => {});
       } else {
         const storedAuthActive = sessionStorage.getItem('sportsfly_auth_active');
         if (storedAuthActive === 'false') {
@@ -389,6 +395,7 @@ export default function App() {
       window.removeEventListener('sportsfly_plan_changed', handlePlanUpdate);
       window.removeEventListener('sportsfly_plan_updated', handlePlanUpdate);
       window.removeEventListener('sportsfly_profile_updated', handleProfileUpdate);
+      window.removeEventListener('sportsfly_company_profile_updated', handleProfileUpdate);
       window.removeEventListener('sportsfly_google_users_updated', handleGoogleUsersUpdate);
       window.removeEventListener('popstate', handlePopState);
       window.removeEventListener('keydown', handleKeyDown);

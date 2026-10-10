@@ -633,6 +633,26 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "email", "clubName", "managerName", "phone", "role", "status", "createdAt"]
+    },
+    "CompanyProfile": {
+      "title": "CompanyProfile",
+      "description": "Company and sports school profile metadata and branding.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "companyName": { "type": "string" },
+        "clubName": { "type": "string" },
+        "branchName": { "type": "string" },
+        "authorizedPerson": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "city": { "type": "string" },
+        "logoDataUrl": { "type": "string" },
+        "companyType": { "type": "string" },
+        "accessCode": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "companyName"]
     }
   },
   "firestore": {
@@ -679,6 +699,10 @@
     "/registered_users/{userId}": {
       "schema": { "$ref": "#/entities/RegisteredUser" },
       "description": "Registered email accounts with approval lifecycle stored persistently in Firestore."
+    },
+    "/company_profile/{docId}": {
+      "schema": { "$ref": "#/entities/CompanyProfile" },
+      "description": "Company profile and branding settings for analysis firm and sports schools."
     }
   }
 }

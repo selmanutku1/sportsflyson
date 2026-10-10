@@ -544,8 +544,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       <AnimatePresence>
         {isOpen && (
-          <motion.aside
-            id="app-sidebar"
+          <>
+            {/* Mobile Backdrop Overlay */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={onCloseMobile}
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-2xs z-40 lg:hidden cursor-pointer"
+              aria-hidden="true"
+            />
+            <motion.aside
+              id="app-sidebar"
             initial={{ x: '-100%' }}
             animate={{ x: 0 }}
             exit={{ x: '-100%' }}
@@ -1397,6 +1408,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </p>
         </div>
       </motion.aside>
+      </>
       )}
     </AnimatePresence>
     </>

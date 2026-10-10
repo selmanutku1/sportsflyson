@@ -37,6 +37,7 @@ import { SportsFlyLabView } from './moduller/SportsFlyLabView';
 import { SportsFlyVectorMark } from '../SportsFlyLogo';
 import { getStoredUserProfile } from '../../data/userProfile';
 import { isSuperAdminUser } from '../../data/packagePermissions';
+import { getStoredLocalCompanyProfile, fetchCompanyProfileFromFirestore } from '../../services/companyProfileService';
 
 interface EntegrasyonlarViewProps {
   onNavigate?: (page: NavPage) => void;
@@ -87,6 +88,7 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
   const [passCodeError, setPassCodeError] = useState<string | null>(null);
 
   React.useEffect(() => {
+    fetchCompanyProfileFromFirestore().catch(() => {});
     try {
       const selectedId = sessionStorage.getItem('sportsfly_selected_integration_id');
       if (selectedId) {
@@ -224,10 +226,9 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
       try {
         sessionStorage.setItem('sportsfly_integration_entry_source', 'true');
         localStorage.setItem('sportsfly_integration_entry_source', 'true');
-        if (matchedCompanyEntry) {
-          sessionStorage.setItem('sportsfly_active_company_profile', JSON.stringify(matchedCompanyEntry));
-          localStorage.setItem('sportsfly_active_company_profile', JSON.stringify(matchedCompanyEntry));
-        }
+        const profileToSave = matchedCompanyEntry || getStoredLocalCompanyProfile();
+        sessionStorage.setItem('sportsfly_active_company_profile', JSON.stringify(profileToSave));
+        localStorage.setItem('sportsfly_active_company_profile', JSON.stringify(profileToSave));
       } catch (e) {}
 
       openModuleDirectly(item);

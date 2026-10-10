@@ -1057,7 +1057,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   });
 
   return (
-    <div className="min-h-screen bg-[#f3f6fb] flex flex-col items-center justify-center p-3 sm:p-6 lg:p-8 font-sans text-slate-800 relative selection:bg-blue-100 selection:text-blue-900">
+    <div className="min-h-screen min-h-[100dvh] bg-[#f3f6fb] flex flex-col items-center justify-center p-3 sm:p-6 lg:p-8 font-sans text-slate-800 relative selection:bg-blue-100 selection:text-blue-900">
       
       {/* Soft Background Grid Accent */}
       <div 
@@ -1069,32 +1069,32 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       />
 
       {/* Centralized Corporate Logo & Identity Header */}
-      <div className="relative z-10 flex flex-col items-center text-center mb-6 mt-2 animate-in fade-in slide-in-from-top-3 duration-300">
-        <div className="w-24 h-24 sm:w-28 sm:h-28 mb-3.5 relative flex items-center justify-center p-3 rounded-2xl bg-white border border-slate-200/60 shadow-md">
+      <div className="relative z-10 flex flex-col items-center text-center mb-5 sm:mb-6 mt-2 animate-in fade-in slide-in-from-top-3 duration-300">
+        <div className="w-20 h-20 sm:w-28 sm:h-28 mb-3 relative flex items-center justify-center p-2.5 sm:p-3 rounded-2xl bg-white border border-slate-200/60 shadow-md">
           <img
             src="/sportsfly-logo.svg"
             alt="SportsFly Corporate Logo"
             className="w-full h-full object-contain"
           />
         </div>
-        <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+        <h1 className="text-2xl sm:text-4xl font-black text-slate-900 tracking-tight flex items-center gap-2">
           SportsFly
         </h1>
-        <p className="text-xs sm:text-sm font-semibold text-slate-500 mt-1 max-w-[340px]">
+        <p className="text-xs sm:text-sm font-semibold text-slate-500 mt-1 max-w-[340px] px-2">
           Spor Okulu, Akademi &amp; Tesis Yönetim Sistemi
         </p>
       </div>
 
       {/* Main Login Card - Crisp White Minimalist Card with Elegant Shadow */}
-      <div className="relative z-10 w-full max-w-[460px] bg-white rounded-2xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 border border-slate-200/60 mb-6">
+      <div className="relative z-10 w-full max-w-[460px] bg-white rounded-2xl sm:rounded-3xl p-4.5 sm:p-8 shadow-xl shadow-slate-200/50 border border-slate-200/60 mb-6">
         
         {/* 1. Header: Minimal Welcoming Header */}
-        <div className="mb-6 text-left pb-4 border-b border-slate-100 flex items-start justify-between gap-2">
+        <div className="mb-5 sm:mb-6 text-left pb-3.5 sm:pb-4 border-b border-slate-100 flex items-start justify-between gap-2">
           <div>
-            <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">
+            <h2 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">
               {is2FAStepActive ? 'İki Faktörlü Doğrulama (2FA)' : 'Kullanıcı Girişi'}
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-relaxed">
               {is2FAStepActive
                 ? twoFactorMethod === 'email'
                   ? 'Hesap güvenliğiniz için e-posta adresinize gönderilen doğrulama kodunu girin.'
@@ -1105,19 +1105,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex p-1 bg-slate-100 rounded-xl mb-6">
+        <div className="flex p-1 bg-slate-100 rounded-xl mb-5 sm:mb-6">
           <button
             onClick={() => setLoginType('standard')}
-            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
-              loginType === 'standard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
+            className={`flex-1 py-2.5 text-xs sm:text-sm font-bold rounded-lg transition-all cursor-pointer ${
+              loginType === 'standard' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
             }`}
           >
             Standart Giriş
           </button>
           <button
             onClick={() => setLoginType('integration')}
-            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
-              loginType === 'integration' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
+            className={`flex-1 py-2.5 text-xs sm:text-sm font-bold rounded-lg transition-all cursor-pointer ${
+              loginType === 'integration' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
             }`}
           >
             Entegrasyon Girişi
@@ -1227,7 +1227,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               <label className="block text-[11px] font-bold text-slate-700">
                 {twoFactorMethod === 'email' ? '6 Haneli E-Posta Doğrulama Kodu' : '6 Haneli SMS Doğrulama Kodu'}
               </label>
-              <div className="grid grid-cols-6 gap-2">
+              <div className="grid grid-cols-6 gap-1 sm:gap-2">
                 {otpDigits.map((digit, idx) => (
                   <input
                     key={idx}
@@ -1241,7 +1241,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                     onChange={(e) => handleOtpDigitChange(idx, e.target.value)}
                     onKeyDown={(e) => handleOtpKeyDown(idx, e)}
                     onPaste={handleOtpPaste}
-                    className="w-full h-12 text-center text-lg font-extrabold font-sans tabular-nums text-slate-900 bg-slate-50 border-2 border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-100 transition-all"
+                    className="w-full h-11 sm:h-12 text-center text-base sm:text-lg font-extrabold font-sans tabular-nums text-slate-900 bg-slate-50 border-2 border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-100 transition-all p-0"
                   />
                 ))}
               </div>
@@ -1386,7 +1386,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 <select
                   value={countryCode}
                   onChange={(e) => setCountryCode(e.target.value)}
-                  className="bg-slate-50 border border-slate-300 text-slate-900 text-xs rounded-xl px-2.5 py-2.5 focus:outline-none focus:border-blue-600 focus:bg-white cursor-pointer font-bold transition-all shrink-0"
+                  className="bg-slate-50 border border-slate-300 text-slate-900 text-base sm:text-xs rounded-xl px-2.5 py-2.5 min-h-[44px] focus:outline-none focus:border-blue-600 focus:bg-white cursor-pointer font-bold transition-all shrink-0"
                 >
                   <option value="+90">🇹🇷 +90</option>
                   <option value="+49">🇩🇪 +49</option>
@@ -1404,7 +1404,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="5XX XXX XX XX"
-                    className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-xl pl-9 pr-3 py-2.5 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400 font-medium"
+                    className="w-full bg-white border border-slate-300 text-slate-900 text-base sm:text-xs rounded-xl pl-9 pr-3 py-2.5 min-h-[44px] focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400 font-medium"
                     required
                   />
                 </div>
@@ -1424,7 +1424,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="ornek@sporokulu.com"
-                  className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-xl pl-9 pr-3 py-2.5 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400 font-medium"
+                  className="w-full bg-white border border-slate-300 text-slate-900 text-base sm:text-xs rounded-xl pl-9 pr-3 py-2.5 min-h-[44px] focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400 font-medium"
                   required
                 />
               </div>
@@ -1452,7 +1452,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-xl pl-9 pr-10 py-2.5 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400 font-medium"
+                className="w-full bg-white border border-slate-300 text-slate-900 text-base sm:text-xs rounded-xl pl-9 pr-10 py-2.5 min-h-[44px] focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400 font-medium"
                 required
               />
               <button
@@ -1855,8 +1855,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       {/* MODAL 3: Registration Modal (Spor Okulu Yönetici Kaydı)                   */}
       {/* ========================================================================= */}
       {showRegisterModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className={`bg-white rounded-3xl p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 text-slate-800 transition-all duration-300 ${
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+          <div className={`bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 text-slate-800 transition-all duration-300 max-h-[92vh] max-h-[92dvh] overflow-y-auto ${
             regStep === 'package_selection'
               ? 'max-w-5xl w-full'
               : regStep === 'checkout' || regStep === 'contracts'
@@ -2985,22 +2985,22 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
       {/* Forgot Password Modal */}
       {showForgotPasswordModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center space-y-4">
-            <h3 className="text-lg font-black text-center">Şifre Sıfırlama</h3>
-            <p className="text-xs text-slate-600">E-posta adresinizi girin, size şifre sıfırlama bağlantısı gönderelim.</p>
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-slate-200 text-center space-y-4 animate-in fade-in zoom-in-95">
+            <h3 className="text-base sm:text-lg font-black text-center text-slate-900">Şifre Sıfırlama</h3>
+            <p className="text-xs text-slate-600 leading-relaxed">E-posta adresinizi girin, size şifre sıfırlama bağlantısı gönderelim.</p>
             <input
               type="email"
               value={forgotPasswordEmail}
               onChange={(e) => setForgotPasswordEmail(e.target.value)}
               placeholder="ornek@sporokulu.com"
-              className="w-full bg-slate-50 border border-slate-300 px-3 py-2.5 rounded-xl text-xs"
+              className="w-full bg-slate-50 border border-slate-300 px-3.5 py-3 sm:py-2.5 min-h-[44px] rounded-xl text-base sm:text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
             />
-            {forgotPasswordStatus === 'success' && <p className="text-xs text-emerald-600 text-center">Sıfırlama bağlantısı gönderildi!</p>}
-            {forgotPasswordStatus === 'error' && <p className="text-xs text-rose-600 text-center">Bir hata oluştu, lütfen tekrar deneyin.</p>}
-            <div className="flex gap-2">
-              <button onClick={() => setShowForgotPasswordModal(false)} className="flex-1 py-2 text-xs font-semibold cursor-pointer">İptal</button>
-              <button onClick={handleForgotPassword} disabled={forgotPasswordStatus === 'loading'} className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold cursor-pointer">Gönder</button>
+            {forgotPasswordStatus === 'success' && <p className="text-xs text-emerald-600 font-bold text-center">Sıfırlama bağlantısı gönderildi!</p>}
+            {forgotPasswordStatus === 'error' && <p className="text-xs text-rose-600 font-bold text-center">Bir hata oluştu, lütfen tekrar deneyin.</p>}
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => setShowForgotPasswordModal(false)} className="flex-1 py-2.5 min-h-[42px] text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer">İptal</button>
+              <button onClick={handleForgotPassword} disabled={forgotPasswordStatus === 'loading'} className="flex-1 py-2.5 min-h-[42px] bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer">Gönder</button>
             </div>
           </div>
         </div>
@@ -3008,8 +3008,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
       {/* Google Account Picker Modal (Optimized for Vercel, Live & Localhost) */}
       {showGoogleAccountPicker && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 text-left space-y-5">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-md w-full p-4.5 sm:p-6 shadow-2xl border border-slate-200 text-left space-y-4 sm:space-y-5 max-h-[90vh] max-h-[90dvh] overflow-y-auto">
             {/* Modal Header */}
             <div className="flex items-start justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-3">
