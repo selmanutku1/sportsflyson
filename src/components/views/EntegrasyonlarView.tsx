@@ -774,7 +774,7 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
       {/* Pass Code Verification Modal (Geçiş Kodu Sorma Modalı - Süper Admin için açılmaz) */}
       {!isSuperAdmin && passCodeModalItem && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-[#111c2e] w-full max-w-md rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 relative animate-in zoom-in-95 duration-200">
+          <div className="bg-white dark:bg-[#111c2e] w-full max-w-md max-h-[90vh] overflow-y-auto rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 relative animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">

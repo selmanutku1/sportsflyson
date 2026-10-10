@@ -27,9 +27,7 @@ import { syncGoogleProfileData } from './services/userService';
 import { fetchCompanyProfileFromFirestore } from './services/companyProfileService';
 
 // Lazy-loaded view modules for instant initial load & code splitting
-const DashboardView = lazy(() =>
-  import('./components/views/DashboardView').then((m) => ({ default: m.DashboardView }))
-);
+import { DashboardView } from './components/views/DashboardView';
 const SporsepetiUserView = lazy(() =>
   import('./components/views/SporsepetiUserView').then((m) => ({ default: m.SporsepetiUserView }))
 );
@@ -112,9 +110,7 @@ const EnvanterYonetimiView = lazy(() =>
   }))
 );
 import { EntegrasyonlarView } from './components/views/EntegrasyonlarView';
-const PaketlerView = lazy(() =>
-  import('./components/views/PaketlerView').then((m) => ({ default: m.PaketlerView }))
-);
+import { PaketlerView } from './components/views/PaketlerView';
 const OnKayitView = lazy(() =>
   import('./components/views/OnKayitView').then((m) => ({ default: m.OnKayitView }))
 );
@@ -182,16 +178,7 @@ export default function App() {
   }, []);
 
   // Authentication State: defaults to false so new visitors or fresh deployments show the initial login screen first
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = sessionStorage.getItem('sportsfly_auth_active');
-        if (stored === 'true') return true;
-        return false;
-      } catch (e) {}
-    }
-    return false;
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
   const [isIntegrationActive, setIsIntegrationActive] = useState(() => {
     if (typeof window !== 'undefined') {

@@ -148,6 +148,17 @@ const OFFICIAL_PACKAGES: PackagePlanItem[] = [
   },
 ];
 
+const PAYTR_LINKS: Partial<Record<PackagePlanType, Record<'aylik' | 'yillik', string>>> = {
+  'Başlangıç Kulübü': {
+    aylik: 'https://www.paytr.com/link/ImcbZd4',
+    yillik: 'https://www.paytr.com/link/VErjIpI'
+  },
+  'Kulüp & Akademi': {
+    aylik: 'https://www.paytr.com/link/jDxLXrf',
+    yillik: 'https://www.paytr.com/link/uqcnHDN'
+  }
+};
+
 const PACKAGES_CUSTOM_STORAGE_KEY = 'sportsfly_packages_official_v5';
 
 export const PaketlerView: React.FC = () => {
@@ -164,7 +175,7 @@ export const PaketlerView: React.FC = () => {
     return OFFICIAL_PACKAGES;
   });
 
-  const [activeTab, setActiveTab] = useState<'kartlar' | 'yetki-matrisi' | 'kota-analiz'>('kartlar');
+  const [activeTab, setActiveTab] = useState<'kartlar' | 'yetki-matrisi'>('kartlar');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [selectedPlanModal, setSelectedPlanModal] = useState<PackagePlanItem | null>(null);
   const [actionType, setActionType] = useState<'trial' | 'upgrade' | 'contact' | null>(null);
@@ -238,6 +249,13 @@ export const PaketlerView: React.FC = () => {
   };
 
   const handleCtaClick = async (pkg: PackagePlanItem) => {
+    // If a direct PayTR link exists, use it
+    const paymentLink = PAYTR_LINKS[pkg.name]?.[billingCycle];
+    if (paymentLink) {
+      window.open(paymentLink, '_blank');
+      return;
+    }
+
     setSelectedPlanModal(pkg);
     setCheckoutSession(null);
     if (pkg.name === 'Başlangıç Kulübü') {
@@ -446,18 +464,6 @@ export const PaketlerView: React.FC = () => {
           >
             <ShieldCheck className="w-4 h-4" />
             <span>Modül &amp; Yetki Matrisi</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('kota-analiz')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              activeTab === 'kota-analiz'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Sliders className="w-4 h-4" />
-            <span>Kulüp Kota &amp; Kaynak Kullanımı</span>
           </button>
         </div>
       </div>
@@ -757,141 +763,6 @@ export const PaketlerView: React.FC = () => {
                 </tr>
               </tbody>
             </table>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: QUOTA & RESOURCE USAGE FOR CURRENT CLUB */}
-      {activeTab === 'kota-analiz' && (
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs space-y-6">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900">
-                Kulüp Kaynak &amp; Kota Kullanım Analizi
-              </h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Kulübünüzün mevcut sporcu, antrenör ve şube sayısının aktif <strong>"{activePlan}"</strong> paketine göre doluluk oranları.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              {/* Metric 1: Sporcu Kotası */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
-                    <Users className="w-4 h-4 text-blue-600" />
-                    Aktif Sporcu Kotası
-                  </span>
-                  <span className="text-xs font-extrabold text-slate-800">
-                    {currentClubStats.registeredAthletes} /{' '}
-                    {PACKAGE_DETAILS[activePlan]?.maxStudents}
-                  </span>
-                </div>
-                {/* Progress bar */}
-                {typeof PACKAGE_DETAILS[activePlan]?.maxStudents === 'number' ? (
-                  <div>
-                    <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          currentClubStats.registeredAthletes > (PACKAGE_DETAILS[activePlan]?.maxStudents as number)
-                            ? 'bg-rose-500'
-                            : 'bg-blue-600'
-                        }`}
-                        style={{
-                          width: `${Math.min(
-                            100,
-                            Math.round(
-                              (currentClubStats.registeredAthletes /
-                                (PACKAGE_DETAILS[activePlan]?.maxStudents as number)) *
-                                100
-                            )
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-1.5">
-                      {currentClubStats.registeredAthletes > (PACKAGE_DETAILS[activePlan]?.maxStudents as number) ? (
-                        <span className="text-rose-600 font-bold">
-                          Kota aşıldı! Bir üst pakete geçiş yapmanız gerekmektedir.
-                        </span>
-                      ) : (
-                        <span>
-                          Kapasitenin %
-                          {Math.round(
-                            (currentClubStats.registeredAthletes /
-                              (PACKAGE_DETAILS[activePlan]?.maxStudents as number)) *
-                              100
-                          )}{' '}
-                          kadarı kullanılıyor.
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="p-2 rounded-lg bg-emerald-50 text-emerald-800 text-xs font-semibold flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>Sınırsız sporcu hakkı aktif</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Metric 2: Antrenör Kotası */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
-                    <Award className="w-4 h-4 text-indigo-600" />
-                    Antrenör &amp; Kadro
-                  </span>
-                  <span className="text-xs font-extrabold text-slate-800">
-                    {currentClubStats.registeredTrainers} Antrenör
-                  </span>
-                </div>
-                <div className="text-xs text-slate-600">
-                  Paket Kapsamı: <strong>{PACKAGE_DETAILS[activePlan]?.maxTrainers}</strong>
-                </div>
-                {activePlan === 'Başlangıç Kulübü' && currentClubStats.registeredTrainers > 2 && (
-                  <div className="text-[11px] text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200/60">
-                    Başlangıç Kulübü 2 antrenör ile sınırlıdır. Sınırsız antrenör için Kulüp &amp; Akademi önerilir.
-                  </div>
-                )}
-                {activePlan !== 'Başlangıç Kulübü' && (
-                  <div className="p-2 rounded-lg bg-emerald-50 text-emerald-800 text-xs font-semibold flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>Sınırsız antrenör tanımlama hakkı</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Metric 3: Şube Kotası */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
-                    <Building2 className="w-4 h-4 text-purple-600" />
-                    Tesis &amp; Şube Kotası
-                  </span>
-                  <span className="text-xs font-extrabold text-slate-800">
-                    {currentClubStats.facilityCount} Tesis
-                  </span>
-                </div>
-                <div className="text-xs text-slate-600">
-                  Paket Kapsamı:{' '}
-                  <strong>
-                    {PACKAGE_DETAILS[activePlan]?.level === 3 ? 'Sınırsız Şube & Tesis' : 'Tek Şube'}
-                  </strong>
-                </div>
-                {PACKAGE_DETAILS[activePlan]?.level < 3 && (
-                  <div className="text-[11px] text-indigo-700 bg-indigo-50 p-2 rounded-lg border border-indigo-200/60">
-                    Birden fazla şube ve tesis yönetimi için <strong>Pro Akademi &amp; Çoklu Şube</strong> gereklidir.
-                  </div>
-                )}
-                {PACKAGE_DETAILS[activePlan]?.level === 3 && (
-                  <div className="p-2 rounded-lg bg-emerald-50 text-emerald-800 text-xs font-semibold flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>Çoklu şube ve konsolide finans yetkisi</span>
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         </div>
       )}
