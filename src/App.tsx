@@ -181,18 +181,16 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Authentication State: defaults to true so user immediately sees and accesses the management panel
+  // Authentication State: defaults to false so new visitors or fresh deployments show the initial login screen first
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       try {
         const stored = sessionStorage.getItem('sportsfly_auth_active');
-        if (stored === 'false') return false;
         if (stored === 'true') return true;
-        sessionStorage.setItem('sportsfly_auth_active', 'true');
-        return true;
+        return false;
       } catch (e) {}
     }
-    return true;
+    return false;
   });
 
   const [isIntegrationActive, setIsIntegrationActive] = useState(() => {

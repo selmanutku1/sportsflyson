@@ -1532,23 +1532,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             <ArrowRight className="w-4 h-4" />
           </button>
 
-          {/* Quick Direct Access to Super Admin Panel */}
-          <button
-            type="button"
-            onClick={() => {
-              sessionStorage.setItem('sportsfly_auth_active', 'true');
-              sessionStorage.setItem('sportsfly_active_page', 'anasayfa');
-              onLoginSuccess({
-                email: ADMIN_GOOGLE_EMAIL,
-                name: 'Selman Utku Marmara',
-                role: 'Süper Admin',
-              });
-            }}
-            className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs tracking-wide transition-all shadow-sm cursor-pointer flex items-center justify-center gap-2 border border-slate-700"
-          >
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Yönetici Paneline Doğrudan Geçiş Yap</span>
-          </button>
+
         </form>
 
         {/* 5. Register Link */}

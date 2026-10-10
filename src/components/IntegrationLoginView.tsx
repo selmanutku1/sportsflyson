@@ -123,7 +123,7 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
   };
 
   return (
-    <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-300">
+    <div className="space-y-4 px-4 sm:px-0 animate-in fade-in slide-in-from-right-3 duration-300">
       {/* Integration Select */}
       <div className="space-y-1.5 text-left">
         <label className="block text-[11px] sm:text-xs font-bold text-slate-700">
