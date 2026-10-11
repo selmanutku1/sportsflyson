@@ -1059,7 +1059,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   });
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-[#f3f6fb] flex flex-col items-center justify-center p-3 sm:p-6 lg:p-8 font-sans text-slate-800 relative selection:bg-blue-100 selection:text-blue-900">
+    <div className="h-screen h-[100dvh] overflow-hidden bg-[#f3f6fb] flex flex-col items-center justify-center p-3 sm:p-4 font-sans text-slate-800 relative selection:bg-blue-100 selection:text-blue-900">
       
       {/* Soft Background Grid Accent */}
       <div 
@@ -1073,14 +1073,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
 
       {/* Corporate Logo & Brand Header */}
-      <div className="relative z-10 flex flex-col items-center text-center mb-5 sm:mb-6">
-        <SportsFlyVectorMark className="w-16 h-16 sm:w-20 sm:h-20 mb-2.5 drop-shadow-sm" />
-        <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">SportsFly</h1>
-        <p className="text-xs sm:text-sm text-slate-500 font-medium">Kulüp & Spor Yönetim Sistemi</p>
+      <div className="relative z-10 flex flex-col items-center text-center mb-3 sm:mb-4 shrink-0">
+        <SportsFlyVectorMark className="w-12 h-12 sm:w-16 sm:h-16 mb-1.5 drop-shadow-sm" />
+        <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">SportsFly</h1>
+        <p className="text-[11px] sm:text-xs text-slate-500 font-medium">Kulüp & Spor Yönetim Sistemi</p>
       </div>
 
       {/* Main Login Card - Crisp White Minimalist Card with Elegant Shadow */}
-      <div className="relative z-10 w-full max-w-[460px] bg-white rounded-2xl sm:rounded-3xl p-4.5 sm:p-8 shadow-xl shadow-slate-200/50 border border-slate-200/60 mb-6">
+      <div className="relative z-10 w-full max-w-[440px] bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xl shadow-slate-200/50 border border-slate-200/60 overflow-y-auto max-h-[calc(100vh-120px)] scrollbar-none">
         
         {/* 1. Header: Minimal Welcoming Header */}
         <div className="mb-5 sm:mb-6 text-left pb-3.5 sm:pb-4 border-b border-slate-100 flex items-start justify-between gap-2">

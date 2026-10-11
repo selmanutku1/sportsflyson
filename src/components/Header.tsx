@@ -381,7 +381,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [rootCrumb, ...childCrumbs] = breadcrumbText.split(' > ');
 
   return (
-    <header className="bg-white dark:bg-[#111c2e] border-b border-slate-200/90 dark:border-slate-800 sticky top-0 z-30 shadow-xs transition-colors duration-200 shrink-0">
+    <header className="bg-white dark:bg-[#111c2e] border-b border-slate-200/90 dark:border-slate-800 sticky top-0 z-50 shadow-xs transition-colors duration-200 shrink-0">
       <div className="flex items-center justify-between px-2.5 sm:px-4 lg:px-6 h-16 gap-2">
         {/* Left Side: Single Icon (Menu Toggle) & Breadcrumbs (SportsFly > Sayfa) */}
         <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 shrink-0">
@@ -546,8 +546,8 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
-          {/* Minimal Package Plan Quick Switcher in Header */}
-          {!isUnapprovedOrRestricted && (
+          {/* Minimal Package Plan Quick Switcher in Header - Sadece Süper Admin için */}
+          {isSuperAdmin && !isUnapprovedOrRestricted && (
           <div className="relative hidden sm:block" ref={planMenuRef}>
             <button
               id="header-package-plan-btn"
@@ -573,7 +573,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Plan Switcher Dropdown */}
             {showPlanMenu && (
-              <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-white dark:bg-[#111c2e] rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 py-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-white dark:bg-[#111c2e] rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 py-3 z-[9999] animate-in fade-in slide-in-from-top-2 duration-150">
                 <div className="px-4 pb-2.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
                   <div>
                     <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
@@ -679,7 +679,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Theme Dropdown */}
             {showThemeMenu && (
-              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-[#111c2e] rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 py-1.5 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-[#111c2e] rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 py-1.5 z-[9999] animate-in fade-in slide-in-from-top-2 duration-150">
                 <div className="px-3 py-1.5 border-b border-slate-100 dark:border-slate-800 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
                   Görünüm Teması
                 </div>
@@ -788,12 +788,12 @@ export const Header: React.FC<HeaderProps> = ({
               <>
                 {/* Mobile Backdrop */}
                 <div
-                  className="fixed inset-0 bg-slate-900/40 backdrop-blur-2xs z-40 sm:hidden"
+                  className="fixed inset-0 bg-slate-900/40 backdrop-blur-2xs z-[9998] sm:hidden"
                   onClick={() => setShowNotifications(false)}
                 />
 
                 {/* Main Popover Container */}
-                <div className="fixed inset-x-2 top-14 max-w-sm sm:max-w-none mx-auto sm:mx-0 z-50 sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[390px] bg-white dark:bg-[#111c2e] rounded-2xl shadow-xl border border-slate-200/90 dark:border-slate-700/80 flex flex-col max-h-[80vh] sm:max-h-[32rem] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                <div className="fixed inset-x-2 top-14 max-w-sm sm:max-w-none mx-auto sm:mx-0 z-[9999] sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[390px] bg-white dark:bg-[#111c2e] rounded-2xl shadow-xl border border-slate-200/90 dark:border-slate-700/80 flex flex-col max-h-[80vh] sm:max-h-[32rem] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                   
                   {/* Institutional Header */}
                   <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-900/30">
@@ -1048,7 +1048,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Profile Menu Dropdown */}
             {showProfileMenu && (
-              <div className="absolute right-0 mt-2 w-64 sm:w-72 max-w-[calc(100vw-2rem)] bg-white dark:bg-[#111c2e] rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="absolute right-0 mt-2 w-64 sm:w-72 max-w-[calc(100vw-2rem)] bg-white dark:bg-[#111c2e] rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 py-2 z-[9999] animate-in fade-in slide-in-from-top-2 duration-150">
                 <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-[#162238]/60 rounded-t-2xl">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[11px] text-slate-400 dark:text-slate-500 font-semibold uppercase tracking-wider">

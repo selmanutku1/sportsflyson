@@ -50,6 +50,7 @@ import {
   RotateCcw,
   ChevronDown,
   Info,
+  LogOut,
 } from 'lucide-react';
 import { SportsFlyVectorMark } from '../../SportsFlyLogo';
 import {
@@ -117,6 +118,8 @@ import {
   fetchCompanyProfileFromFirestore,
   saveCompanyProfileToFirestore,
 } from '../../../services/companyProfileService';
+import { getStoredUserProfile } from '../../../data/userProfile';
+import { isSuperAdminUser } from '../../../data/packagePermissions';
 
 interface SportsFlyLabViewProps {
   onToast?: (msg: string) => void;
@@ -298,6 +301,11 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     const list = getStoredLabReports();
     return list[0]?.id || 'lab-rep-1';
   });
+
+  const currentUserProfile = React.useMemo(() => getStoredUserProfile(), []);
+  const isSuperAdmin = React.useMemo(() => {
+    return isSuperAdminUser(currentUserProfile?.role, currentUserProfile?.email);
+  }, [currentUserProfile]);
 
   // Check if entered via integration access pass code (Only show Company Profile when true)
   const isIntegrationEntry = (() => {
@@ -1630,8 +1638,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       <div className="flex flex-col items-center justify-center opacity-[0.10] -rotate-6 transition-opacity">
         <div className="w-[320px] h-[320px] sm:w-[420px] sm:h-[420px] flex items-center justify-center p-6">
           <img
-            src={effectiveAnalysisFirmLogo}
-            alt={effectiveAnalysisFirmName}
+            src={ROTA_PERFORMANS_LOGO_DATA_URL}
+            alt="Rota Performans"
             className="w-full h-full object-contain filter drop-shadow-xs"
           />
         </div>
@@ -2917,7 +2925,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         id="sportsfly-lab-parent-athlete-page"
         className={`a4-print-page relative overflow-hidden min-h-[1460px] flex flex-col justify-between rounded-xl p-5 sm:p-7 shadow-xs print:shadow-none ${activeTemplate.pageFrameClass}`}
       >
-        <div className="space-y-4">
+        {renderPageWatermark()}
+        <div className="space-y-4 relative z-10">
           {/* Header Banner */}
           <div className="p-4 rounded-2xl bg-gradient-to-r from-[#0b192c] via-[#0f2942] to-[#1e3a8a] text-white shadow-xs border-b-2 border-sky-400">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/20 pb-3">
@@ -3235,7 +3244,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         id="sportsfly-lab-coach-club-page"
         className={`a4-print-page relative overflow-hidden min-h-[1460px] flex flex-col justify-between rounded-xl p-5 sm:p-7 shadow-xs print:shadow-none ${activeTemplate.pageFrameClass}`}
       >
-        <div className="space-y-4">
+        {renderPageWatermark()}
+        <div className="space-y-4 relative z-10">
           {/* Header Banner */}
           <div className="p-4 rounded-2xl bg-gradient-to-r from-[#0b192c] via-[#0f2942] to-[#1e293b] text-white border-2 border-sky-500/40 shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/80 pb-3">
@@ -4951,17 +4961,27 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       {/* Top Studio Control Bar (Clean, Grouped & Uncluttered - Sticky & Pinned) */}
       <div
         ref={headerMenuContainerRef}
-        className="bg-white/95 dark:bg-[#111c2e]/95 backdrop-blur-md rounded-2xl border border-slate-200 dark:border-slate-800 p-3.5 sm:p-4 shadow-sm print:hidden sticky top-0 z-30"
+        className={`bg-white/95 dark:bg-[#111c2e]/95 backdrop-blur-md rounded-2xl border border-slate-200 dark:border-slate-800 p-3 sm:p-4 shadow-sm print:hidden relative transition-all ${
+          openHeaderMenu ? 'z-[9990]' : 'z-20'
+        }`}
       >
+        {/* Click-away backdrop overlay to close any open dropdown smoothly */}
+        {openHeaderMenu && (
+          <div
+            className="fixed inset-0 z-[9990] bg-black/5 dark:bg-black/20 cursor-default"
+            onClick={() => setOpenHeaderMenu(null)}
+          />
+        )}
+
         {/* ROW 1: Brand Title + Primary Workspace Mode Tabs + Grouped PDF/Print Menu */}
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
           {/* Left: Brand & Active School Summary (Dynamic: Integration Company Identity vs SportsFly LAB Default) */}
           {isIntegrationEntry && activeCompanyProfile ? (
             <div className="flex items-center gap-3 min-w-0">
               <div
-                onClick={() => setActiveLabTab('company-profile')}
-                className="w-11 h-11 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 p-1 shadow-xs cursor-pointer hover:border-indigo-400 transition-colors overflow-hidden group"
-                title="Firma Profilini Görüntüle"
+                onClick={() => setActiveLabTab(activeLabTab === 'company-profile' ? 'studio' : 'company-profile')}
+                className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 p-1 shadow-xs cursor-pointer hover:border-indigo-400 transition-colors overflow-hidden group"
+                title="Firma Profilini Görüntüle / Kapat"
               >
                 {activeCompanyProfile.logoDataUrl ? (
                   <img
@@ -4970,9 +4990,9 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                     className="w-full h-full object-contain"
                   />
                 ) : activeCompanyProfile.companyType === 'spor_kulubu' ? (
-                  <Trophy className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                  <Trophy className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600 dark:text-emerald-400" />
                 ) : (
-                  <Activity className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+                  <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-600 dark:text-indigo-400" />
                 )}
               </div>
               <div className="min-w-0">
@@ -4996,55 +5016,49 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       : 'Analiz Firması'}
                   </span>
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  <span className="text-slate-600 dark:text-slate-300 font-semibold truncate max-w-[200px]">
-                    SportsFly LAB Altyapısı
+                <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  <span className="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800/60">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Doğrulanmış Entegrasyon
                   </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="font-mono text-blue-600 dark:text-blue-400 font-bold">
-                    Geçiş Kodu: {activeCompanyProfile.accessCode}
+                  <span className="text-slate-300 dark:text-slate-600 hidden sm:inline">·</span>
+                  <span className="text-slate-500 dark:text-slate-400 hidden sm:inline font-medium">
+                    SportsFly LAB Performans Altyapısı
                   </span>
-                  <span aria-hidden="true">·</span>
-                  <button
-                    type="button"
-                    onClick={() => setActiveLabTab('company-profile')}
-                    className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <Building2 className="w-3 h-3" />
-                    <span>Firma Profilini Gör</span>
-                  </button>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 shadow-xs">
-                <SportsFlyVectorMark className="w-7 h-7" />
-              </div>
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <SportsFlyVectorMark className="w-9 h-9 sm:w-10 sm:h-10 shrink-0" />
               <div className="min-w-0">
                 <h1 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white tracking-tight leading-snug truncate">
                   SportsFly Lab — Atletik Performans &amp; Beden Kompozisyonu Karnesi
                 </h1>
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  <span className="font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[220px] sm:max-w-xs">
+                  <span className="font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[180px] sm:max-w-xs">
                     {effectiveClubName}
                   </span>
                   <span aria-hidden="true">·</span>
-                  <span className="truncate max-w-[160px]">{effectiveBranchName}</span>
-                  <span aria-hidden="true">·</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowBrandingSettings((prev) => !prev)}
-                    className="text-sky-600 dark:text-sky-400 hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <span>{showBrandingSettings ? 'Okul Ayarlarını Gizle' : 'Okul & Logo Ayarları'}</span>
-                  </button>
+                  <span className="truncate max-w-[140px] sm:max-w-[160px]">{effectiveBranchName}</span>
+                  {isSuperAdmin && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowBrandingSettings((prev) => !prev)}
+                        className="text-sky-600 dark:text-sky-400 hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>{showBrandingSettings ? 'Okul Ayarlarını Gizle' : 'Okul & Logo Ayarları'}</span>
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
           )}
 
-          {/* Right: Workspace Mode Tabs + Primary PDF Download & Output Dropdown */}
+          {/* Right: Workspace Mode Tabs + Primary Action Buttons + Logout */}
           <div className="flex flex-wrap items-center justify-between xl:justify-end gap-2 shrink-0">
             {/* Primary Module Section Tabs */}
             <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/90 rounded-xl border border-slate-200/80 dark:border-slate-700 overflow-x-auto scrollbar-none max-w-full">
@@ -5061,74 +5075,80 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 <span>Karne Görünümü</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setActiveLabTab('batch')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-                  activeLabTab === 'batch'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-                title="Excel'den toplu sporcu verisi yükleyerek toplu karne ve toplu PDF oluşturun"
-              >
-                <Users className="w-3.5 h-3.5 text-violet-600 shrink-0" />
-                <span>Toplu Karne</span>
-                <span className="text-[11px] font-sans tabular-nums tabular-nums text-slate-500 dark:text-slate-400">
-                  ({batchReports.length})
-                </span>
-              </button>
+              {(isSuperAdmin || batchReports.length > 0) && (
+                <button
+                  type="button"
+                  onClick={() => setActiveLabTab('batch')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                    activeLabTab === 'batch'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="Excel'den toplu sporcu verisi yükleyerek toplu karne ve toplu PDF oluşturun"
+                >
+                  <Users className="w-3.5 h-3.5 text-violet-600 shrink-0" />
+                  <span>Toplu Karne</span>
+                  <span className="text-[11px] font-sans tabular-nums text-slate-500 dark:text-slate-400">
+                    ({batchReports.length})
+                  </span>
+                </button>
+              )}
 
-              <button
-                type="button"
-                onClick={() => setActiveLabTab('archive')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-                  activeLabTab === 'archive'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-                title="İsimlendirilerek kaydedilmiş tüm sporcu karnelerini görüntüleyin"
-              >
-                <Archive className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <span>Arşiv</span>
-                <span className="text-[11px] font-sans tabular-nums tabular-nums text-slate-500 dark:text-slate-400">
-                  ({archivedReports.length})
-                </span>
-              </button>
+              {/* Arşiv Sekmesi (Yalnızca Süper Admin veya kayıtlı arşiv raporları varsa) */}
+              {(isSuperAdmin || (!isIntegrationEntry && archivedReports.length > 0)) && (
+                <button
+                  type="button"
+                  onClick={() => setActiveLabTab('archive')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                    activeLabTab === 'archive'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="İsimlendirilerek kaydedilmiş tüm sporcu karnelerini görüntüleyin"
+                >
+                  <Archive className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>Arşiv</span>
+                  <span className="text-[11px] font-sans tabular-nums text-slate-500 dark:text-slate-400">
+                    ({archivedReports.length})
+                  </span>
+                </button>
+              )}
 
-              {/* FİRMA PROFİLİ BUTONU - ENTEGRASYONDA VE LAB'DA HER ZAMAN ERİŞİLEBİLİR */}
+              {/* FİRMA PROFİLİ BUTONU */}
               {activeCompanyProfile && (
                 <button
                   type="button"
-                  onClick={() => setActiveLabTab('company-profile')}
+                  onClick={() => setActiveLabTab(activeLabTab === 'company-profile' ? 'studio' : 'company-profile')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
                     activeLabTab === 'company-profile'
                       ? 'bg-indigo-600 text-white shadow-2xs'
                       : 'text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
                   }`}
-                  title="Firma & Kulüp Entegrasyon Profilinizi İnceleyin"
+                  title={activeLabTab === 'company-profile' ? 'Karnelere Geri Dön' : 'Firma & Kulüp Profilinizi İnceleyin'}
                 >
-                  <Building2 className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 shrink-0" />
-                  <span>Firma Profili</span>
+                  <Building2 className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-300 shrink-0" />
+                  <span>{activeLabTab === 'company-profile' ? 'Karnelere Dön' : 'Firma Profili'}</span>
                 </button>
               )}
             </div>
 
-            {/* Primary Action Buttons: PDF Preview + A4 Print + Download PDF */}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* Primary Action Buttons: PDF Preview + A4 Print + Download PDF + Logout */}
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onClick={handleTogglePdfPreview}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer whitespace-nowrap ${
+                className={`px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer whitespace-nowrap ${
                   isPdfPreviewMode
                     ? 'bg-rose-600 hover:bg-rose-700 text-white ring-2 ring-rose-400/40'
                     : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100'
                 }`}
                 title="Sporcu karnesini web üzerinde gerçek A4 baskı formatında inceleyin"
               >
-                <Eye className={`w-4 h-4 ${isPdfPreviewMode ? 'text-white' : 'text-rose-600'} shrink-0`} />
-                <span>{isPdfPreviewMode ? 'PDF Görünümünü Kapat' : 'PDF Olarak Görüntüle'}</span>
+                <Eye className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${isPdfPreviewMode ? 'text-white' : 'text-rose-600'} shrink-0`} />
+                <span className="hidden sm:inline">{isPdfPreviewMode ? 'PDF Görünümünü Kapat' : 'PDF Olarak Görüntüle'}</span>
+                <span className="sm:hidden">{isPdfPreviewMode ? 'PDF Kapat' : 'PDF'}</span>
                 {isPdfPreviewMode && (
-                  <span className="px-1.5 py-0.5 rounded text-[9px] font-sans tabular-nums font-black bg-white/20 text-white">
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-sans tabular-nums font-black bg-white/20 text-white hidden sm:inline">
                     Açık
                   </span>
                 )}
@@ -5137,38 +5157,57 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               <button
                 type="button"
                 onClick={handlePrintA4}
-                className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer whitespace-nowrap"
+                className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer whitespace-nowrap"
                 title="A4 formatında yazdırın veya tarayıcıdan PDF olarak kaydedin"
               >
-                <Printer className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>A4 Yazdır</span>
+                <Printer className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 shrink-0" />
+                <span className="hidden sm:inline">A4 Yazdır</span>
+                <span className="sm:hidden">Yazdır</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleDownloadPDF}
                 disabled={isGeneratingPDF}
-                className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white text-xs font-extrabold flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap shadow-xs"
+                className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white text-xs font-extrabold flex items-center gap-1.5 sm:gap-2 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap shadow-xs"
                 title="5 sayfalık sporcu karnesinin tamamını yüksek çözünürlüklü A4 PDF olarak indirin"
               >
                 {isGeneratingPDF ? (
-                  <div className="w-4 h-4 border-2 border-slate-400 border-t-white rounded-full animate-spin shrink-0" />
+                  <div className="w-3.5 h-3.5 sm:w-4 sm:h-4 border-2 border-slate-400 border-t-white rounded-full animate-spin shrink-0" />
                 ) : (
-                  <FileDown className="w-4 h-4 text-sky-400 dark:text-white shrink-0" />
+                  <FileDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400 dark:text-white shrink-0" />
                 )}
                 <span>
                   {isGeneratingPDF
                     ? `İndiriliyor (${pdfProgressPage || 1}/5)...`
-                    : 'Tüm Karneyi İndir'}
+                    : (
+                      <>
+                        <span className="hidden sm:inline">Tüm Karneyi İndir</span>
+                        <span className="sm:hidden">İndir</span>
+                      </>
+                    )}
                 </span>
               </button>
+
+              {/* Entegrasyon Oturumundan Çıkış Yap Butonu (SportsFly Lab Başlığına Entegre) */}
+              {isIntegrationEntry && onLogout && (
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-2xs border border-red-200/60 dark:border-red-900/40"
+                  title="Entegrasyon Oturumunu Kapat"
+                >
+                  <LogOut className="w-3.5 h-3.5 shrink-0" />
+                  <span className="hidden sm:inline">Çıkış Yap</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
 
-        {/* ROW 2: Athlete Selector + Grouped Dropdown Menus (Left) & Compact Page Bar (Right) */}
+        {/* ROW 2: Athlete Selector + Action Dropdowns (Süper Admin hariç sadeleştirilmiş ve mobilde minimal) */}
         <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800/80 flex flex-col xl:flex-row xl:items-center justify-between gap-2.5">
-          {/* Left: Active Athlete Selector + 3 Grouped Action Dropdowns */}
+          {/* Left: Active Athlete Selector + Action Dropdowns */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Athlete Selector */}
             <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 min-w-0 max-w-full">
@@ -5179,7 +5218,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               <select
                 value={selectedReportId}
                 onChange={(e) => setSelectedReportId(e.target.value)}
-                className="min-w-0 max-w-[220px] sm:max-w-[260px] bg-transparent text-xs font-extrabold text-slate-900 dark:text-white focus:outline-none truncate cursor-pointer"
+                className="min-w-0 max-w-[150px] xs:max-w-[190px] sm:max-w-[260px] bg-transparent text-xs font-extrabold text-slate-900 dark:text-white focus:outline-none truncate cursor-pointer"
               >
                 {reports.map((rep) => (
                   <option key={rep.id} value={rep.id}>
@@ -5189,132 +5228,133 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               </select>
             </div>
 
-            {/* Karne Formatı (Tek Birleşik Karne) */}
+            {/* DROPDOWN 1: Excel & Veri İşlemleri - Yalnızca Süper Admin için görünür */}
+            {isSuperAdmin && (
+              <div className={`relative ${openHeaderMenu === 'excel' ? 'z-[9995]' : ''}`}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenHeaderMenu((prev) => (prev === 'excel' ? null : 'excel'))
+                  }
+                  className={`px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                    openHeaderMenu === 'excel'
+                      ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200'
+                      : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
+                  }`}
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="hidden sm:inline">Excel &amp; Veri İşlemleri</span>
+                  <span className="sm:hidden">Excel</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                </button>
 
-            {/* DROPDOWN 1: Excel & Veri İşlemleri (Grouped Vertically) */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() =>
-                  setOpenHeaderMenu((prev) => (prev === 'excel' ? null : 'excel'))
-                }
-                className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                  openHeaderMenu === 'excel'
-                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200'
-                    : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
-                }`}
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>Excel &amp; Veri İşlemleri</span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              </button>
+                {openHeaderMenu === 'excel' && (
+                  <div className="absolute left-0 top-full mt-1.5 w-[min(20rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Excel Yükleme &amp; Şablon İşlemleri
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenHeaderMenu(null);
+                        fileInputRef.current?.click();
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                    >
+                      <Upload className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <div>
+                        <div>Excel Verisi Yükle (.xlsx / .csv)</div>
+                        <div className="text-[10px] font-normal text-slate-500">
+                          Mevcut karne içeriğine uygun parametre veya çoklu sporcu dosyası yükle
+                        </div>
+                      </div>
+                    </button>
 
-              {openHeaderMenu === 'excel' && (
-                <div className="absolute left-0 top-full mt-1.5 w-80 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 z-40 space-y-1">
-                  <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Excel Yükleme &amp; Şablon İşlemleri
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenHeaderMenu(null);
+                        setActiveLabTab('batch');
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                    >
+                      <Users className="w-4 h-4 text-violet-600 shrink-0" />
+                      <div>
+                        <div>Toplu Karne Oluşturma Alanı</div>
+                        <div className="text-[10px] font-normal text-slate-500">
+                          Çoklu sporcu tablosu, sütun eşleştirme ve toplu PDF üretimi
+                        </div>
+                      </div>
+                    </button>
+
+                    <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenHeaderMenu(null);
+                        downloadSportsFlyLabExcelTemplate(currentReport);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                    >
+                      <Download className="w-4 h-4 text-sky-600 shrink-0" />
+                      <div>
+                        <div>Örnek Excel Şablonu İndir (.xlsx)</div>
+                        <div className="text-[10px] font-normal text-slate-500">
+                          Mevcut karne parametreleri + Toplu sporcu listesi (3 Sayfa)
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenHeaderMenu(null);
+                        downloadBatchSportsFlyLabExcelTemplate(currentReport);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <div>
+                        <div>Toplu Sporcu Excel Şablonu İndir (.xlsx)</div>
+                        <div className="text-[10px] font-normal text-slate-500">
+                          Her satırda 1 sporcunun tüm karne verileri (Çoklu liste)
+                        </div>
+                      </div>
+                    </button>
+
+                    <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenHeaderMenu(null);
+                        setActiveLabTab('batch');
+                        handleLoadSampleBatchData();
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className="w-4 h-4 text-violet-600 shrink-0" />
+                      <div>
+                        <div>Örnek Sporcu Veri Seti Yükle (6 Sporcu)</div>
+                        <div className="text-[10px] font-normal text-slate-500">
+                          Farklı branşlardan hazır karne verileri ile hemen test et
+                        </div>
+                      </div>
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenHeaderMenu(null);
-                      fileInputRef.current?.click();
-                    }}
-                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Upload className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <div>
-                      <div>Excel Verisi Yükle (.xlsx / .csv)</div>
-                      <div className="text-[10px] font-normal text-slate-500">
-                        Mevcut karne içeriğine uygun parametre veya çoklu sporcu dosyası yükle
-                      </div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenHeaderMenu(null);
-                      setActiveLabTab('batch');
-                    }}
-                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Users className="w-4 h-4 text-violet-600 shrink-0" />
-                    <div>
-                      <div>Toplu Karne Oluşturma Alanı</div>
-                      <div className="text-[10px] font-normal text-slate-500">
-                        Çoklu sporcu tablosu, sütun eşleştirme ve toplu PDF üretimi
-                      </div>
-                    </div>
-                  </button>
-
-                  <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenHeaderMenu(null);
-                      downloadSportsFlyLabExcelTemplate(currentReport);
-                    }}
-                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Download className="w-4 h-4 text-sky-600 shrink-0" />
-                    <div>
-                      <div>Örnek Excel Şablonu İndir (.xlsx)</div>
-                      <div className="text-[10px] font-normal text-slate-500">
-                        Mevcut karne parametreleri + Toplu sporcu listesi (3 Sayfa)
-                      </div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenHeaderMenu(null);
-                      downloadBatchSportsFlyLabExcelTemplate(currentReport);
-                    }}
-                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <div>
-                      <div>Toplu Sporcu Excel Şablonu İndir (.xlsx)</div>
-                      <div className="text-[10px] font-normal text-slate-500">
-                        Her satırda 1 sporcunun tüm karne verileri (Çoklu liste)
-                      </div>
-                    </div>
-                  </button>
-
-                  <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenHeaderMenu(null);
-                      setActiveLabTab('batch');
-                      handleLoadSampleBatchData();
-                    }}
-                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <RefreshCw className="w-4 h-4 text-violet-600 shrink-0" />
-                    <div>
-                      <div>Örnek Sporcu Veri Seti Yükle (6 Sporcu)</div>
-                      <div className="text-[10px] font-normal text-slate-500">
-                        Farklı branşlardan hazır karne verileri ile hemen test et
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {/* DROPDOWN 2: Karne İşlemleri (Yeni Karne, Düzenle, Arşive Kaydet) */}
-            <div className="relative">
+            <div className={`relative ${openHeaderMenu === 'karne' ? 'z-[9995]' : ''}`}>
               <button
                 type="button"
                 onClick={() =>
                   setOpenHeaderMenu((prev) => (prev === 'karne' ? null : 'karne'))
                 }
-                className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                className={`px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
                   openHeaderMenu === 'karne'
                     ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/50 text-sky-900 dark:text-sky-200'
                     : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
@@ -5326,7 +5366,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               </button>
 
               {openHeaderMenu === 'karne' && (
-                <div className="absolute left-0 top-full mt-1.5 w-64 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 z-40 space-y-1">
+                <div className="absolute left-0 top-full mt-1.5 w-[min(18rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
                   <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                     Sporcu &amp; Karne Yönetimi
                   </div>
@@ -5384,226 +5424,232 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               )}
             </div>
 
-            {/* DROPDOWN 3: Karne Tasarım Şablonu Seçici (3 Modern Profesyonel PDF Şablonu) */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() =>
-                  setOpenHeaderMenu((prev) => (prev === 'templates' ? null : 'templates'))
-                }
-                className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                  openHeaderMenu === 'templates'
-                    ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200'
-                    : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
-                }`}
-              >
-                <FileText className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <span>PDF Şablonu: {activeTemplate.name}</span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              </button>
+            {/* DROPDOWN 3: Karne Tasarım Şablonu Seçici - Yalnızca Süper Admin için görünür */}
+            {isSuperAdmin && (
+              <div className={`relative ${openHeaderMenu === 'templates' ? 'z-[9995]' : ''}`}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenHeaderMenu((prev) => (prev === 'templates' ? null : 'templates'))
+                  }
+                  className={`px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                    openHeaderMenu === 'templates'
+                      ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200'
+                      : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span className="hidden sm:inline">PDF Şablonu: {activeTemplate.name}</span>
+                  <span className="sm:hidden">Şablon</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                </button>
 
-              {openHeaderMenu === 'templates' && (
-                <div className="absolute left-0 top-full mt-1.5 w-80 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 z-40 space-y-1">
-                  <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    3 Profesyonel PDF Karne Şablonu (Tam A4)
-                  </div>
-                  {KARNE_TEMPLATES.map((tpl) => {
-                    const isSelected = tpl.id === karneTemplate;
-                    return (
-                      <button
-                        key={tpl.id}
-                        type="button"
-                        onClick={() => {
-                          handleSelectKarneTemplate(tpl.id);
-                          setOpenHeaderMenu(null);
-                          notify(`Karne PDF şablonu "${tpl.name}" olarak güncellendi.`);
-                        }}
-                        className={`w-full px-3 py-2 rounded-lg text-left text-xs font-bold flex items-start justify-between gap-2 transition-colors cursor-pointer ${
-                          isSelected
-                            ? 'bg-slate-900 text-white dark:bg-slate-800'
-                            : 'text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
-                        }`}
-                      >
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span>{tpl.shortName}</span>
-                          </div>
-                          <div
-                            className={`text-[10px] font-normal mt-0.5 ${
-                              isSelected ? 'text-slate-300' : 'text-slate-500'
-                            }`}
-                          >
-                            {tpl.subtitle}
-                          </div>
-                        </div>
-                        {isSelected && (
-                          <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                        )}
-                      </button>
-                    );
-                  })}
-
-                  <div className="pt-1.5 mt-1 border-t border-slate-200 dark:border-slate-800 px-2 py-1.5 flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                      Anatomik Vücut Haritası (B)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowBodyMapInfographic((prev) => !prev);
-                        notify(
-                          !showBodyMapInfographic
-                            ? 'Sayfa 1 Anatomik Vücut Haritası İnfografiği aktif edildi.'
-                            : 'Anatomik Vücut Haritası gizlendi.'
-                        );
-                      }}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-sans tabular-nums font-bold cursor-pointer ${
-                        showBodyMapInfographic
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      {showBodyMapInfographic ? 'AÇIK' : 'KAPALI'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* DROPDOWN 3.5 (C): Dinamik Kulüp Renk Paleti Seçici */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() =>
-                  setOpenHeaderMenu((prev) => (prev === 'clubColors' ? null : 'clubColors'))
-                }
-                className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                  openHeaderMenu === 'clubColors'
-                    ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/50 text-sky-900 dark:text-sky-200'
-                    : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
-                }`}
-              >
-                <span className="flex items-center -space-x-1 shrink-0">
-                  <span
-                    className="w-3.5 h-3.5 rounded-full border border-white shadow-2xs inline-block"
-                    style={{ backgroundColor: effectivePrimaryHex }}
-                  />
-                  <span
-                    className="w-3.5 h-3.5 rounded-full border border-white shadow-2xs inline-block"
-                    style={{ backgroundColor: effectiveSecondaryHex }}
-                  />
-                </span>
-                <span>Kulüp Rengi: {activePaletteObj.shortName}</span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              </button>
-
-              {openHeaderMenu === 'clubColors' && (
-                <div className="absolute left-0 top-full mt-1.5 w-80 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-2 z-40 space-y-1">
-                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Dinamik Kulüp Renk Paleti (C)
-                  </div>
-                  {CLUB_COLOR_PALETTES.map((pal) => {
-                    const isSelected = pal.id === clubColorPalette;
-                    const pHex =
-                      pal.id === 'custom'
-                        ? customPrimaryHex
-                        : pal.id === 'template-default'
-                          ? activeTemplate.defaultPrimaryHex
-                          : pal.primaryHex;
-                    const sHex =
-                      pal.id === 'custom'
-                        ? customSecondaryHex
-                        : pal.id === 'template-default'
-                          ? activeTemplate.defaultSecondaryHex
-                          : pal.secondaryHex;
-
-                    return (
-                      <button
-                        key={pal.id}
-                        type="button"
-                        onClick={() => {
-                          handleSelectClubColorPalette(pal.id);
-                          if (pal.id !== 'custom') {
-                            setOpenHeaderMenu(null);
-                          }
-                          notify(`Kulüp renk teması "${pal.name}" olarak uygulandı.`);
-                        }}
-                        className={`w-full px-2.5 py-2 rounded-lg text-left text-xs font-bold flex items-center justify-between gap-2 transition-colors cursor-pointer ${
-                          isSelected
-                            ? 'bg-slate-900 text-white dark:bg-slate-800'
-                            : 'text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <span className="flex items-center -space-x-1 shrink-0">
-                            <span
-                              className="w-4 h-4 rounded-full border border-white shadow-2xs inline-block"
-                              style={{ backgroundColor: pHex }}
-                            />
-                            <span
-                              className="w-4 h-4 rounded-full border border-white shadow-2xs inline-block"
-                              style={{ backgroundColor: sHex }}
-                            />
-                          </span>
-                          <span>{pal.name}</span>
-                        </div>
-                        {isSelected && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
-                      </button>
-                    );
-                  })}
-
-                  {clubColorPalette === 'custom' && (
-                    <div className="pt-2 mt-1 border-t border-slate-200 dark:border-slate-800 px-2 py-1.5 grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 mb-1">
-                          Ana Kulüp Rengi
-                        </label>
-                        <input
-                          type="color"
-                          value={customPrimaryHex}
-                          onChange={(e) => {
-                            setCustomPrimaryHex(e.target.value);
-                            try {
-                              localStorage.setItem('sportsfly_lab_custom_primary_hex', e.target.value);
-                            } catch {
-                              // ignore
-                            }
-                          }}
-                          className="w-full h-8 rounded cursor-pointer border border-slate-300"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 mb-1">
-                          Vurgu Rengi
-                        </label>
-                        <input
-                          type="color"
-                          value={customSecondaryHex}
-                          onChange={(e) => {
-                            setCustomSecondaryHex(e.target.value);
-                            try {
-                              localStorage.setItem('sportsfly_lab_custom_secondary_hex', e.target.value);
-                            } catch {
-                              // ignore
-                            }
-                          }}
-                          className="w-full h-8 rounded cursor-pointer border border-slate-300"
-                        />
-                      </div>
+                {openHeaderMenu === 'templates' && (
+                  <div className="absolute left-0 top-full mt-1.5 w-[min(20rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      3 Profesyonel PDF Karne Şablonu (Tam A4)
                     </div>
-                  )}
-                </div>
-              )}
-            </div>
+                    {KARNE_TEMPLATES.map((tpl) => {
+                      const isSelected = tpl.id === karneTemplate;
+                      return (
+                        <button
+                          key={tpl.id}
+                          type="button"
+                          onClick={() => {
+                            handleSelectKarneTemplate(tpl.id);
+                            setOpenHeaderMenu(null);
+                            notify(`Karne PDF şablonu "${tpl.name}" olarak güncellendi.`);
+                          }}
+                          className={`w-full px-3 py-2 rounded-lg text-left text-xs font-bold flex items-start justify-between gap-2 transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-slate-900 text-white dark:bg-slate-800'
+                              : 'text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span>{tpl.shortName}</span>
+                            </div>
+                            <div
+                              className={`text-[10px] font-normal mt-0.5 ${
+                                isSelected ? 'text-slate-300' : 'text-slate-500'
+                              }`}
+                            >
+                              {tpl.subtitle}
+                            </div>
+                          </div>
+                          {isSelected && (
+                            <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          )}
+                        </button>
+                      );
+                    })}
 
-            {/* DROPDOWN 4: Görünüm, Analiz & Okul Ayarları */}
-            <div className="relative">
+                    <div className="pt-1.5 mt-1 border-t border-slate-200 dark:border-slate-800 px-2 py-1.5 flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                        Anatomik Vücut Haritası (B)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowBodyMapInfographic((prev) => !prev);
+                          notify(
+                            !showBodyMapInfographic
+                              ? 'Sayfa 1 Anatomik Vücut Haritası İnfografiği aktif edildi.'
+                              : 'Anatomik Vücut Haritası gizlendi.'
+                          );
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-sans tabular-nums font-bold cursor-pointer ${
+                          showBodyMapInfographic
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        {showBodyMapInfographic ? 'AÇIK' : 'KAPALI'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* DROPDOWN 3.5 (C): Dinamik Kulüp Renk Paleti Seçici - Yalnızca Süper Admin için görünür */}
+            {isSuperAdmin && (
+              <div className={`relative ${openHeaderMenu === 'clubColors' ? 'z-[9995]' : ''}`}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenHeaderMenu((prev) => (prev === 'clubColors' ? null : 'clubColors'))
+                  }
+                  className={`px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                    openHeaderMenu === 'clubColors'
+                      ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/50 text-sky-900 dark:text-sky-200'
+                      : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
+                  }`}
+                >
+                  <span className="flex items-center -space-x-1 shrink-0">
+                    <span
+                      className="w-3.5 h-3.5 rounded-full border border-white shadow-2xs inline-block"
+                      style={{ backgroundColor: effectivePrimaryHex }}
+                    />
+                    <span
+                      className="w-3.5 h-3.5 rounded-full border border-white shadow-2xs inline-block"
+                      style={{ backgroundColor: effectiveSecondaryHex }}
+                    />
+                  </span>
+                  <span className="hidden sm:inline">Kulüp Rengi: {activePaletteObj.shortName}</span>
+                  <span className="sm:hidden">Renk</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                </button>
+
+                {openHeaderMenu === 'clubColors' && (
+                  <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-1.5 w-[min(20rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-2 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Dinamik Kulüp Renk Paleti (C)
+                    </div>
+                    {CLUB_COLOR_PALETTES.map((pal) => {
+                      const isSelected = pal.id === clubColorPalette;
+                      const pHex =
+                        pal.id === 'custom'
+                          ? customPrimaryHex
+                          : pal.id === 'template-default'
+                            ? activeTemplate.defaultPrimaryHex
+                            : pal.primaryHex;
+                      const sHex =
+                        pal.id === 'custom'
+                          ? customSecondaryHex
+                          : pal.id === 'template-default'
+                            ? activeTemplate.defaultSecondaryHex
+                            : pal.secondaryHex;
+
+                      return (
+                        <button
+                          key={pal.id}
+                          type="button"
+                          onClick={() => {
+                            handleSelectClubColorPalette(pal.id);
+                            if (pal.id !== 'custom') {
+                              setOpenHeaderMenu(null);
+                            }
+                            notify(`Kulüp renk teması "${pal.name}" olarak uygulandı.`);
+                          }}
+                          className={`w-full px-2.5 py-2 rounded-lg text-left text-xs font-bold flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-slate-900 text-white dark:bg-slate-800'
+                              : 'text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="flex items-center -space-x-1 shrink-0">
+                              <span
+                                className="w-4 h-4 rounded-full border border-white shadow-2xs inline-block"
+                                style={{ backgroundColor: pHex }}
+                              />
+                              <span
+                                className="w-4 h-4 rounded-full border border-white shadow-2xs inline-block"
+                                style={{ backgroundColor: sHex }}
+                              />
+                            </span>
+                            <span>{pal.name}</span>
+                          </div>
+                          {isSelected && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
+                        </button>
+                      );
+                    })}
+
+                    {clubColorPalette === 'custom' && (
+                      <div className="pt-2 mt-1 border-t border-slate-200 dark:border-slate-800 px-2 py-1.5 grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                            Ana Kulüp Rengi
+                          </label>
+                          <input
+                            type="color"
+                            value={customPrimaryHex}
+                            onChange={(e) => {
+                              setCustomPrimaryHex(e.target.value);
+                              try {
+                                localStorage.setItem('sportsfly_lab_custom_primary_hex', e.target.value);
+                              } catch {
+                                // ignore
+                              }
+                            }}
+                            className="w-full h-8 rounded cursor-pointer border border-slate-300"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 mb-1">
+                            Vurgu Rengi
+                          </label>
+                          <input
+                            type="color"
+                            value={customSecondaryHex}
+                            onChange={(e) => {
+                              setCustomSecondaryHex(e.target.value);
+                              try {
+                                localStorage.setItem('sportsfly_lab_custom_secondary_hex', e.target.value);
+                              } catch {
+                                // ignore
+                              }
+                            }}
+                            className="w-full h-8 rounded cursor-pointer border border-slate-300"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* DROPDOWN 4: Görünüm, Analiz & Ayarlar (Her zaman net açılır, ekrandan taşmaz) */}
+            <div className={`relative ${openHeaderMenu === 'panels' ? 'z-[9995]' : ''}`}>
               <button
                 type="button"
                 onClick={() =>
                   setOpenHeaderMenu((prev) => (prev === 'panels' ? null : 'panels'))
                 }
-                className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                className={`px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
                   openHeaderMenu === 'panels' || showBrandingSettings
                     ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-900 dark:text-indigo-200'
                     : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
@@ -5615,31 +5661,34 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               </button>
 
               {openHeaderMenu === 'panels' && (
-                <div className="absolute left-0 sm:left-auto sm:right-0 xl:left-0 top-full mt-1.5 w-72 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 z-40 space-y-1">
+                <div className="absolute right-0 sm:left-0 sm:right-auto top-full mt-1.5 w-[min(20rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
                   <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Paneller &amp; Kurumsal Tasarım
+                    Gelişmiş Analiz &amp; Paneller
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenHeaderMenu(null);
-                      setShowBrandingSettings((prev) => !prev);
-                    }}
-                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between gap-2 transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Building2 className="w-4 h-4 text-sky-600 shrink-0" />
-                      <div>
-                        <div>Okul Adı, Logo &amp; Şablon Ayarları</div>
-                        <div className="text-[10px] font-normal text-slate-500">
-                          Kulüp başlığı, logo ve 4 karne tasarım şablonu
+
+                  {isSuperAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenHeaderMenu(null);
+                        setShowBrandingSettings((prev) => !prev);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Building2 className="w-4 h-4 text-sky-600 shrink-0" />
+                        <div>
+                          <div>Okul Adı, Logo &amp; Şablon Ayarları</div>
+                          <div className="text-[10px] font-normal text-slate-500">
+                            Kulüp başlığı, logo ve 4 karne tasarım şablonu
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <span className="text-[10px] font-sans tabular-nums text-slate-500">
-                      {showBrandingSettings ? 'Açık' : 'Kapalı'}
-                    </span>
-                  </button>
+                      <span className="text-[10px] font-sans tabular-nums text-slate-500">
+                        {showBrandingSettings ? 'Açık' : 'Kapalı'}
+                      </span>
+                    </button>
+                  )}
 
                   <button
                     type="button"
@@ -5707,13 +5756,14 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 setActiveLabTab('studio');
                 setViewMode('all');
               }}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                 activeLabTab === 'studio' && viewMode === 'all'
                   ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              {totalReportPages} Sayfa Tam Görünüm
+              <span className="hidden sm:inline">{totalReportPages} Sayfa Tam Görünüm</span>
+              <span className="sm:hidden">Tam Görünüm</span>
             </button>
             <button
               type="button"
@@ -5723,14 +5773,15 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 setActivePage(3);
               }}
               title="Endomorfi, Mezomorfi, Ektomorfi Somatotip Değişim Tablosuna Git"
-              className={`px-2.5 py-1 rounded-lg text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 ${
+              className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 ${
                 activeLabTab === 'studio' && viewMode === 'single' && activePage === 3
                   ? 'bg-indigo-600 text-white shadow-2xs'
                   : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800'
               }`}
             >
               <Sparkles className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-              <span>Somatotip Değişim Tablosu</span>
+              <span className="hidden sm:inline">Somatotip Değişim Tablosu</span>
+              <span className="sm:hidden">Somatotip</span>
             </button>
             {showBodyMapInfographic && (
               <button
@@ -5741,7 +5792,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   setActivePage(0);
                 }}
                 title="Tam Sayfa Anatomik Vücut Haritası & Bölgesel Antropometri İnfografiği"
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   activeLabTab === 'studio' && viewMode === 'single' && activePage === 0
                     ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-2xs'
                     : 'text-emerald-700 dark:text-emerald-400 hover:text-slate-900 dark:hover:text-white'
@@ -5760,7 +5811,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   setActivePage(p.page);
                 }}
                 title={p.full}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   activeLabTab === 'studio' && viewMode === 'single' && activePage === p.page
                     ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -5774,8 +5825,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
           </div>
         </div>
 
-        {/* COLLAPSIBLE DRAWER: Spor Okulu Adı, Logo & 4 Karne Şablonu Ayarları */}
-        {showBrandingSettings && (
+        {/* COLLAPSIBLE DRAWER: Spor Okulu Adı, Logo & 4 Karne Şablonu Ayarları - Sadece Süper Admin */}
+        {isSuperAdmin && showBrandingSettings && (
           <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
             <div className="bg-slate-50/90 dark:bg-slate-800/50 rounded-xl border border-slate-200/90 dark:border-slate-700/80 p-3 sm:p-3.5 space-y-3.5">
               <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3.5">
@@ -6119,7 +6170,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               </button>
 
               {/* Grouped Sample Data & Template Dropdown in Batch View */}
-              <div className="relative">
+              <div className={`relative ${openHeaderMenu === 'batchSamples' ? 'z-[9995]' : ''}`}>
                 <button
                   type="button"
                   onClick={() =>
@@ -6135,7 +6186,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 </button>
 
                 {openHeaderMenu === 'batchSamples' && (
-                  <div className="absolute right-0 top-full mt-1.5 w-80 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 z-40 space-y-1">
+                  <div className="absolute right-0 top-full mt-1.5 w-[min(20rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1">
                     <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       Excel Şablonları &amp; Test Verileri
                     </div>
@@ -7594,7 +7645,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
       {/* Report Card Pages Container (Wrapped with #sportsfly-lab-print-area for @media print A4 output) */}
       <div
-        className={`${
+        className={`relative z-0 ${
           (activeLabTab === 'archive' || activeLabTab === 'batch' || activeLabTab === 'company-profile') && !isGeneratingBatchPDF
             ? 'hidden print:block'
             : ''

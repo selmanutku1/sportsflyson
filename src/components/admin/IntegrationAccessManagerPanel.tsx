@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../../firebase';
-import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where } from 'firebase/firestore';
 import {
   Plus,
   Trash2,
@@ -51,6 +51,7 @@ export const IntegrationAccessManagerPanel: React.FC = () => {
   // UI state
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<{ item: CompanyIntegrationProfile; index: number } | null>(null);
   const logoFileInputRef = useRef<HTMLInputElement>(null);
 
   const showToast = (msg: string) => {
@@ -93,12 +94,12 @@ export const IntegrationAccessManagerPanel: React.FC = () => {
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('Lütfen geçerli bir görsel dosyası (PNG, JPG, SVG, WebP) seçiniz.');
+      showToast('Lütfen geçerli bir görsel dosyası (PNG, JPG, SVG, WebP) seçiniz.');
       return;
     }
 
     if (file.size > 2 * 1024 * 1024) {
-      alert('Logo görsel boyutu en fazla 2MB olmalıdır.');
+      showToast('Logo görsel boyutu en fazla 2MB olmalıdır.');
       return;
     }
 
@@ -130,7 +131,7 @@ export const IntegrationAccessManagerPanel: React.FC = () => {
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!companyName.trim() || !accessCode.trim()) {
-      alert('Lütfen Firma / Kulüp Adı ve Geçiş Kodunu eksiksiz giriniz.');
+      showToast('Lütfen Firma / Kulüp Adı ve Geçiş Kodunu eksiksiz giriniz.');
       return;
     }
 
@@ -199,18 +200,50 @@ export const IntegrationAccessManagerPanel: React.FC = () => {
     window.scrollTo({ top: 300, behavior: 'smooth' });
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!window.confirm(`"${name}" firma entegrasyon erişimini ve geçiş kodunu silmek istediğinizden emin misiniz?`)) {
-      return;
-    }
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmTarget) return;
+    const { item: intItem, index } = deleteConfirmTarget;
+    const name = intItem.companyName || 'Firma';
+
     try {
-      await deleteDoc(doc(db, 'integrations', id));
-    } catch (e) {}
-    const updated = integrations.filter((i) => i.id !== id);
+      if (intItem.id) {
+        await deleteDoc(doc(db, 'integrations', intItem.id));
+      }
+      if (intItem.accessCode) {
+        try {
+          const q = query(collection(db, 'integrations'), where('accessCode', '==', intItem.accessCode));
+          const snap = await getDocs(q);
+          snap.forEach(async (d) => {
+            try {
+              await deleteDoc(d.ref);
+            } catch (err) {}
+          });
+        } catch (err) {}
+      }
+    } catch (e) {
+      console.warn('Firestore delete error:', e);
+    }
+
+    const updated = integrations.filter((i, idx) => {
+      if (intItem.id && i.id) return i.id !== intItem.id;
+      if (intItem.accessCode && i.accessCode) {
+        return i.accessCode.trim().toUpperCase() !== intItem.accessCode.trim().toUpperCase();
+      }
+      return idx !== index;
+    });
+
     setIntegrations(updated);
-    localStorage.setItem('sportsfly_integration_access_list', JSON.stringify(updated));
-    showToast(`"${name}" erişim kaydı silindi.`);
-    if (editingId === id) resetForm();
+    try {
+      localStorage.setItem('sportsfly_integration_access_list', JSON.stringify(updated));
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new Event('sportsfly_integrations_updated'));
+    } catch (e) {}
+
+    showToast(`"${name}" (${intItem.accessCode}) erişim kaydı silindi.`);
+    if (editingId && (editingId === intItem.id || editingId === intItem.accessCode)) {
+      resetForm();
+    }
+    setDeleteConfirmTarget(null);
   };
 
   const handleCopyCode = (code: string) => {
@@ -599,11 +632,11 @@ export const IntegrationAccessManagerPanel: React.FC = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-            {integrations.map((int: CompanyIntegrationProfile) => {
+            {integrations.map((int: CompanyIntegrationProfile, index: number) => {
               const isLabActive = int.activeModules?.['int-sportsfly-lab'] ?? true;
               return (
                 <div
-                  key={int.id}
+                  key={int.id || int.accessCode || index}
                   className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/90 dark:border-slate-700/80 flex flex-col justify-between gap-3 hover:border-blue-300 dark:hover:border-blue-700 transition-colors shadow-2xs"
                 >
                   <div>
@@ -738,7 +771,7 @@ export const IntegrationAccessManagerPanel: React.FC = () => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleDelete(int.id!, int.companyName)}
+                        onClick={() => setDeleteConfirmTarget({ item: int, index })}
                         className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg cursor-pointer transition-colors"
                         title="Erişimi Sil"
                       >
@@ -752,6 +785,52 @@ export const IntegrationAccessManagerPanel: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Silme Onay Modalı (window.confirm yerine tam uyumlu in-app modal) */}
+      {deleteConfirmTarget && (
+        <div className="fixed inset-0 z-[99999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl max-w-sm w-full p-6 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto shadow-xs">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1.5">
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                Firma Erişimini Sil
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                <strong className="text-slate-900 dark:text-white">
+                  "{deleteConfirmTarget.item.companyName}"
+                </strong>{' '}
+                adlı firmanın geçiş kodunu (
+                <span className="font-mono font-bold text-blue-600 dark:text-blue-400">
+                  {deleteConfirmTarget.item.accessCode}
+                </span>
+                ) ve entegrasyon profilini silmek istediğinizden emin misiniz?
+              </p>
+              <p className="text-[11px] text-rose-500 font-semibold">
+                Bu işlem geri alınamaz.
+              </p>
+            </div>
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmTarget(null)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Evet, Sil</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

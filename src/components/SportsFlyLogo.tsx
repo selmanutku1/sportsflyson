@@ -79,11 +79,12 @@ interface SportsFlyLogoProps {
  */
 export const SportsFlyVectorMark: React.FC<{ className?: string }> = ({ className = 'w-7 h-7' }) => {
   const customLogo = useSportsFlyLogo();
+  
   return (
     <img
-      src={customLogo || "/sportsfly-logo.jpg"}
+      src={customLogo || "/sportsfly-logo.svg"}
       alt="SportsFly Logo"
-      className={`object-contain shrink-0 ${className}`}
+      className={`object-contain shrink-0 align-middle ${className}`}
     />
   );
 };
@@ -105,7 +106,7 @@ export const SportsFlyLogo: React.FC<SportsFlyLogoProps> = ({
         style={dimensionStyle}
       >
         <img
-          src={customLogo || "/sportsfly-logo.jpg"}
+          src={customLogo || "/sportsfly-logo.svg"}
           alt="SportsFly Logo"
           className="w-full h-full object-contain"
         />
@@ -122,9 +123,9 @@ export const SportsFlyLogo: React.FC<SportsFlyLogoProps> = ({
 export const SportsFlyIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => {
   const customLogo = useSportsFlyLogo();
   return (
-    <span className={`inline-flex items-center justify-center shrink-0 ${className}`}>
+    <span className={`inline-flex items-center justify-center shrink-0 align-middle ${className}`}>
       <img
-        src={customLogo || "/sportsfly-logo.jpg"}
+        src={customLogo || "/sportsfly-logo.svg"}
         alt="SportsFly Logo"
         className="w-full h-full object-contain"
       />

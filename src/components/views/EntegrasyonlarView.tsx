@@ -286,7 +286,7 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
   // Helper Icon Renderer
   const renderIcon = (name?: string, id?: string) => {
     if (id === 'int-sportsfly-lab') {
-      return <SportsFlyVectorMark className="w-7 h-7" />;
+      return <SportsFlyVectorMark className="w-10 h-10" />;
     }
     switch (name) {
       case 'Star':
@@ -349,8 +349,8 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
 
     return (
       <div className="space-y-3 sm:space-y-4 print:space-y-0">
-        {/* Responsive Entegrasyon Oturum Çubuğu (Geri Dön butonu kaldırıldı) */}
-        {onLogout && (
+        {/* Responsive Entegrasyon Oturum Çubuğu (SportsFly Lab kendi entegre başlığını kullandığı için çift başlık oluşmaz) */}
+        {onLogout && activeSubModule !== 'sportsfly-lab' && (
           <div className="bg-white dark:bg-[#111c2e] p-3 sm:px-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2.5 shadow-2xs print:hidden">
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
@@ -680,7 +680,7 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
                           <div
                             className={`w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform ${
                               isLab
-                                ? 'bg-slate-900 border border-slate-800 shadow-xs'
+                                ? ''
                                 : 'bg-slate-50 dark:bg-[#162238] border border-slate-100 dark:border-slate-800'
                             }`}
                           >

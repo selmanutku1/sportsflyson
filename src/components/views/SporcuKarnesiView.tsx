@@ -1730,7 +1730,7 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
                               <div className="flex items-center justify-between mb-3.5 flex-wrap gap-2">
                                 <div className="flex items-center gap-2">
                                   <div className="w-7 h-7 rounded-lg bg-blue-50 border border-blue-200/80 flex items-center justify-center text-blue-600">
-                                    <SportsFlyIcon className="w-4 h-4" />
+                                    <Compass className="w-4 h-4" />
                                   </div>
                                   <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                                     Kazanılan Rozetler
@@ -2228,7 +2228,7 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
             {/* Info / Status Banner */}
             <div className="mt-3.5 p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0">
               <div className="flex items-center gap-2">
-                <SportsFlyIcon className="w-4 h-4 shrink-0" />
+                <Compass className="w-4 h-4 shrink-0" />
                 <span className="text-xs text-slate-600">
                   Sporcunun örnek davranışlarını kurumsal rozetlerle ödüllendirebilir veya gerektiğinde geri alabilirsiniz.
                 </span>
@@ -2298,7 +2298,7 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
               <form onSubmit={handleAddCustomBadge} className="mt-3 p-4 rounded-xl bg-amber-50/50 border border-amber-200 shrink-0 space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    <SportsFlyIcon className="w-3.5 h-3.5" />
+                    <Compass className="w-3.5 h-3.5" />
                     Kulübe / Maça Özel Yeni Rozet Tanımla
                   </h4>
                   <button

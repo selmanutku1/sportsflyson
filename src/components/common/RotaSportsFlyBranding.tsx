@@ -28,7 +28,6 @@ export const RotaSportsFlyHeaderBadge: React.FC<RotaSportsFlyHeaderBadgeProps> =
   firmLogoUrl,
   firmName,
 }) => {
-  const effectiveFirmLogo = firmLogoUrl || ROTA_PERFORMANS_LOGO_DATA_URL;
   const effectiveFirmName = firmName || 'ROTA PERFORMANS';
 
   return (
@@ -45,8 +44,8 @@ export const RotaSportsFlyHeaderBadge: React.FC<RotaSportsFlyHeaderBadgeProps> =
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full overflow-hidden bg-white p-0.5 border border-cyan-400/60 shadow-xs flex items-center justify-center shrink-0">
               <img
-                src={effectiveFirmLogo}
-                alt={effectiveFirmName}
+                src="/rota-performans-logo.png"
+                alt="Rota Performans"
                 className="w-full h-full object-contain"
               />
             </div>
@@ -59,7 +58,7 @@ export const RotaSportsFlyHeaderBadge: React.FC<RotaSportsFlyHeaderBadgeProps> =
                 {effectiveFirmName.includes(' ') ? (
                   <>
                     {effectiveFirmName.split(' ')[0]}{' '}
-                    <span className="text-cyan-500">
+                    <span className="text-cyan-400">
                       {effectiveFirmName.split(' ').slice(1).join(' ')}
                     </span>
                   </>
@@ -82,7 +81,9 @@ export const RotaSportsFlyHeaderBadge: React.FC<RotaSportsFlyHeaderBadgeProps> =
           className="flex items-center gap-1.5 hover:opacity-80 transition-opacity cursor-pointer"
           title="SportsFly LAB"
         >
-          <SportsFlyVectorMark className="w-5 h-5 shrink-0" />
+          <div className="w-6 h-6 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0 shadow-2xs">
+            <img src="/sportsfly-logo.svg" alt="SportsFly" className="w-4 h-4 object-contain" />
+          </div>
           <div className="text-left">
             <div
               className={`text-[9.5px] font-sans font-extrabold uppercase tracking-wider leading-none ${
@@ -170,7 +171,7 @@ export const RotaSportsFlyFooterBadge: React.FC<RotaSportsFlyFooterBadgeProps> =
             title="SportsFly LAB"
           >
             <div className="w-6 h-6 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0 shadow-2xs">
-              <SportsFlyVectorMark className="w-4 h-4" />
+              <img src="/sportsfly-logo.svg" alt="SportsFly" className="w-4 h-4 object-contain" />
             </div>
             <div>
               <div className="flex items-center gap-1.5 leading-tight">
