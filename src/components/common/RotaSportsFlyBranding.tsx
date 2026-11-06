@@ -42,10 +42,10 @@ export const RotaSportsFlyHeaderBadge: React.FC<RotaSportsFlyHeaderBadgeProps> =
         <>
           {/* 1. Analiz Firması Logosu & İsmi */}
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full overflow-hidden bg-white p-0.5 border border-cyan-400/60 shadow-xs flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-white p-0.5 border border-sky-400/60 shadow-xs flex items-center justify-center shrink-0">
               <img
-                src="/rota-performans-logo.png"
-                alt="Rota Performans"
+                src={firmLogoUrl || ROTA_PERFORMANS_LOGO_DATA_URL}
+                alt={effectiveFirmName}
                 className="w-full h-full object-contain"
               />
             </div>
@@ -123,6 +123,8 @@ export interface RotaSportsFlyFooterBadgeProps {
   pageText?: string;
   hideRota?: boolean;
   hideSportsFly?: boolean;
+  firmLogoUrl?: string;
+  firmName?: string;
 }
 
 /**
@@ -136,6 +138,8 @@ export const RotaSportsFlyFooterBadge: React.FC<RotaSportsFlyFooterBadgeProps> =
   pageText,
   hideRota = false,
   hideSportsFly = false,
+  firmLogoUrl,
+  firmName,
 }) => {
   return (
     <div className="flex flex-col sm:flex-row print:flex-row sm:items-center print:items-center justify-between gap-2.5 bg-slate-50/95 px-3.5 py-2 rounded-xl border border-slate-200 text-left">
@@ -144,16 +148,28 @@ export const RotaSportsFlyFooterBadge: React.FC<RotaSportsFlyFooterBadgeProps> =
         {!hideRota && (
           /* Rota Performans */
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-full overflow-hidden bg-white p-0.5 border border-cyan-400 shadow-2xs shrink-0 flex items-center justify-center">
+            <div className="w-7 h-7 rounded-full overflow-hidden bg-white p-0.5 border border-sky-400 shadow-2xs shrink-0 flex items-center justify-center">
               <img
-                src="/rota-performans-logo.png"
-                alt="Rota Performans"
+                src={firmLogoUrl || ROTA_PERFORMANS_LOGO_DATA_URL}
+                alt={firmName || "Rota Performans"}
                 className="w-full h-full object-contain"
               />
             </div>
             <div>
               <div className="text-[12px] font-black tracking-tight text-slate-900 leading-tight">
-                ROTA <span className="text-cyan-600">PERFORMANS</span>
+                {firmName ? (
+                  firmName.includes(' ') ? (
+                    <>
+                      {firmName.split(' ')[0]} <span className="text-sky-600">{firmName.split(' ').slice(1).join(' ')}</span>
+                    </>
+                  ) : (
+                    firmName
+                  )
+                ) : (
+                  <>
+                    ROTA <span className="text-sky-600">PERFORMANS</span>
+                  </>
+                )}
               </div>
             </div>
           </div>

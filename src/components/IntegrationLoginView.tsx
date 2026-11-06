@@ -1,10 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { Package, KeyRound, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../firebase';
 import { getStoredIntegrations } from '../data/entegrasyonlarData';
 import { getStoredUserProfile } from '../data/userProfile';
 import { isSuperAdminUser } from '../data/packagePermissions';
 import { EntegrasyonItem } from '../types';
-import { getStoredLocalCompanyProfile, fetchCompanyProfileFromFirestore } from '../services/companyProfileService';
+import {
+  getStoredLocalCompanyProfile,
+  saveStoredLocalCompanyProfile,
+  fetchCompanyProfileFromFirestore,
+} from '../services/companyProfileService';
+import { SPORTSFLY_LOGO_DATA_URL } from '../assets/sportsFlyLogoDataUrl';
+import { ROTA_PERFORMANS_LOGO_DATA_URL } from '../assets/rotaPerformansLogoDataUrl';
 
 interface IntegrationLoginViewProps {
   onSuccess: () => void;
@@ -59,17 +67,47 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
       let matchedAny = false;
       let matchedCompanyEntry: any = null;
 
+      // 1. Direct Firestore Lookup for exact access code matching
+      const cleanInput = trimmedCode.toUpperCase();
+      try {
+        const q = query(
+          collection(db, 'integrations'),
+          where('accessCode', '==', cleanInput)
+        );
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          const docData = snap.docs[0].data() as any;
+          matchedCompanyEntry = {
+            id: snap.docs[0].id,
+            ...docData,
+            logoDataUrl: docData.logoDataUrl || (docData.companyName?.toLowerCase().includes('rota') ? ROTA_PERFORMANS_LOGO_DATA_URL : '')
+          };
+          matchedAny = true;
+          if (docData.accessCode) validCodes.push(docData.accessCode.toUpperCase());
+          if (docData.activeModules && trimmedId in docData.activeModules) {
+            if (docData.activeModules[trimmedId] === false) {
+              isAllowedForModule = false;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Direct Firestore query failed, falling back to local list:', err);
+      }
+
+      // 2. Fallback to localStorage access list
       try {
         const storedAccess = localStorage.getItem('sportsfly_integration_access_list');
         if (storedAccess) {
           const parsed = JSON.parse(storedAccess);
           if (Array.isArray(parsed) && parsed.length > 0) {
             parsed.forEach((entry: any) => {
-              const codeMatch = entry.accessCode && entry.accessCode.trim().toUpperCase() === trimmedCode.toUpperCase();
+              const codeMatch = entry.accessCode && entry.accessCode.trim().toUpperCase() === cleanInput;
               const companyMatch = entry.companyName && entry.companyName.trim().toLowerCase() === trimmedCode.toLowerCase();
               if (codeMatch || companyMatch) {
                 matchedAny = true;
-                matchedCompanyEntry = entry;
+                if (!matchedCompanyEntry) {
+                  matchedCompanyEntry = entry;
+                }
                 if (entry.accessCode) validCodes.push(entry.accessCode.toUpperCase());
                 if (entry.activeModules && trimmedId in entry.activeModules) {
                   if (entry.activeModules[trimmedId] === false) {
@@ -82,7 +120,6 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
         }
       } catch (e) {}
 
-      const cleanInput = trimmedCode.toUpperCase();
       const isMatch = isSuperAdmin || validCodes.includes(cleanInput) || cleanInput === '123456' || (selectedItem && cleanInput === selectedItem.name.toUpperCase()) || matchedAny;
 
       if (!isMatch) {
@@ -109,9 +146,17 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
       sessionStorage.setItem('sportsfly_integration_name', integrationName);
       sessionStorage.setItem('sportsfly_selected_integration_id', trimmedId);
 
-      const profileToSave = matchedCompanyEntry || getStoredLocalCompanyProfile();
-      sessionStorage.setItem('sportsfly_active_company_profile', JSON.stringify(profileToSave));
-      localStorage.setItem('sportsfly_active_company_profile', JSON.stringify(profileToSave));
+      let profileToSave = matchedCompanyEntry || getStoredLocalCompanyProfile();
+      if (!profileToSave.logoDataUrl && (profileToSave.companyName?.toLowerCase().includes('rota') || cleanInput.includes('GPT') || cleanInput.includes('LAB'))) {
+        profileToSave = { ...profileToSave, logoDataUrl: ROTA_PERFORMANS_LOGO_DATA_URL };
+      }
+      sessionStorage.setItem('sportsfly_active_access_code', cleanInput);
+      if (profileToSave.logoDataUrl) {
+        try {
+          sessionStorage.setItem('sportsfly_active_company_logo', profileToSave.logoDataUrl);
+        } catch (e) {}
+      }
+      saveStoredLocalCompanyProfile(profileToSave);
 
       onSuccess();
     } catch (e) {
@@ -123,7 +168,7 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
   };
 
   return (
-    <div className="space-y-4 px-4 sm:px-0 animate-in fade-in slide-in-from-right-3 duration-300">
+    <div className="space-y-4 px-1 sm:px-0 animate-in fade-in duration-150">
       {/* Integration Select */}
       <div className="space-y-1.5 text-left">
         <label className="block text-[11px] sm:text-xs font-bold text-slate-700">

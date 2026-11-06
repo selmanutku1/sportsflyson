@@ -1059,7 +1059,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   });
 
   return (
-    <div className="h-screen h-[100dvh] overflow-hidden bg-[#f3f6fb] flex flex-col items-center justify-center p-3 sm:p-4 font-sans text-slate-800 relative selection:bg-blue-100 selection:text-blue-900">
+    <div className="min-h-screen min-h-[100dvh] w-full bg-[#f3f6fb] flex flex-col items-center justify-center py-6 px-4 font-sans text-slate-800 relative selection:bg-blue-100 selection:text-blue-900 overflow-x-hidden">
       
       {/* Soft Background Grid Accent */}
       <div 
@@ -1070,17 +1070,24 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         }}
       />
 
-
-
       {/* Corporate Logo & Brand Header */}
-      <div className="relative z-10 flex flex-col items-center text-center mb-3 sm:mb-4 shrink-0">
-        <SportsFlyVectorMark className="w-12 h-12 sm:w-16 sm:h-16 mb-1.5 drop-shadow-sm" />
-        <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">SportsFly</h1>
-        <p className="text-[11px] sm:text-xs text-slate-500 font-medium">Kulüp & Spor Yönetim Sistemi</p>
+      <div className="relative z-10 flex flex-col items-center text-center mb-4 sm:mb-5 shrink-0 select-none">
+        <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-white p-2.5 shadow-md shadow-blue-500/10 border border-slate-200/80 flex items-center justify-center mb-2.5">
+          <img
+            src="/sportsfly-logo.png"
+            alt="SportsFly Logo"
+            className="w-full h-full object-contain"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = '/sportsfly-logo.svg';
+            }}
+          />
+        </div>
+        <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">SportsFly</h1>
+        <p className="text-xs text-slate-500 font-medium mt-0.5">Kulüp &amp; Spor Yönetim Sistemi</p>
       </div>
 
-      {/* Main Login Card - Crisp White Minimalist Card with Elegant Shadow */}
-      <div className="relative z-10 w-full max-w-[440px] bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xl shadow-slate-200/50 border border-slate-200/60 overflow-y-auto max-h-[calc(100vh-120px)] scrollbar-none">
+      {/* Main Login Card - Firmly Fixed & Stable Card */}
+      <div className="relative z-10 w-full max-w-[440px] bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-7 shadow-xl shadow-slate-200/60 border border-slate-200/80">
         
         {/* 1. Header: Minimal Welcoming Header */}
         <div className="mb-5 sm:mb-6 text-left pb-3.5 sm:pb-4 border-b border-slate-100 flex items-start justify-between gap-2">
@@ -2914,11 +2921,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             </button>
 
             <div className="w-16 h-16 rounded-2xl bg-white p-2.5 flex items-center justify-center mx-auto shadow-md border border-slate-200/80">
-              <img
-                src="/sportsfly-logo.svg"
-                alt="SportsFly Logo"
-                className="w-full h-full object-contain"
-              />
+              <SportsFlyVectorMark className="w-full h-full object-contain" />
             </div>
 
             <div className="space-y-1.5">

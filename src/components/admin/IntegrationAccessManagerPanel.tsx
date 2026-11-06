@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { getStoredIntegrations } from '../../data/entegrasyonlarData';
 import { CompanyIntegrationProfile, CompanyIntegrationType } from '../../types';
+import { ROTA_PERFORMANS_LOGO_DATA_URL } from '../../assets/rotaPerformansLogoDataUrl';
 
 const allStored = getStoredIntegrations();
 const ALL_MODULES = allStored.map((item) => ({ id: item.id, name: item.name }));
@@ -62,18 +63,41 @@ export const IntegrationAccessManagerPanel: React.FC = () => {
   const fetchIntegrations = async () => {
     try {
       const querySnapshot = await getDocs(collection(db, 'integrations'));
-      const data = querySnapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...(docSnap.data() as any),
-      }));
+      const data = querySnapshot.docs.map((docSnap) => {
+        const itemData = docSnap.data() as any;
+        let logo = itemData.logoDataUrl || '';
+        if (!logo && itemData.companyName?.toLowerCase().includes('rota')) {
+          logo = ROTA_PERFORMANS_LOGO_DATA_URL;
+        }
+        return {
+          id: docSnap.id,
+          ...itemData,
+          logoDataUrl: logo,
+        };
+      });
       setIntegrations(data);
-      localStorage.setItem('sportsfly_integration_access_list', JSON.stringify(data));
+      try {
+        localStorage.setItem('sportsfly_integration_access_list', JSON.stringify(data));
+      } catch (storageErr) {
+        try {
+          const minimalList = data.map((d: any) => ({
+            ...d,
+            logoDataUrl: d.logoDataUrl && d.logoDataUrl.length > 50000 ? '' : d.logoDataUrl
+          }));
+          localStorage.setItem('sportsfly_integration_access_list', JSON.stringify(minimalList));
+        } catch (innerErr) {}
+      }
     } catch (e) {
       // Fallback to localStorage if offline/Firestore error
       const stored = localStorage.getItem('sportsfly_integration_access_list');
       if (stored) {
         try {
-          setIntegrations(JSON.parse(stored));
+          const parsed = JSON.parse(stored);
+          const fixed = parsed.map((item: any) => ({
+            ...item,
+            logoDataUrl: item.logoDataUrl || (item.companyName?.toLowerCase().includes('rota') ? ROTA_PERFORMANS_LOGO_DATA_URL : ''),
+          }));
+          setIntegrations(fixed);
         } catch (err) {}
       }
     }

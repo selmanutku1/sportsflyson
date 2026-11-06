@@ -37,6 +37,8 @@ import {
 } from 'lucide-react';
 import { CompanyIntegrationProfile } from '../../../types';
 import { saveCompanyProfileToFirestore } from '../../../services/companyProfileService';
+import { SPORTSFLY_LOGO_DATA_URL } from '../../../assets/sportsFlyLogoDataUrl';
+import { ROTA_PERFORMANS_LOGO_DATA_URL } from '../../../assets/rotaPerformansLogoDataUrl';
 import {
   SportsFlyLabReport,
   SportsFlyLabArchivedReport,
@@ -386,9 +388,9 @@ export const CompanyIntegrationProfileView: React.FC<CompanyIntegrationProfileVi
           <div className="flex items-start sm:items-center gap-4 sm:gap-5">
             {/* Analysis Firm Logo Box */}
             <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-white p-2 border-2 border-white/20 shadow-2xl flex items-center justify-center shrink-0 overflow-hidden">
-              {companyProfile.logoDataUrl ? (
+              {companyProfile.logoDataUrl || ROTA_PERFORMANS_LOGO_DATA_URL ? (
                 <img
-                  src={companyProfile.logoDataUrl}
+                  src={companyProfile.logoDataUrl || ROTA_PERFORMANS_LOGO_DATA_URL}
                   alt={companyProfile.companyName}
                   className="w-full h-full object-contain"
                 />
@@ -442,13 +444,13 @@ export const CompanyIntegrationProfileView: React.FC<CompanyIntegrationProfileVi
               <div className="flex items-center gap-1.5">
                 <div className="w-6 h-6 rounded-full bg-white p-0.5 overflow-hidden border border-cyan-400 shrink-0 flex items-center justify-center">
                   <img
-                    src="/rota-performans-logo.png"
-                    alt="Rota Performans Logo"
+                    src={SPORTSFLY_LOGO_DATA_URL}
+                    alt="SportsFly Logo"
                     className="w-full h-full object-contain"
                   />
                 </div>
                 <span className="text-[10.5px] font-black uppercase tracking-tight text-white hidden sm:inline">
-                  ROTA <span className="text-cyan-400">PERFORMANS</span>
+                  SPORTSFLY <span className="text-sky-400">LAB</span>
                 </span>
               </div>
               <div className="h-3.5 w-px bg-white/20" />

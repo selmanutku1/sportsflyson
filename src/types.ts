@@ -40,6 +40,9 @@ export type NavPage =
   | 'turnuva-yonetimi'
   | 'envanter-yonetimi'
   | 'entegrasyonlar'
+  | 'kulup-web-sitesi'
+  | 'sportsfly-intelligence'
+  | 'sportsfly-lab'
   | 'eposta-servis-yapilandirmasi';
 
 export interface EntegrasyonItem {

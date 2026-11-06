@@ -49,7 +49,7 @@ import {
 } from '../common/RotaSportsFlyBranding';
 import { ROTA_PERFORMANS_LOGO_DATA_URL } from '../../assets/rotaPerformansLogoDataUrl';
 import { getStoredLabSchoolBranding } from '../../data/sportsFlyLabData';
-import { exportContainerToSmartA4Pdf } from '../../utils/pdfExportHelper';
+import { exportContainerToSmartA4Pdf, exportReportPagesToA4Pdf } from '../../utils/pdfExportHelper';
 import { INITIAL_KARNELER, SporcuKarne, getStoredKarneler, saveStoredKarneler } from '../../data/mockKarneData';
 import { SporcuProfil, getStoredSporcuProfilleri } from '../../data/sporcuProfilData';
 import { INITIAL_SPORCULAR } from '../../data/mockData';
@@ -382,33 +382,58 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
 
     const prevCharts = showPerformanceCharts;
     const prevZoom = pdfZoom;
+    const prevActivePage = activeReportPage;
 
     try {
       setIsDownloading(true);
-      if (!showPerformanceCharts || pdfZoom !== 100) {
+      if (!showPerformanceCharts || pdfZoom !== 100 || activeReportPage !== 'all') {
         setShowPerformanceCharts(true);
         setPdfZoom(100);
-        await new Promise((r) => setTimeout(r, 250));
+        setActiveReportPage('all');
+        await new Promise((r) => setTimeout(r, 400));
       } else {
-        await new Promise((r) => setTimeout(r, 80));
+        await new Promise((r) => setTimeout(r, 120));
       }
 
       showToast(`${selectedKarne.adSoyad} için tüm sporcu karnesi PDF olarak hazırlanıyor...`);
 
       const fileName = `${selectedKarne.adSoyad.replace(/\s+/g, '_')}_Tum_Sporcu_Karnesi.pdf`;
-      await exportContainerToSmartA4Pdf({
-        containerEl: karneRef.current,
-        fileName,
-      });
 
-      showToast(`✓ ${fileName} (Tüm Karne) başarıyla indirildi!`);
-    } catch (error) {
+      const candidatePageIds = [
+        'sporcu-karne-sayfa-1',
+        'sporcu-karne-sayfa-2',
+        'sporcu-karne-sayfa-3',
+        'sporcu-karne-sayfa-4',
+        'sporcu-karne-sayfa-5',
+      ];
+      let availablePageIds = candidatePageIds.filter((id) => document.getElementById(id) !== null);
+
+      if (availablePageIds.length === 0) {
+        await new Promise((r) => setTimeout(r, 300));
+        availablePageIds = candidatePageIds.filter((id) => document.getElementById(id) !== null);
+      }
+
+      if (availablePageIds.length > 0) {
+        await exportReportPagesToA4Pdf({
+          pageIds: availablePageIds,
+          fileName,
+        });
+      } else {
+        await exportContainerToSmartA4Pdf({
+          containerEl: karneRef.current,
+          fileName,
+        });
+      }
+
+      showToast(`✓ ${fileName} (${availablePageIds.length || 5} Sayfa) başarıyla indirildi!`);
+    } catch (error: any) {
       console.error('PDF oluşturulurken hata:', error);
-      showToast('PDF oluşturulurken bir hata oluştu. Tarayıcınızın "Yazdır" seçeneğini kullanabilirsiniz.');
+      showToast(error?.message || 'PDF oluşturulurken bir hata oluştu. Tarayıcınızın "Yazdır" seçeneğini kullanabilirsiniz.');
     } finally {
       setIsDownloading(false);
       setShowPerformanceCharts(prevCharts);
       setPdfZoom(prevZoom);
+      setActiveReportPage(prevActivePage);
     }
   };
 
@@ -610,7 +635,7 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
           pageNo={pageNo}
           totalReportPages={5}
           effectiveSecondaryHex="#0284c7"
-          hideRota={true}
+          hideRota={false}
         />
       </div>
     </div>

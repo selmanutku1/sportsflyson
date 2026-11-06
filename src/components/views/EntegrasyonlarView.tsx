@@ -1,4 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../../firebase';
 import {
   Search,
   Check,
@@ -27,6 +29,8 @@ import {
   SlidersHorizontal,
   LogOut,
   Key,
+  Globe,
+  ArrowLeft,
 } from 'lucide-react';
 import { EntegrasyonItem, NavPage } from '../../types';
 import { getStoredIntegrations, saveStoredIntegrations } from '../../data/entegrasyonlarData';
@@ -34,10 +38,18 @@ import { SporpuanSporcuDegerlendirmeView } from './sporpuan/SporpuanSporcuDegerl
 import { TurnuvaYonetimiView } from './moduller/TurnuvaYonetimiView';
 import { EnvanterYonetimiView } from './moduller/EnvanterYonetimiView';
 import { SportsFlyLabView } from './moduller/SportsFlyLabView';
+import { ClubWebsiteBuilderView } from './moduller/ClubWebsiteBuilderView';
+import { SportsFlyIntelligenceView } from './moduller/SportsFlyIntelligenceView';
 import { SportsFlyVectorMark } from '../SportsFlyLogo';
 import { getStoredUserProfile } from '../../data/userProfile';
 import { isSuperAdminUser } from '../../data/packagePermissions';
-import { getStoredLocalCompanyProfile, fetchCompanyProfileFromFirestore } from '../../services/companyProfileService';
+import {
+  getStoredLocalCompanyProfile,
+  saveStoredLocalCompanyProfile,
+  fetchCompanyProfileFromFirestore,
+} from '../../services/companyProfileService';
+import { SPORTSFLY_LOGO_DATA_URL } from '../../assets/sportsFlyLogoDataUrl';
+import { ROTA_PERFORMANS_LOGO_DATA_URL } from '../../assets/rotaPerformansLogoDataUrl';
 
 interface EntegrasyonlarViewProps {
   onNavigate?: (page: NavPage) => void;
@@ -69,12 +81,37 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
     return Array.from(set);
   }, [integrations]);
 
+  // Sync defined company integration access list from Firestore
+  useEffect(() => {
+    getDocs(collection(db, 'integrations'))
+      .then((snap) => {
+        if (!snap.empty) {
+          const data = snap.docs.map((docSnap) => {
+            const itemData = docSnap.data() as any;
+            let logo = itemData.logoDataUrl || '';
+            if (!logo && itemData.companyName?.toLowerCase().includes('rota')) {
+              logo = ROTA_PERFORMANS_LOGO_DATA_URL;
+            }
+            return {
+              id: docSnap.id,
+              ...itemData,
+              logoDataUrl: logo,
+            };
+          });
+          localStorage.setItem('sportsfly_integration_access_list', JSON.stringify(data));
+        }
+      })
+      .catch((err) => {
+        console.warn('[EntegrasyonlarView] Failed to sync integrations from Firestore:', err);
+      });
+  }, []);
+
   // Filter Switches on top right (Önerilen, Aktif Olanlar)
   const [onlyRecommended, setOnlyRecommended] = useState(false);
   const [onlyActive, setOnlyActive] = useState(false);
 
-  // Active Sub-module viewing (e.g. if user opens SporPuan, Turnuva, Envanter, or SportsFly Lab directly inside Integrations)
-  const [activeSubModule, setActiveSubModule] = useState<'sportsfly-lab' | 'sporpuan' | 'turnuva' | 'envanter' | null>(null);
+  // Active Sub-module viewing (e.g. if user opens SporPuan, Turnuva, Envanter, SportsFly Lab, Kulup Web Sitesi, or SportsFly Intelligence directly inside Integrations)
+  const [activeSubModule, setActiveSubModule] = useState<'sportsfly-lab' | 'sporpuan' | 'turnuva' | 'envanter' | 'kulup-web-sitesi' | 'sportsfly-intelligence' | null>(null);
 
   // Settings Modal for 3rd party APIs (İyzico, WhatsApp, etc.)
   const [settingsModalItem, setSettingsModalItem] = useState<EntegrasyonItem | null>(null);
@@ -101,6 +138,10 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
           setActiveSubModule('turnuva');
         } else if (selectedId === 'int-envanter') {
           setActiveSubModule('envanter');
+        } else if (selectedId === 'int-kulup-web-sitesi') {
+          setActiveSubModule('kulup-web-sitesi');
+        } else if (selectedId === 'int-sportsfly-intelligence') {
+          setActiveSubModule('sportsfly-intelligence');
         } else {
           const found = integrations.find((i) => i.id === selectedId);
           if (found) {
@@ -158,6 +199,10 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
       setActiveSubModule('turnuva');
     } else if (item.id === 'int-envanter') {
       setActiveSubModule('envanter');
+    } else if (item.id === 'int-kulup-web-sitesi') {
+      setActiveSubModule('kulup-web-sitesi');
+    } else if (item.id === 'int-sportsfly-intelligence') {
+      setActiveSubModule('sportsfly-intelligence');
     } else {
       setSettingsModalItem(item);
       setApiKeyInput(item.apiKey || '');
@@ -165,15 +210,15 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
     }
   };
 
-  // Open integration action (bypasses pass code completely for Super Admin)
+  // Open integration action (bypasses pass code for Super Admin, Club Website, and Intelligence AI)
   const handleOpenIntegration = (item: EntegrasyonItem) => {
     if (!item.isActive) {
       showNotification(`"${item.name}" entegrasyonu ayarlardan pasif durumda olduğu için açılamaz.`);
       return;
     }
 
-    // Süper Admin için geçiş kodu sorulmaz, doğrudan açılır!
-    if (isSuperAdmin) {
+    // Süper Admin, Kulüp Web Sitesi ve Intelligence AI için geçiş kodu sorulmaz, doğrudan açılır!
+    if (isSuperAdmin || item.id === 'int-kulup-web-sitesi' || item.id === 'int-sportsfly-intelligence') {
       openModuleDirectly(item);
       return;
     }
@@ -222,9 +267,17 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
       try {
         sessionStorage.setItem('sportsfly_integration_entry_source', 'true');
         localStorage.setItem('sportsfly_integration_entry_source', 'true');
-        const profileToSave = matchedCompanyEntry || getStoredLocalCompanyProfile();
-        sessionStorage.setItem('sportsfly_active_company_profile', JSON.stringify(profileToSave));
-        localStorage.setItem('sportsfly_active_company_profile', JSON.stringify(profileToSave));
+        sessionStorage.setItem('sportsfly_active_access_code', cleanInput);
+        let profileToSave = matchedCompanyEntry || getStoredLocalCompanyProfile();
+        if (!profileToSave.logoDataUrl && (profileToSave.companyName?.toLowerCase().includes('rota') || cleanInput.includes('GPT') || cleanInput.includes('LAB'))) {
+          profileToSave = { ...profileToSave, logoDataUrl: ROTA_PERFORMANS_LOGO_DATA_URL };
+        }
+        if (profileToSave.logoDataUrl) {
+          try {
+            sessionStorage.setItem('sportsfly_active_company_logo', profileToSave.logoDataUrl);
+          } catch (e) {}
+        }
+        saveStoredLocalCompanyProfile(profileToSave);
       } catch (e) {}
 
       openModuleDirectly(item);
@@ -311,15 +364,17 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
         return <Flame className="w-6 h-6 sm:w-7 sm:h-7 text-orange-500" />;
       case 'Sparkles':
         return <Sparkles className="w-6 h-6 sm:w-7 sm:h-7 text-emerald-500" />;
+      case 'Globe':
+        return <Globe className="w-6 h-6 sm:w-7 sm:h-7 text-indigo-500" />;
       default:
         return <Layers className="w-6 h-6 sm:w-7 sm:h-7 text-slate-600" />;
     }
   };
 
-  // If user is inside a submodule (SportsFly Lab, SporPuan, Turnuva, or Envanter), show the submodule with a responsive back & quick-switch header
+  // If user is inside a submodule (SportsFly Lab, SporPuan, Turnuva, Envanter, or Kulup Web Sitesi), show the submodule with a responsive header
   if (activeSubModule) {
     const subModules: Array<{
-      key: 'sportsfly-lab' | 'sporpuan' | 'turnuva' | 'envanter';
+      key: 'sportsfly-lab' | 'sporpuan' | 'turnuva' | 'envanter' | 'kulup-web-sitesi' | 'sportsfly-intelligence';
       shortLabel: string;
       fullLabel: string;
     }> = [
@@ -343,14 +398,24 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
         shortLabel: 'Envanter',
         fullLabel: 'Envanter & Malzeme Takibi',
       },
+      {
+        key: 'kulup-web-sitesi',
+        shortLabel: 'Web Sitesi',
+        fullLabel: 'Kulüp Web Sitesi Portalı',
+      },
+      {
+        key: 'sportsfly-intelligence',
+        shortLabel: 'Intelligence AI',
+        fullLabel: 'SportsFly Intelligence — Yapay Zeka Büyüme Asistanı',
+      },
     ];
 
     const activeModuleMeta = subModules.find((m) => m.key === activeSubModule);
 
     return (
       <div className="space-y-3 sm:space-y-4 print:space-y-0">
-        {/* Responsive Entegrasyon Oturum Çubuğu (SportsFly Lab kendi entegre başlığını kullandığı için çift başlık oluşmaz) */}
-        {onLogout && activeSubModule !== 'sportsfly-lab' && (
+        {/* Responsive Entegrasyon Oturum Çubuğu */}
+        {activeSubModule !== 'sportsfly-lab' && (
           <div className="bg-white dark:bg-[#111c2e] p-3 sm:px-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2.5 shadow-2xs print:hidden">
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
@@ -359,15 +424,28 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={onLogout}
-              className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-            >
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">Entegrasyon Panelinden Çıkış Yap</span>
-              <span className="sm:hidden">Çıkış Yap</span>
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setActiveSubModule(null)}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">Entegrasyonlara Dön</span>
+                <span className="sm:hidden">Geri</span>
+              </button>
+
+              {onLogout && (
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="hidden sm:inline">Çıkış Yap</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -375,6 +453,8 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
         {activeSubModule === 'sporpuan' && <SporpuanSporcuDegerlendirmeView onToast={onToast} />}
         {activeSubModule === 'turnuva' && <TurnuvaYonetimiView onToast={onToast} />}
         {activeSubModule === 'envanter' && <EnvanterYonetimiView onToast={onToast} />}
+        {activeSubModule === 'kulup-web-sitesi' && <ClubWebsiteBuilderView onToast={onToast} onLogout={onLogout} />}
+        {activeSubModule === 'sportsfly-intelligence' && <SportsFlyIntelligenceView onToast={onToast} />}
       </div>
     );
   }

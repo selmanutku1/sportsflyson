@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { exportReportPagesToA4Pdf, BatchA4PdfBuilder } from '../../../utils/pdfExportHelper';
+import { exportReportPagesToA4Pdf, exportContainerToSmartA4Pdf, BatchA4PdfBuilder } from '../../../utils/pdfExportHelper';
 import { SomatotypeRadarAndChart } from '../../charts/SomatotypeRadarAndChart';
 import {
   Activity,
@@ -58,6 +58,7 @@ import {
   RotaSportsFlyFooterBadge,
 } from '../../common/RotaSportsFlyBranding';
 import { ROTA_PERFORMANS_LOGO_DATA_URL } from '../../../assets/rotaPerformansLogoDataUrl';
+import { SPORTSFLY_LOGO_DATA_URL } from '../../../assets/sportsFlyLogoDataUrl';
 import {
   SportsFlyLabPerformanceCharts,
   SportsFlyLabKarnePage5RadarContent,
@@ -105,10 +106,13 @@ import {
   parseSportsFlyLabExcel,
   analyzeLabPerformanceMetrics,
   fetchGeminiLabRecommendations,
+  generateAiForecastForLabReport,
   ensureDataConsistency,
   addStoredLabExcelRecord,
   getStoredLabExcelHistory,
   UploadedExcelFileRecord,
+  isStaleExpertComment,
+  generateAthleteInterpretiveExpertComment,
 } from '../../../data/sportsFlyLabData';
 import { getStoredKarneler, saveStoredKarneler } from '../../../data/mockKarneData';
 import { CompanyIntegrationProfileView } from './CompanyIntegrationProfileView';
@@ -347,6 +351,48 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     };
   }, []);
 
+  // Data Migration: Ensure 3rd test (III / Son) values are empty for ALL reports and archives
+  useEffect(() => {
+    const stored = getStoredLabReports();
+    const archived = getStoredLabArchives();
+    
+    const cleanReport = (r: SportsFlyLabReport): SportsFlyLabReport => {
+      const isStale = isStaleExpertComment(r.expertComment);
+      const personalizedComment = isStale ? generateAthleteInterpretiveExpertComment(r) : r.expertComment;
+
+      return {
+        ...r,
+        date3: '—',
+        scoreHistory: { ...r.scoreHistory, p3Score: 0, p3Date: '—' },
+        bodyComposition: (r.bodyComposition || []).map(b => ({ ...b, m3: 0 })),
+        motorPerformance: (r.motorPerformance || []).map(m => ({ ...m, m3: 0 })),
+        ipsativeTargets: (r.ipsativeTargets || []).map(i => ({ ...i, m3: 0 })),
+        cardio: r.cardio ? { ...r.cardio, test3Distance: 0, test3Shuttles: 0, test3Vo2: 0, test3Status: '—' } : r.cardio,
+        somatotype: r.somatotype ? { ...r.somatotype, m3: { endo: 0, meso: 0, ecto: 0, category: '—' } } : r.somatotype,
+        expertComment: personalizedComment
+      };
+    };
+
+    const cleanedReports = stored.map(cleanReport);
+    const cleanedArchives = archived.map(arch => ({
+      ...arch,
+      reportSnapshot: cleanReport(arch.reportSnapshot)
+    }));
+
+    const reportsChanged = JSON.stringify(stored) !== JSON.stringify(cleanedReports);
+    const archivesChanged = JSON.stringify(archived) !== JSON.stringify(cleanedArchives);
+
+    if (reportsChanged) {
+      setReports(cleanedReports);
+      saveStoredLabReports(cleanedReports);
+    }
+    if (archivesChanged) {
+      setArchivedReports(cleanedArchives);
+      // We don't have a direct setter for archives here but we can use saveStoredLabArchives
+      localStorage.setItem('sportsfly_lab_archive_v1', JSON.stringify(cleanedArchives));
+    }
+  }, []);
+
   // Main module tab: 'studio', 'batch', 'archive', or 'company-profile' (Company Profile only in integration entry)
   const [activeLabTab, setActiveLabTab] = useState<'studio' | 'batch' | 'archive' | 'company-profile'>('studio');
 
@@ -363,10 +409,10 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     'SportsFly_Lab_Toplu_Sporcu_Sablonu (6 Örnek Sporcu).xlsx'
   );
   const [batchGroupTitle, setBatchGroupTitle] = useState<string>(
-    '2026 Eylül Dönemi 3. Ölçüm Karnesi'
+    '2026 Dönemi Performans Analiz Grubu'
   );
   const [batchGroupNote, setBatchGroupNote] = useState<string>(
-    'Excel Toplu Sporcu Verisi · Kurumsal Performans ve PHV Taraması'
+    'Excel Toplu Sporcu Verisi · Kurumsal Performans Taraması'
   );
   const [autoArchiveOnBatchCreate, setAutoArchiveOnBatchCreate] = useState<boolean>(true);
   const [batchSearchQuery, setBatchSearchQuery] = useState<string>('');
@@ -422,6 +468,10 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
   const [pdfProgressPage, setPdfProgressPage] = useState<number | null>(null);
   const [showEditModal, setShowEditModal] = useState<boolean>(false);
   const [showNewReportModal, setShowNewReportModal] = useState<boolean>(false);
+  const [showBrandingSettings, setShowBrandingSettings] = useState<boolean>(false);
+  const [hideSectionNumbers, setHideSectionNumbers] = useState<boolean>(true);
+  const [hideScaleLegend, setHideScaleLegend] = useState<boolean>(true);
+  const [showBodyMapInfographic, setShowBodyMapInfographic] = useState<boolean>(true);
   const [newAthleteForm, setNewAthleteForm] = useState<{
     athleteName: string;
     sportBranch: string;
@@ -436,8 +486,6 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
   // Performans grafikleri ve performans önerileri her zaman kapalı başlar, kullanıcı açmadıkça açık gelmez
   const [showChartsPanel, setShowChartsPanel] = useState<boolean>(false);
   const [showAiPanel, setShowAiPanel] = useState<boolean>(false);
-  const [showBrandingSettings, setShowBrandingSettings] = useState<boolean>(false);
-  const [showBodyMapInfographic, setShowBodyMapInfographic] = useState<boolean>(true);
   const [karneTemplate, setKarneTemplate] = useState<KarneTemplateId>(() => {
     try {
       const saved = localStorage.getItem('sportsfly_lab_karne_template_v2') as KarneTemplateId | null;
@@ -568,7 +616,10 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     schoolBranding.branchName.trim() || currentReport.branchName || 'Merkez Kampüs';
   const effectiveSchoolLogo = schoolBranding.logoDataUrl || currentReport.clubLogoUrl || '';
   const effectiveAnalysisFirmLogo =
-    activeCompanyProfile?.logoDataUrl || ROTA_PERFORMANS_LOGO_DATA_URL;
+    activeCompanyProfile?.logoDataUrl ||
+    (activeCompanyProfile?.companyName?.toLowerCase().includes('rota')
+      ? ROTA_PERFORMANS_LOGO_DATA_URL
+      : ROTA_PERFORMANS_LOGO_DATA_URL);
   const effectiveAnalysisFirmName =
     activeCompanyProfile?.companyName || 'ROTA PERFORMANS';
 
@@ -641,7 +692,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       `${targetReport.athleteName} — ${targetReport.date3} Dönem Karnesi (${targetReport.sportBranch})`
     );
     setArchiveNoteInput(
-      `${effectiveClubName} · 3. Ölçüm Genel Performans: %${targetReport.scoreHistory.p3Score}`
+      `${effectiveClubName} · Genel Performans Puanı: %${targetReport.scoreHistory.p2Score || targetReport.scoreHistory.p3Score}`
     );
     setShowSaveArchiveModal(true);
   };
@@ -1259,6 +1310,11 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     const prevSelectedId = selectedReportId;
     const prevViewMode = viewMode;
     const prevZoom = pdfZoom;
+    const prevTab = activeLabTab;
+
+    if (activeLabTab !== 'studio') {
+      setActiveLabTab('studio');
+    }
 
     const persistedBranding = getStoredLabSchoolBranding();
     const brandedBatch = selectedBatchReports.map((rep) =>
@@ -1275,7 +1331,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     setViewMode('all');
     setPdfZoom(100);
 
-    const pageIds = [
+    const candidatePageIds = [
       'sportsfly-lab-page-bodymap',
       'sportsfly-lab-page-1',
       'sportsfly-lab-page-2',
@@ -1293,11 +1349,13 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
           `Sporcu ${i + 1}/${brandedBatch.length}: ${athlete.athleteName} karnesi hazırlanıyor...`
         );
 
-        // Allow React state & D3 SVG charts on Pages 1-7 to settle
-        await new Promise((r) => setTimeout(r, 380));
+        // Allow React state & SVG charts to settle
+        await new Promise((r) => setTimeout(r, 420));
+
+        const activePageIds = candidatePageIds.filter((id) => document.getElementById(id) !== null);
 
         if (exportMode === 'combined' && combinedBuilder) {
-          await combinedBuilder.appendReportPages(pageIds, (pageIdx, totalPages) => {
+          await combinedBuilder.appendReportPages(activePageIds, (pageIdx, totalPages) => {
             setBatchPdfStatusText(
               `Birleşik PDF Oluşturuluyor — Sporcu ${i + 1}/${brandedBatch.length} (${athlete.athleteName}) · Sayfa ${pageIdx}/${totalPages}`
             );
@@ -1305,7 +1363,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         } else {
           const safeName = athlete.athleteName.replace(/\s+/g, '_');
           await exportReportPagesToA4Pdf({
-            pageIds,
+            pageIds: activePageIds,
             fileName: `SportsFly_Lab_Tum_Karne_${safeName}.pdf`,
             onPageProgress: (pageIdx, totalPages) => {
               setBatchPdfStatusText(
@@ -1324,22 +1382,25 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
           `SportsFly_Lab_Toplu_Karne_${brandedBatch.length}_Sporcu_${safeGroup}.pdf`
         );
         notify(
-          `${brandedBatch.length} sporcunun karnesi (${brandedBatch.length * 7} sayfa) tek bir birleşik A4 PDF dosyası olarak indirildi.`
+          `${brandedBatch.length} sporcunun karnesi tek bir birleşik A4 PDF dosyası olarak indirildi.`
         );
       } else {
         notify(
-          `${brandedBatch.length} sporcunun 7'şer sayfalık karneleri ayrı ayrı A4 PDF olarak indirildi.`
+          `${brandedBatch.length} sporcunun karneleri ayrı ayrı A4 PDF olarak indirildi.`
         );
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Toplu PDF oluşturma hatası:', err);
-      notify('Toplu PDF oluşturulurken bir hata meydana geldi.');
+      notify(err?.message || 'Toplu PDF oluşturulurken bir hata meydana geldi.');
     } finally {
       setIsGeneratingBatchPDF(false);
       setBatchPdfStatusText(null);
       setSelectedReportId(prevSelectedId);
       setViewMode(prevViewMode);
       setPdfZoom(prevZoom);
+      if (prevTab !== 'studio') {
+        setActiveLabTab(prevTab);
+      }
     }
   };
 
@@ -1434,7 +1495,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     }
   };
 
-  // Handle PDF Download of the complete 7-page report card ('Tüm Karneyi İndir')
+  // Handle PDF Download of the complete report card ('Tüm Karneyi İndir')
   const handleDownloadPDF = async () => {
     if (isGeneratingPDF) return;
     setIsGeneratingPDF(true);
@@ -1442,13 +1503,16 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
     const previousMode = viewMode;
     const previousZoom = pdfZoom;
+    const previousTab = activeLabTab;
 
-    if (viewMode !== 'all' || pdfZoom !== 100) {
+    if (activeLabTab !== 'studio' || viewMode !== 'all' || pdfZoom !== 100) {
+      setActiveLabTab('studio');
       setViewMode('all');
       setPdfZoom(100);
-      await new Promise((r) => setTimeout(r, 300));
+      setIsPdfPreviewMode(true);
+      await new Promise((r) => setTimeout(r, 450));
     } else {
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 120));
     }
 
     try {
@@ -1463,13 +1527,35 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         pageIds = ['sportsfly-lab-coach-club-page'];
         fileName = `SportsFly_Antrenor_ve_Kulup_Karnesi_${safeName}.pdf`;
       } else {
-        pageIds = [
+        const candidatePageIds = [
           'sportsfly-lab-page-bodymap',
           'sportsfly-lab-page-1',
           'sportsfly-lab-page-2',
           'sportsfly-lab-page-3',
           'sportsfly-lab-page-5',
         ];
+        pageIds = candidatePageIds.filter((id) => document.getElementById(id) !== null);
+
+        // If elements are not ready yet, wait an additional 300ms
+        if (pageIds.length === 0) {
+          await new Promise((r) => setTimeout(r, 350));
+          pageIds = candidatePageIds.filter((id) => document.getElementById(id) !== null);
+        }
+
+        if (pageIds.length === 0) {
+          const printArea = document.getElementById('sportsfly-lab-print-area');
+          if (printArea) {
+            fileName = `SportsFly_Lab_Karne_${safeName}.pdf`;
+            await exportContainerToSmartA4Pdf({
+              containerEl: printArea,
+              fileName,
+            });
+            notify(`${currentReport.athleteName} için sporcu karnesi PDF olarak indirildi.`);
+            return;
+          }
+          throw new Error('Karne sayfaları DOM üzerinde bulunamadı.');
+        }
+
         fileName = `SportsFly_Lab_Tum_Karne_${safeName}.pdf`;
       }
 
@@ -1482,16 +1568,20 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       notify(
         `${currentReport.athleteName} için ${pageIds.length} sayfalık sporcu karnesi temiz A4 PDF olarak indirildi.`
       );
-    } catch (err) {
+    } catch (err: any) {
       console.error('PDF oluşturma hatası:', err);
-      notify('PDF oluşturulurken bir hata meydana geldi.');
+      notify(err?.message || 'PDF oluşturulurken bir hata meydana geldi.');
     } finally {
       setIsGeneratingPDF(false);
       setPdfProgressPage(null);
       setViewMode(previousMode);
       setPdfZoom(previousZoom);
+      if (previousTab !== 'studio') {
+        setActiveLabTab(previousTab);
+      }
     }
   };
+
 
   // Trigger clean A4 Print / Browser PDF Output using @media print styles
   const handlePrintA4 = async () => {
@@ -1750,7 +1840,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   RESMİ SPORCU GELİŞİM &amp; PERFORMANS KARNESİ
                 </span>
                 <span className={isDarkHeaderTpl ? 'text-white/40' : 'text-slate-300'}>·</span>
-                <span className={isDarkHeaderTpl ? 'text-white/85' : 'text-slate-500'}>
+                <span className={isDarkHeaderTpl ? 'text-white/85' : 'text-slate-50'}>
                   {effectiveBranchName}
                 </span>
               </div>
@@ -1794,7 +1884,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               className="text-base sm:text-lg font-extrabold tracking-tight"
               style={{ color: effectivePrimaryHex }}
             >
-              {sectionTitle}
+              {hideSectionNumbers ? sectionTitle.replace(/^\d+\.\s*/, '') : sectionTitle}
             </h2>
             <p className="text-[11px] text-slate-500">{subtitle}</p>
           </div>
@@ -1815,7 +1905,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
             <div>
               <span className="text-slate-400">Ölçümler: </span>
               <span className="font-sans tabular-nums text-[11px] text-slate-700">
-                I: {currentReport.date1} · II: {currentReport.date2} · III: {currentReport.date3}
+                I: {currentReport.date1} · II: {currentReport.date2} {currentReport.date3 !== '—' && currentReport.date3 !== '' ? `· III: ${currentReport.date3}` : ''}
               </span>
             </div>
             {karneTemplate === 'athletic-data' && (
@@ -1846,7 +1936,20 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         clubName={effectiveClubName}
         athleteCode={currentReport.athleteCode}
         pageText={typeof pageNo === 'number' ? `S.${pageNo + pageOffset}/${totalReportPages}` : String(pageNo)}
+        firmLogoUrl={effectiveAnalysisFirmLogo}
+        firmName={effectiveAnalysisFirmName}
       />
+      <div className="mt-2 text-[10px] text-slate-500 dark:text-slate-400 text-center font-medium leading-relaxed px-3 py-1.5 bg-slate-50/90 dark:bg-slate-800/80 rounded-xl border border-slate-200/70 dark:border-slate-700/70 shadow-2xs">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-4">
+          <span>📌 <strong className="text-slate-700 dark:text-slate-200 font-bold">Dünya Sağlık Örgütü (WHO) Referansı:</strong> Bu rapordaki norm değerleri WHO verilerine dayanarak analiz edilmiştir.</span>
+        </div>
+        <div className="mt-1 flex items-center justify-center gap-2">
+          <span className="text-blue-800 dark:text-blue-300 font-bold bg-blue-100/50 dark:bg-blue-900/30 px-2.5 py-1 rounded-lg border border-blue-200/50 inline-flex items-center gap-1.5">
+            <Sparkles className="w-3 h-3" />
+            <span>2. test hedefleri sporcunun yaş ve branş grubuna uygun SportsFly Intelligence normatif performans modellerine dayanarak oluşturulmuştur.</span>
+          </span>
+        </div>
+      </div>
     </div>
   );
 
@@ -1858,23 +1961,38 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     if (!showBodyMapInfographic) return null;
 
     const getRow = (id: string) => currentReport.bodyComposition.find((r) => r.id === id);
-    const getVal = (id: string, fallback: number) => getRow(id)?.m3 ?? fallback;
-    const getM1 = (id: string, fallback: number) => getRow(id)?.m1 ?? fallback;
-    const getM2 = (id: string, fallback: number) => getRow(id)?.m2 ?? fallback;
+    const getVal = (id: string, fallback: number) => {
+      const r = getRow(id);
+      if (!r) return fallback;
+      if (typeof r.m2 === 'number' && r.m2 > 0) return r.m2;
+      if (typeof r.m1 === 'number' && r.m1 > 0) return r.m1;
+      return fallback;
+    };
+    const getM1 = (id: string, fallback: number) => {
+      const r = getRow(id);
+      return r && typeof r.m1 === 'number' && r.m1 > 0 ? r.m1 : fallback;
+    };
+    const getM2 = (id: string, fallback: number) => {
+      const r = getRow(id);
+      return r && typeof r.m2 === 'number' && r.m2 > 0 ? r.m2 : (r && typeof r.m1 === 'number' && r.m1 > 0 ? r.m1 : fallback);
+    };
     const getPct = (id: string, fallback: number) => getRow(id)?.percentile ?? fallback;
     const getSd = (id: string, fallback: number) => getRow(id)?.sd ?? fallback;
     const getStatus = (id: string, fallback: string) => getRow(id)?.status ?? fallback;
 
     const heightVal = getVal('height', 149.5);
     const heightM1 = getM1('height', 145.0);
-    const heightGain = +(heightVal - heightM1).toFixed(1);
+    const heightM2 = getM2('height', 146.2);
+    const heightGain = +(heightM2 - heightM1).toFixed(1);
     const weightVal = getVal('weight', 43.2);
     const weightM1 = getM1('weight', 41.4);
-    const weightDelta = +(weightVal - weightM1).toFixed(1);
+    const weightM2 = getM2('weight', 42.2);
+    const weightDelta = +(weightM2 - weightM1).toFixed(1);
     const bmiVal = getVal('bmi', 18.2);
     const fatVal = getVal('bodyFat', 14.2);
     const fatM1 = getM1('bodyFat', 15.4);
-    const fatDelta = +(fatVal - fatM1).toFixed(1);
+    const fatM2 = getM2('bodyFat', 14.8);
+    const fatDelta = +(fatM2 - fatM1).toFixed(1);
 
     const bicepsSf = getVal('bicepsSkinfold', 5.4);
     const tricepsSf = getVal('tricepsSkinfold', 8.2);
@@ -1892,7 +2010,18 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     const fatMassKg = +((weightVal * fatVal) / 100).toFixed(1);
     const leanMassKg = +(weightVal - fatMassKg).toFixed(1);
     const leanMassPct = +(100 - fatVal).toFixed(1);
-    const { m3: somatoM3 } = currentReport.somatotype;
+
+    const activeSomato =
+      (currentReport.somatotype?.m2 && currentReport.somatotype.m2.endo > 0
+        ? currentReport.somatotype.m2
+        : currentReport.somatotype?.m1 && currentReport.somatotype.m1.endo > 0
+        ? currentReport.somatotype.m1
+        : null) || {
+        endo: 3.2,
+        meso: 4.1,
+        ecto: 2.5,
+        category: 'Mezomorf - Ektomorf',
+      };
 
     const leftCallouts = [
       {
@@ -1901,7 +2030,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         subtitle: 'Ön Üst Kol · Subkutan Yağ Dokusu',
         m1: getM1('bicepsSkinfold', 6.2),
         m2: getM2('bicepsSkinfold', 5.8),
-        m3: bicepsSf,
+        displayVal: bicepsSf,
         unit: 'mm',
         pct: getPct('bicepsSkinfold', 74),
         sd: getSd('bicepsSkinfold', -0.4),
@@ -1914,7 +2043,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         subtitle: 'Arka Üst Kol · Subkutan Yağ Dokusu',
         m1: getM1('tricepsSkinfold', 9.4),
         m2: getM2('tricepsSkinfold', 8.8),
-        m3: tricepsSf,
+        displayVal: tricepsSf,
         unit: 'mm',
         pct: getPct('tricepsSkinfold', 76),
         sd: getSd('tricepsSkinfold', -0.5),
@@ -1927,7 +2056,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         subtitle: 'Üst Sırt Skapula Alt Açısı · Gövde Yağ',
         m1: getM1('subscapularSkinfold', 7.6),
         m2: getM2('subscapularSkinfold', 7.2),
-        m3: subscapSf,
+        displayVal: subscapSf,
         unit: 'mm',
         pct: getPct('subscapularSkinfold', 78),
         sd: getSd('subscapularSkinfold', -0.3),
@@ -1940,7 +2069,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         subtitle: 'Yan Karın / Pelvik Kuşak Deri Kıvrımı',
         m1: getM1('suprailiacSkinfold', 7.1),
         m2: getM2('suprailiacSkinfold', 6.5),
-        m3: suprailiacSf,
+        displayVal: suprailiacSf,
         unit: 'mm',
         pct: getPct('suprailiacSkinfold', 80),
         sd: getSd('suprailiacSkinfold', -0.4),
@@ -1956,7 +2085,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         subtitle: 'Üst Ekstremite Maksimal Kas Hipertrofisi',
         m1: getM1('flexedBiceps', 23.2),
         m2: getM2('flexedBiceps', 24.0),
-        m3: flexedBic,
+        displayVal: flexedBic,
         unit: 'cm',
         pct: getPct('flexedBiceps', 78),
         sd: getSd('flexedBiceps', 0.6),
@@ -1969,7 +2098,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         subtitle: `Dirsek (${humerusBr} cm) & Diz (${femurBr} cm)`,
         m1: getM1('femurBreadth', 8.4),
         m2: getM2('femurBreadth', 8.5),
-        m3: femurBr,
+        displayVal: `${humerusBr} / ${femurBr}`,
         unit: 'cm',
         pct: getPct('femurBreadth', 82),
         sd: getSd('femurBreadth', 0.7),
@@ -1982,8 +2111,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         subtitle: `Merkez Gövde Dağılımı · Toplam Yağ %${fatVal}`,
         m1: getM1('whr', 0.8),
         m2: getM2('whr', 0.79),
-        m3: whrVal,
-        unit: 'oran',
+        displayVal: `${whrVal} · %${fatVal}`,
+        unit: '',
         pct: getPct('bodyFat', 84),
         sd: getSd('bodyFat', -0.4),
         status: getStatus('bodyFat', 'Optimal'),
@@ -1995,7 +2124,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         subtitle: `Alt Ekstremite Kas (${calfCirc} cm) · Deri (${calfSf} mm)`,
         m1: getM1('calfCircumference', 30.1),
         m2: getM2('calfCircumference', 30.8),
-        m3: calfCirc,
+        displayVal: calfCirc,
         unit: 'cm',
         pct: getPct('calfCircumference', 81),
         sd: getSd('calfCircumference', 0.6),
@@ -2027,7 +2156,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 {heightVal} <span className="text-[10px] font-normal text-slate-500">cm</span>
               </div>
               <div className="text-[9.5px] font-sans tabular-nums font-bold text-emerald-700">
-                {heightGain >= 0 ? `+${heightGain}` : heightGain} cm (I→III) · %{getPct('height', 76)}
+                {heightGain >= 0 ? `+${heightGain}` : heightGain} cm (I→II) · %{getPct('height', 76)}
               </div>
             </div>
 
@@ -2039,7 +2168,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 {weightVal} <span className="text-[10px] font-normal text-slate-500">kg</span>
               </div>
               <div className="text-[9.5px] font-sans tabular-nums font-bold text-sky-700">
-                BKİ: {bmiVal} kg/m² ({weightDelta >= 0 ? `+${weightDelta}` : weightDelta} kg)
+                BKİ: {bmiVal} kg/m² ({weightDelta >= 0 ? `+${weightDelta}` : weightDelta} kg) [I→II]
               </div>
             </div>
 
@@ -2052,7 +2181,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 <span className="text-[10px] font-normal text-rose-600">({fatMassKg} kg)</span>
               </div>
               <div className="text-[9.5px] font-sans tabular-nums font-bold text-emerald-700">
-                Δ {fatDelta > 0 ? `+${fatDelta}` : fatDelta}% · {getStatus('bodyFat', 'Optimal')}
+                Δ {fatDelta > 0 ? `+${fatDelta}` : fatDelta}% (I→II) · {getStatus('bodyFat', 'Optimal')}
               </div>
             </div>
 
@@ -2094,10 +2223,10 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 className="text-base font-black font-sans tabular-nums mt-0.5"
                 style={{ color: effectiveSecondaryHex }}
               >
-                {somatoM3.endo} - {somatoM3.meso} - {somatoM3.ecto}
+                {activeSomato.endo} - {activeSomato.meso} - {activeSomato.ecto}
               </div>
               <div className="text-[9.5px] font-bold text-white/90 truncate">
-                {somatoM3.category}
+                {activeSomato.category}
               </div>
             </div>
           </div>
@@ -2122,7 +2251,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                         className="px-1.5 py-0.5 rounded text-[9px] font-sans tabular-nums font-black text-white"
                         style={{ backgroundColor: item.accent }}
                       >
-                        NOKTA {item.code}
+                        ANALİZ {item.code}
                       </span>
                       <span className="text-[9.5px] font-sans tabular-nums font-bold text-emerald-700">
                         {item.status} · %{item.pct}
@@ -2140,7 +2269,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                         I: <strong>{item.m1}</strong> → II: <strong>{item.m2}</strong>
                       </div>
                       <div className="text-base font-black text-slate-900">
-                        {item.m3}{' '}
+                        {item.displayVal}{' '}
                         <span className="text-[10px] font-normal text-slate-500">{item.unit}</span>
                       </div>
                     </div>
@@ -2245,22 +2374,22 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   <rect x="52" y="284" width="480" height="92" rx="8" fill="#fff1f2" fillOpacity="0.35" />
                   <rect x="52" y="378" width="480" height="202" rx="8" fill="#f0fdf4" fillOpacity="0.35" />
 
-                  {/* Clean Non-Overlapping Zone Badges positioned safely in open layout space (Left column between callouts) */}
+                  {/* Clean Non-Overlapping Zone Badges positioned safely in open layout space */}
                   <g>
-                    <rect x="52" y="158" width="118" height="14" rx="3.5" fill="#e2e8f0" fillOpacity="0.9" />
-                    <text x="111" y="168" textAnchor="middle" className="text-[7px] font-sans tabular-nums font-extrabold fill-slate-700">
+                    <rect x="52" y="148" width="100" height="12" rx="3" fill="#e2e8f0" fillOpacity="0.95" stroke="#cbd5e1" strokeWidth="0.5" />
+                    <text x="102" y="156.5" textAnchor="middle" fill="#475569" fontSize="6.5" fontWeight="900" fontFamily="sans-serif" className="text-[6.5px] font-sans font-black fill-slate-600 tracking-tighter">
                       BÖLGE I · ÜST TORAKS &amp; KOL
                     </text>
                   </g>
                   <g>
-                    <rect x="52" y="288" width="118" height="14" rx="3.5" fill="#ffe4e6" fillOpacity="0.9" />
-                    <text x="111" y="298" textAnchor="middle" className="text-[7px] font-sans tabular-nums font-extrabold fill-rose-700">
-                      BÖLGE II · MERKEZ GÖVDE (CORE)
+                    <rect x="52" y="362" width="100" height="12" rx="3" fill="#ffe4e6" fillOpacity="0.95" stroke="#fecaca" strokeWidth="0.5" />
+                    <text x="102" y="370.5" textAnchor="middle" fill="#be123c" fontSize="6.5" fontWeight="900" fontFamily="sans-serif" className="text-[6.5px] font-sans font-black fill-rose-700 tracking-tighter">
+                      BÖLGE II · MERKEZ GÖVDE
                     </text>
                   </g>
                   <g>
-                    <rect x="52" y="382" width="118" height="14" rx="3.5" fill="#dcfce7" fillOpacity="0.9" />
-                    <text x="111" y="392" textAnchor="middle" className="text-[7px] font-sans tabular-nums font-extrabold fill-emerald-800">
+                    <rect x="52" y="564" width="100" height="12" rx="3" fill="#dcfce7" fillOpacity="0.95" stroke="#bbf7d0" strokeWidth="0.5" />
+                    <text x="102" y="572.5" textAnchor="middle" fill="#065f46" fontSize="6.5" fontWeight="900" fontFamily="sans-serif" className="text-[6.5px] font-sans font-black fill-emerald-800 tracking-tighter">
                       BÖLGE III · ALT EKSTREMİTE
                     </text>
                   </g>
@@ -2285,6 +2414,10 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                         x="33"
                         y={tick.y + 3}
                         textAnchor="end"
+                        fill="#64748b"
+                        fontSize="7.5"
+                        fontWeight="700"
+                        fontFamily="sans-serif"
                         className="text-[7.5px] font-sans tabular-nums font-bold fill-slate-500"
                       >
                         {tick.cm}
@@ -2302,8 +2435,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                     strokeWidth="1.3"
                     strokeDasharray="4,2"
                   />
-                  <rect x="54" y="63" width="118" height="18" rx="4" fill="#0284c7" />
-                  <text x="113" y="75" textAnchor="middle" className="text-[8.5px] font-sans tabular-nums font-black fill-white">
+                  <rect x="54" y="55" width="118" height="18" rx="4" fill="#0284c7" />
+                  <text x="113" y="67" textAnchor="middle" fill="#ffffff" fontSize="8.5" fontWeight="900" fontFamily="sans-serif" className="text-[8.5px] font-sans tabular-nums font-black fill-white">
                     BOY: {heightVal} cm
                   </text>
 
@@ -2318,7 +2451,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                     strokeDasharray="3,3"
                   />
                   <rect x="218" y="20" width="140" height="16" rx="4" fill="#0f172a" />
-                  <text x="288" y="30.5" textAnchor="middle" className="text-[7.5px] font-sans tabular-nums font-bold fill-white">
+                  <text x="288" y="30.5" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="700" fontFamily="sans-serif" className="text-[7.5px] font-sans tabular-nums font-bold fill-white">
                     SİMETRİ EKSENİ · 0.0°
                   </text>
 
@@ -2357,7 +2490,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
                   {/* Force Plate Telemetry Pill */}
                   <rect x="138" y="616" width="300" height="24" rx="6" fill={effectivePrimaryHex} />
-                  <text x="288" y="631.5" textAnchor="middle" className="text-[9px] font-sans tabular-nums font-black fill-white">
+                  <text x="288" y="631.5" textAnchor="middle" fill="#ffffff" fontSize="9" fontWeight="900" fontFamily="sans-serif" className="text-[9px] font-sans tabular-nums font-black fill-white">
                     KÜTLE: {weightVal} kg · YAĞSIZ KAS: {leanMassKg} kg · YAĞ: %{fatVal}
                   </text>
 
@@ -2586,7 +2719,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   <line x1="241" y1="472" x2="241" y2="484" stroke="#ea580c" strokeWidth="2.2" />
                   <line x1="273" y1="472" x2="273" y2="484" stroke="#ea580c" strokeWidth="2.2" />
                   <rect x="238" y="490" width="38" height="14" rx="3" fill="#ea580c" />
-                  <text x="257" y="500" textAnchor="middle" className="text-[7px] font-sans tabular-nums font-black fill-white">
+                  <text x="257" y="500" textAnchor="middle" fill="#ffffff" fontSize="7" fontWeight="900" fontFamily="sans-serif" className="text-[7px] font-sans tabular-nums font-black fill-white">
                     {femurBr} cm
                   </text>
 
@@ -2629,122 +2762,122 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   {/* LEFT LEADER LINES (01 - 04) */}
                   {/* 01 Biceps Skinfold */}
                   <polyline
-                    points="196,226 154,142 122,142"
+                    points="196,226 140,112 84,112"
                     fill="none"
                     stroke="#0284c7"
                     strokeWidth="1.5"
                   />
-                  <rect x="48" y="129" width="76" height="24" rx="5" fill="#0284c7" />
-                  <text x="86" y="140" textAnchor="middle" className="text-[7px] font-sans tabular-nums font-bold fill-white/85">
+                  <rect x="8" y="94" width="80" height="32" rx="6" fill={effectivePrimaryHex} stroke="#ffffff" strokeWidth="1.2" />
+                  <text x="48" y="108" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="900" fontFamily="sans-serif" className="text-[7.5px] font-sans font-black fill-white/90">
                     01 BICEPS SF
                   </text>
-                  <text x="86" y="149" textAnchor="middle" className="text-[8.5px] font-sans tabular-nums font-black fill-white">
+                  <text x="48" y="121" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="900" fontFamily="sans-serif" className="text-[10px] font-sans font-black fill-white">
                     {bicepsSf} mm
                   </text>
 
                   {/* 02 Triceps Skinfold */}
                   <polyline
-                    points="182,244 146,244 122,244"
+                    points="182,244 130,224 84,224"
                     fill="none"
                     stroke="#6366f1"
                     strokeWidth="1.5"
                   />
-                  <rect x="48" y="231" width="76" height="24" rx="5" fill="#6366f1" />
-                  <text x="86" y="242" textAnchor="middle" className="text-[7px] font-sans tabular-nums font-bold fill-white/85">
+                  <rect x="8" y="208" width="80" height="32" rx="6" fill={effectivePrimaryHex} stroke="#ffffff" strokeWidth="1.2" />
+                  <text x="48" y="222" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="900" fontFamily="sans-serif" className="text-[7.5px] font-sans font-black fill-white/90">
                     02 TRICEPS SF
                   </text>
-                  <text x="86" y="251" textAnchor="middle" className="text-[8.5px] font-sans tabular-nums font-black fill-white">
+                  <text x="48" y="235" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="900" fontFamily="sans-serif" className="text-[10px] font-sans font-black fill-white">
                     {tricepsSf} mm
                   </text>
 
                   {/* 03 Subscapular Skinfold */}
                   <polyline
-                    points="248,206 168,348 122,348"
+                    points="248,206 140,336 84,336"
                     fill="none"
                     stroke="#059669"
                     strokeWidth="1.5"
                   />
-                  <rect x="48" y="335" width="76" height="24" rx="5" fill="#059669" />
-                  <text x="86" y="346" textAnchor="middle" className="text-[7px] font-sans tabular-nums font-bold fill-white/85">
+                  <rect x="8" y="320" width="80" height="32" rx="6" fill={effectivePrimaryHex} stroke="#ffffff" strokeWidth="1.2" />
+                  <text x="48" y="334" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="900" fontFamily="sans-serif" className="text-[7.5px] font-sans font-black fill-white/90">
                     03 KÜREK ALTI
                   </text>
-                  <text x="86" y="355" textAnchor="middle" className="text-[8.5px] font-sans tabular-nums font-black fill-white">
+                  <text x="48" y="347" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="900" fontFamily="sans-serif" className="text-[10px] font-sans font-black fill-white">
                     {subscapSf} mm
                   </text>
 
                   {/* 04 Suprailiac Skinfold */}
                   <polyline
-                    points="244,324 176,448 122,448"
+                    points="244,324 140,448 84,448"
                     fill="none"
                     stroke="#10b981"
                     strokeWidth="1.5"
                   />
-                  <rect x="48" y="435" width="76" height="24" rx="5" fill="#10b981" />
-                  <text x="86" y="446" textAnchor="middle" className="text-[7px] font-sans tabular-nums font-bold fill-white/85">
+                  <rect x="8" y="432" width="80" height="32" rx="6" fill={effectivePrimaryHex} stroke="#ffffff" strokeWidth="1.2" />
+                  <text x="48" y="446" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="900" fontFamily="sans-serif" className="text-[7.5px] font-sans font-black fill-white/90">
                     04 SUPRAILIAC
                   </text>
-                  <text x="86" y="455" textAnchor="middle" className="text-[8.5px] font-sans tabular-nums font-black fill-white">
+                  <text x="48" y="459" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="900" fontFamily="sans-serif" className="text-[10px] font-sans font-black fill-white">
                     {suprailiacSf} mm
                   </text>
 
                   {/* RIGHT LEADER LINES (05 - 08) */}
                   {/* 05 Flexed Biceps Circumference */}
                   <polyline
-                    points="382,232 426,142 456,142"
+                    points="382,232 432,112 476,112"
                     fill="none"
                     stroke={effectivePrimaryHex}
                     strokeWidth="1.5"
                   />
-                  <rect x="454" y="129" width="82" height="24" rx="5" fill={effectivePrimaryHex} />
-                  <text x="495" y="140" textAnchor="middle" className="text-[7px] font-sans tabular-nums font-bold fill-white/85">
+                  <rect x="474" y="94" width="82" height="32" rx="6" fill={effectivePrimaryHex} stroke="#ffffff" strokeWidth="1.2" />
+                  <text x="515" y="108" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="900" fontFamily="sans-serif" className="text-[7.5px] font-sans font-black fill-white/90">
                     05 PAZU ÇEVRE
                   </text>
-                  <text x="495" y="149" textAnchor="middle" className="text-[8.5px] font-sans tabular-nums font-black fill-white">
+                  <text x="515" y="121" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="900" fontFamily="sans-serif" className="text-[10px] font-sans font-black fill-white">
                     {flexedBic} cm
                   </text>
 
                   {/* 06 Humerus & Femur Breadth */}
                   <polyline
-                    points="392,266 428,244 454,244"
+                    points="392,266 438,224 476,224"
                     fill="none"
                     stroke="#ea580c"
                     strokeWidth="1.5"
                   />
-                  <rect x="454" y="231" width="82" height="24" rx="5" fill="#ea580c" />
-                  <text x="495" y="242" textAnchor="middle" className="text-[7px] font-sans tabular-nums font-bold fill-white/90">
+                  <rect x="474" y="208" width="82" height="32" rx="6" fill={effectivePrimaryHex} stroke="#ffffff" strokeWidth="1.2" />
+                  <text x="515" y="222" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="900" fontFamily="sans-serif" className="text-[7.5px] font-sans font-black fill-white/90">
                     06 KEMİK ÇAPI
                   </text>
-                  <text x="495" y="251" textAnchor="middle" className="text-[8.5px] font-sans tabular-nums font-black fill-white">
+                  <text x="515" y="235" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="900" fontFamily="sans-serif" className="text-[10px] font-sans font-black fill-white">
                     {humerusBr} / {femurBr} cm
                   </text>
 
                   {/* 07 WHR & Body Fat % */}
                   <polyline
-                    points="333,298 416,348 456,348"
+                    points="333,298 424,336 476,336"
                     fill="none"
                     stroke="#e11d48"
                     strokeWidth="1.5"
                   />
-                  <rect x="454" y="335" width="82" height="24" rx="5" fill="#e11d48" />
-                  <text x="495" y="346" textAnchor="middle" className="text-[7px] font-sans tabular-nums font-bold fill-white/85">
+                  <rect x="474" y="320" width="82" height="32" rx="6" fill={effectivePrimaryHex} stroke="#ffffff" strokeWidth="1.2" />
+                  <text x="515" y="334" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="900" fontFamily="sans-serif" className="text-[7.5px] font-sans font-black fill-white/90">
                     07 WHR &amp; YAĞ
                   </text>
-                  <text x="495" y="355" textAnchor="middle" className="text-[8.5px] font-sans tabular-nums font-black fill-white">
+                  <text x="515" y="347" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="900" fontFamily="sans-serif" className="text-[10px] font-sans font-black fill-white">
                     {whrVal} · %{fatVal}
                   </text>
 
                   {/* 08 Calf Circumference & Skinfold */}
                   <polyline
-                    points="329,522 418,448 456,448"
+                    points="329,522 428,448 476,448"
                     fill="none"
                     stroke="#0f766e"
                     strokeWidth="1.5"
                   />
-                  <rect x="454" y="435" width="82" height="24" rx="5" fill="#0f766e" />
-                  <text x="495" y="446" textAnchor="middle" className="text-[7px] font-sans tabular-nums font-bold fill-white/85">
+                  <rect x="474" y="432" width="82" height="32" rx="6" fill={effectivePrimaryHex} stroke="#ffffff" strokeWidth="1.2" />
+                  <text x="515" y="446" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="900" fontFamily="sans-serif" className="text-[7.5px] font-sans font-black fill-white/90">
                     08 BALDIR
                   </text>
-                  <text x="495" y="455" textAnchor="middle" className="text-[8.5px] font-sans tabular-nums font-black fill-white">
+                  <text x="515" y="459" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="900" fontFamily="sans-serif" className="text-[10px] font-sans font-black fill-white">
                     {calfCirc}cm / {calfSf}mm
                   </text>
 
@@ -2766,6 +2899,10 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                         x={pin.cx}
                         y={pin.cy + 2.5}
                         textAnchor="middle"
+                        fill="#ffffff"
+                        fontSize="7.5"
+                        fontWeight="900"
+                        fontFamily="sans-serif"
                         className="text-[7.5px] font-sans tabular-nums font-black fill-white"
                       >
                         {pin.code}
@@ -2811,7 +2948,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                         className="px-1.5 py-0.5 rounded text-[9px] font-sans tabular-nums font-black text-white"
                         style={{ backgroundColor: item.accent }}
                       >
-                        NOKTA {item.code}
+                        ANALİZ {item.code}
                       </span>
                       <span className="text-[9.5px] font-sans tabular-nums font-bold text-emerald-700">
                         {item.status} · %{item.pct}
@@ -2829,7 +2966,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                         I: <strong>{item.m1}</strong> → II: <strong>{item.m2}</strong>
                       </div>
                       <div className="text-base font-black text-slate-900">
-                        {item.m3}{' '}
+                        {item.displayVal}{' '}
                         <span className="text-[10px] font-normal text-slate-500">{item.unit}</span>
                       </div>
                     </div>
@@ -2862,43 +2999,43 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         >
           <div className="grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3 gap-3">
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-extrabold text-sky-900 uppercase">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-extrabold text-sky-900 uppercase truncate">
                   I. ÜST EKSTREMİTE &amp; TORAKS SENTEZİ
                 </span>
-                <span className="text-[10px] font-sans tabular-nums font-bold text-sky-700">
+                <span className="text-[10px] font-sans tabular-nums font-bold text-sky-700 shrink-0 whitespace-nowrap">
                   Pazu: {flexedBic} cm
                 </span>
               </div>
-              <p className="text-[10.5px] text-slate-600 mt-1 leading-snug">
+              <p className="text-[10.5px] text-slate-600 mt-1 leading-normal">
                 Biceps ({bicepsSf} mm) ve Triceps ({tricepsSf} mm) deri kıvrımı kalınlıkları ile Humerus bikondiler kemik çapı ({humerusBr} cm) üst gövde kas-iskelet verimliliğinin optimal düzeyde olduğunu göstermektedir.
               </p>
             </div>
 
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-extrabold text-rose-900 uppercase">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-extrabold text-rose-900 uppercase truncate">
                   II. MERKEZ GÖVDE (CORE) &amp; METABOLİK DENGE
                 </span>
-                <span className="text-[10px] font-sans tabular-nums font-bold text-rose-700">
+                <span className="text-[10px] font-sans tabular-nums font-bold text-rose-700 shrink-0 whitespace-nowrap">
                   WHR: {whrVal} · Yağ: %{fatVal}
                 </span>
               </div>
-              <p className="text-[10.5px] text-slate-600 mt-1 leading-snug">
+              <p className="text-[10.5px] text-slate-600 mt-1 leading-normal">
                 Subscapular ({subscapSf} mm) ve Suprailiac ({suprailiacSf} mm) merkez gövde deri kıvrımları ile Bel/Kalça oranı ({whrVal}), atletik gövde stabilitesi ve düşük viseral yağ dağılımını doğrulamaktadır.
               </p>
             </div>
 
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-extrabold text-emerald-900 uppercase">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-extrabold text-emerald-900 uppercase truncate">
                   III. ALT EKSTREMİTE &amp; KİNETİK İTKİ ZİNCİRİ
                 </span>
-                <span className="text-[10px] font-sans tabular-nums font-bold text-emerald-700">
+                <span className="text-[10px] font-sans tabular-nums font-bold text-emerald-700 shrink-0 whitespace-nowrap">
                   Baldır: {calfCirc} cm · Femur: {femurBr} cm
                 </span>
               </div>
-              <p className="text-[10.5px] text-slate-600 mt-1 leading-snug">
+              <p className="text-[10.5px] text-slate-600 mt-1 leading-normal">
                 Femur bikondiler çapı ({femurBr} cm), baldır kas çevresi ({calfCirc} cm) ve medial baldır skinfold ({calfSf} mm) değerleri; patlayıcı sıçrama ve sprint kuvvet aktarımını destekleyen güçlü alt ekstremite yapısını yansıtır.
               </p>
             </div>
@@ -2951,6 +3088,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 <RotaSportsFlyHeaderBadge
                   isDark={true}
                   effectiveSecondaryHex={effectiveSecondaryHex}
+                  hideRota={true}
                 />
                 <div className="px-3 py-1.5 rounded-xl bg-white/10 backdrop-blur-xs border border-white/25 text-right shrink-0">
                   <div className="text-[10px] uppercase tracking-wider text-sky-200 font-semibold">
@@ -2979,7 +3117,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               </div>
               <div className="bg-white/10 rounded-lg p-2 border border-white/15">
                 <span className="text-[9px] text-sky-100 block font-sans font-medium uppercase">Ölçüm Dönemi</span>
-                <span className="font-bold text-sky-200">3. Dönem Ölçümü</span>
+                <span className="font-bold text-sky-200">{currentReport.date3 !== '—' ? '3. Dönem Ölçümü' : 'Gelişim Durumu'}</span>
               </div>
             </div>
 
@@ -3018,7 +3156,9 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 <div className="text-[9.5px] text-blue-600 font-bold mt-0.5">+%{p2Score - p1Score} İlerleme</div>
               </div>
               <div className="p-3 rounded-xl bg-white border-2 border-emerald-500 shadow-2xs">
-                <div className="text-[10px] font-bold text-emerald-800 uppercase">3. Ölçüm (Güncel)</div>
+                <div className="text-[10px] font-bold text-emerald-800 uppercase">
+                  {currentReport.date3 !== '—' ? '3. Ölçüm (Güncel)' : 'Mevcut Durum'}
+                </div>
                 <div className="text-xl font-black font-sans tabular-nums text-emerald-600 mt-0.5">%{p3Score}</div>
                 <div className="text-[9.5px] text-emerald-700 font-extrabold mt-0.5">İleri Düzey Gelişim</div>
               </div>
@@ -3270,6 +3410,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 <RotaSportsFlyHeaderBadge
                   isDark={true}
                   effectiveSecondaryHex={effectiveSecondaryHex}
+                  hideRota={true}
                 />
                 <div className="px-3 py-1.5 rounded-xl bg-slate-900/80 border border-slate-700 text-right shrink-0">
                   <div className="text-[10px] uppercase tracking-wider text-sky-200 font-semibold font-sans tabular-nums">
@@ -3341,7 +3482,9 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                     </th>
                     <th className="py-2 px-1.5 text-center">1. Test ({currentReport.date1})</th>
                     <th className="py-2 px-1.5 text-center">2. Test ({currentReport.date2})</th>
-                    <th className="py-2 px-2 text-center bg-emerald-950 text-emerald-300 font-black">3. Test ({currentReport.date3})</th>
+                    <th className="py-2 px-2 text-center bg-emerald-950 text-emerald-300 font-black">
+                      {currentReport.date3 !== '—' ? `3. Test (${currentReport.date3})` : '—'}
+                    </th>
                     <th className="py-2 px-2 text-center">Dönemsel Değişim (Δ)</th>
                     <th className="py-2 px-2 text-right">Trend Yönü</th>
                   </tr>
@@ -3355,7 +3498,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                         <td className="py-2 px-2.5 font-sans font-bold text-slate-800">{m.name} ({m.unit})</td>
                         <td className="py-2 px-1.5 text-center text-slate-600">{m.m1}</td>
                         <td className="py-2 px-1.5 text-center text-blue-800 font-semibold">{m.m2}</td>
-                        <td className="py-2 px-2 text-center font-black text-slate-950 bg-emerald-50/50">{m.m3}</td>
+                        <td className="py-2 px-2 text-center font-black text-slate-950 bg-emerald-50/50">{m.m3 || '—'}</td>
                         <td className="py-2 px-2 text-center font-bold">
                           <span className={isPositive ? 'text-emerald-700' : 'text-rose-600'}>
                             {delta >= 0 ? `+${delta}` : delta} {m.unit}
@@ -3665,31 +3808,151 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
             'Beden Sağlığı, Deri Kıvrım Kalınlıkları (Skinfold), Kemik Çapı, Kas Çevresi ve Z-Skor (SD) Referans Analizi'
           )}
 
-          {/* 3-Dot Scale Measurement Legend & Explanation Bar + Explicit Reference Source */}
-          <div className="flex flex-wrap items-center justify-between gap-2.5 bg-slate-50 p-3 rounded-xl border-2 border-slate-200 shadow-2xs mb-3 text-xs">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-[11px] font-black uppercase text-slate-900 tracking-wider flex items-center gap-1.5">
-                <Info className="w-4 h-4 text-blue-600 inline shrink-0" />
-                <span>Skala Göstergesi (3 Dönemlik Ölçüm Noktaları):</span>
-              </span>
-              <span className="flex items-center gap-1.5 font-bold text-slate-800 bg-white px-2.5 py-1 rounded-md border border-slate-200 shadow-2xs">
-                <span className="w-3 h-3 rounded-full bg-slate-400 border border-slate-600 inline-block shrink-0" />
-                <span>Gri Nokta = I. Ölçüm (Başlangıç: {currentReport.date1})</span>
-              </span>
-              <span className="flex items-center gap-1.5 font-bold text-blue-900 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200 shadow-2xs">
-                <span className="w-3 h-3 rounded-full bg-blue-600 border border-white inline-block shrink-0" />
-                <span>Mavi Nokta = II. Ölçüm (Ara Dönem: {currentReport.date2})</span>
-              </span>
-              <span className="flex items-center gap-1.5 font-black text-rose-950 bg-rose-50 px-2.5 py-1 rounded-md border border-rose-300 shadow-2xs">
-                <span className="w-3.5 h-3.5 rounded-full bg-rose-600 border-2 border-white inline-block shrink-0" />
-                <span>Kırmızı Nokta = III. Ölçüm (Güncel Sonuç: {currentReport.date3})</span>
-              </span>
+          {!hideScaleLegend && (
+            <div className="flex flex-wrap items-center justify-between gap-2.5 bg-slate-50 p-3 rounded-xl border-2 border-slate-200 shadow-2xs mb-3 text-xs">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-[11px] font-black uppercase text-slate-900 tracking-wider flex items-center gap-1.5">
+                  <Info className="w-4 h-4 text-blue-600 inline shrink-0" />
+                  <span>Skala Göstergesi (3 Dönemlik Ölçüm Noktaları):</span>
+                </span>
+                <span className="flex items-center gap-1.5 font-bold text-slate-800 bg-white px-2.5 py-1 rounded-md border border-slate-200 shadow-2xs">
+                  <span className="w-3 h-3 rounded-full bg-slate-400 border border-slate-600 inline-block shrink-0" />
+                  <span>I. Ölçüm ({currentReport.date1})</span>
+                </span>
+                <span className="flex items-center gap-1.5 font-bold text-blue-900 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200 shadow-2xs">
+                  <span className="w-3 h-3 rounded-full bg-blue-600 border border-white inline-block shrink-0" />
+                  <span>II. Ölçüm ({currentReport.date2})</span>
+                </span>
+                {currentReport.date3 !== '—' && currentReport.date3 !== '' && (
+                  <span className="flex items-center gap-1.5 font-black text-rose-950 bg-rose-50 px-2.5 py-1 rounded-md border border-rose-300 shadow-2xs">
+                    <span className="w-3.5 h-3.5 rounded-full bg-rose-600 border-2 border-white inline-block shrink-0" />
+                    <span>III. Ölçüm ({currentReport.date3})</span>
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-3.5 py-1.5 rounded-lg bg-slate-900 text-white border border-slate-700 font-sans text-xs font-semibold shadow-2xs flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-sky-400 inline-block shrink-0" />
+                  <span>Referans Standart: Dünya Sağlık Örgütü (WHO) Uluslararası Büyüme &amp; ISAK Kinantropometri Protokolü</span>
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="px-3.5 py-1.5 rounded-lg bg-slate-900 text-white border border-slate-700 font-sans text-xs font-semibold shadow-2xs flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-sky-400 inline-block shrink-0" />
-                <span>Referans Standart: Dünya Sağlık Örgütü (WHO) Uluslararası Büyüme &amp; ISAK Kinantropometri Protokolü</span>
-              </span>
+          )}
+
+          {/* Parent Info & Sports History Cards (Matching Reference Image) */}
+          <div className="space-y-3 mb-4">
+            {/* 2. VELİ BİLGİLERİ */}
+            <div className="rounded-xl border-2 border-red-500 overflow-hidden shadow-2xs bg-white">
+              <div className="bg-red-600 text-white font-black px-3 py-1.5 text-xs uppercase flex items-center gap-2">
+                {!hideSectionNumbers && (
+                  <span className="w-5 h-5 rounded-full bg-white text-red-600 flex items-center justify-center font-bold text-xs shrink-0">2</span>
+                )}
+                <Users className="w-4 h-4" />
+                <span>VELİ BİLGİLERİ</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-red-200 p-3 text-xs">
+                {/* Anne Bilgileri */}
+                <div className="space-y-2 pr-2">
+                  <div className="font-extrabold text-slate-900 border-b border-red-100 pb-1">ANNE BİLGİLERİ</div>
+                  <div className="grid grid-cols-12 gap-1 items-center">
+                    <span className="col-span-4 text-slate-600 font-semibold">Adı Soyadı :</span>
+                    <span className="col-span-8 font-bold text-slate-900 border-b border-dashed border-slate-300 pb-0.5">{currentReport.parentInfo?.anneAdSoyad || '—'}</span>
+                  </div>
+                  <div className="grid grid-cols-12 gap-1 items-center">
+                    <span className="col-span-4 text-slate-600 font-semibold">Boy / Kilo :</span>
+                    <span className="col-span-8 font-medium text-slate-800 border-b border-dashed border-slate-300 pb-0.5">
+                      {currentReport.parentInfo?.anneBoy || '—'} cm &nbsp;&nbsp;&nbsp; {currentReport.parentInfo?.anneKilo || '—'} kg
+                    </span>
+                  </div>
+                </div>
+
+                {/* Baba Bilgileri */}
+                <div className="space-y-2 pl-0 md:pl-3 pt-3 md:pt-0">
+                  <div className="font-extrabold text-slate-900 border-b border-red-100 pb-1">BABA BİLGİLERİ</div>
+                  <div className="grid grid-cols-12 gap-1 items-center">
+                    <span className="col-span-4 text-slate-600 font-semibold">Adı Soyadı :</span>
+                    <span className="col-span-8 font-bold text-slate-900 border-b border-dashed border-slate-300 pb-0.5">{currentReport.parentInfo?.babaAdSoyad || '—'}</span>
+                  </div>
+                  <div className="grid grid-cols-12 gap-1 items-center">
+                    <span className="col-span-4 text-slate-600 font-semibold">Boy / Kilo :</span>
+                    <span className="col-span-8 font-medium text-slate-800 border-b border-dashed border-slate-300 pb-0.5">
+                      {currentReport.parentInfo?.babaBoy || '—'} cm &nbsp;&nbsp;&nbsp; {currentReport.parentInfo?.babaKilo || '—'} kg
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. SPOR GEÇMİŞİ */}
+            <div className="rounded-xl border-2 border-slate-900 overflow-hidden shadow-2xs bg-white">
+              <div className="bg-slate-900 text-white font-black px-3 py-1.5 text-xs uppercase flex items-center gap-2">
+                {!hideSectionNumbers && (
+                  <span className="w-5 h-5 rounded-full bg-white text-slate-900 flex items-center justify-center font-bold text-xs shrink-0">3</span>
+                )}
+                <Activity className="w-4 h-4 text-emerald-400" />
+                <span>SPOR GEÇMİŞİ</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-300 p-3 text-xs">
+                {/* Anne Spor Geçmişi */}
+                <div className="space-y-2 pr-2">
+                  <div className="font-extrabold text-slate-900 border-b border-slate-200 pb-1">ANNE SPOR GEÇMİŞİ</div>
+                  <div className="flex items-center justify-between py-1">
+                    <span className="text-slate-700 font-semibold">Daha önce / hâlen spor yapıyor mu?</span>
+                    <div className="flex items-center gap-4 font-bold text-slate-800">
+                      <span className="flex items-center gap-1.5">
+                        <span className={`w-3.5 h-3.5 rounded border border-slate-600 flex items-center justify-center text-[10px] ${currentReport.parentInfo?.anneSporYapiyorMu === 'Evet' ? 'bg-slate-900 text-white font-black' : 'bg-white'}`}>
+                          {currentReport.parentInfo?.anneSporYapiyorMu === 'Evet' ? '✓' : ''}
+                        </span>
+                        <span>Evet</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className={`w-3.5 h-3.5 rounded border border-slate-600 flex items-center justify-center text-[10px] ${currentReport.parentInfo?.anneSporYapiyorMu === 'Hayir' ? 'bg-slate-900 text-white font-black' : 'bg-white'}`}>
+                          {currentReport.parentInfo?.anneSporYapiyorMu === 'Hayir' ? '✓' : ''}
+                        </span>
+                        <span>Hayır</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-12 gap-1 items-center">
+                    <span className="col-span-5 text-slate-600 font-semibold">Hangi branş(lar)? :</span>
+                    <span className="col-span-7 font-medium text-slate-800 border-b border-dashed border-slate-300 pb-0.5">{currentReport.parentInfo?.anneBranslar || '—'}</span>
+                  </div>
+                  <div className="grid grid-cols-12 gap-1 items-center">
+                    <span className="col-span-5 text-slate-600 font-semibold">Spor geçmişi (yıl/yaş):</span>
+                    <span className="col-span-7 font-medium text-slate-800 border-b border-dashed border-slate-300 pb-0.5">{currentReport.parentInfo?.anneSporGecmisi || '—'}</span>
+                  </div>
+                </div>
+
+                {/* Baba Spor Geçmişi */}
+                <div className="space-y-2 pl-0 md:pl-3 pt-3 md:pt-0">
+                  <div className="font-extrabold text-slate-900 border-b border-slate-200 pb-1">BABA SPOR GEÇMİŞİ</div>
+                  <div className="flex items-center justify-between py-1">
+                    <span className="text-slate-700 font-semibold">Daha önce / hâlen spor yapıyor mu?</span>
+                    <div className="flex items-center gap-4 font-bold text-slate-800">
+                      <span className="flex items-center gap-1.5">
+                        <span className={`w-3.5 h-3.5 rounded border border-slate-600 flex items-center justify-center text-[10px] ${currentReport.parentInfo?.babaSporYapiyorMu === 'Evet' ? 'bg-slate-900 text-white font-black' : 'bg-white'}`}>
+                          {currentReport.parentInfo?.babaSporYapiyorMu === 'Evet' ? '✓' : ''}
+                        </span>
+                        <span>Evet</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className={`w-3.5 h-3.5 rounded border border-slate-600 flex items-center justify-center text-[10px] ${currentReport.parentInfo?.babaSporYapiyorMu === 'Hayir' ? 'bg-slate-900 text-white font-black' : 'bg-white'}`}>
+                          {currentReport.parentInfo?.babaSporYapiyorMu === 'Hayir' ? '✓' : ''}
+                        </span>
+                        <span>Hayır</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-12 gap-1 items-center">
+                    <span className="col-span-5 text-slate-600 font-semibold">Hangi branş(lar)? :</span>
+                    <span className="col-span-7 font-medium text-slate-800 border-b border-dashed border-slate-300 pb-0.5">{currentReport.parentInfo?.babaBranslar || '—'}</span>
+                  </div>
+                  <div className="grid grid-cols-12 gap-1 items-center">
+                    <span className="col-span-5 text-slate-600 font-semibold">Spor geçmişi (yıl/yaş):</span>
+                    <span className="col-span-7 font-medium text-slate-800 border-b border-dashed border-slate-300 pb-0.5">{currentReport.parentInfo?.babaSporGecmisi || '—'}</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -3713,7 +3976,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                     className="py-3 px-2 text-center w-[9%] font-black"
                     style={{ backgroundColor: 'rgba(255,255,255,0.22)', color: '#ffffff' }}
                   >
-                    III (Son)
+                    {currentReport.date3 !== '—' && <span>III (Son)</span>}
                   </th>
                   <th className="py-3 px-2 text-center w-[7%] text-white">Birim</th>
                   <th className="py-3 px-2 text-center w-[8%] text-white">Yüzdelik</th>
@@ -3750,13 +4013,13 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       className={`${isEven ? 'bg-slate-50/90' : 'bg-white'} hover:bg-blue-50/60 transition-colors border-b border-slate-200/90 ${rowBorderClass}`}
                     >
                       <td className="py-2.5 pr-3 pl-3 border-r border-slate-200">
-                        <div className="flex items-center justify-between gap-1.5">
-                          <span className="font-extrabold text-slate-900 text-[13px] tracking-tight">{row.name}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 ${targetStateClass}`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-extrabold text-slate-900 text-[12px] tracking-tight truncate">{row.name}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 whitespace-nowrap ${targetStateClass}`}>
                             {targetStateLabel}
                           </span>
                         </div>
-                        <div className="text-[10.5px] text-slate-600 font-medium leading-tight mt-0.5 line-clamp-1">
+                        <div className="text-[10.5px] text-slate-600 font-medium leading-tight mt-0.5">
                           {row.description}
                         </div>
                       </td>
@@ -3767,8 +4030,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                         {row.m2}
                       </td>
                       <td className="py-2.5 px-2 text-center border-r border-slate-200 bg-blue-100/60">
-                        <span className="font-sans tabular-nums font-black text-xs text-blue-950 bg-white border-2 border-blue-500 px-2 py-0.5 rounded-md inline-block shadow-2xs">
-                          {row.m3}
+                        <span className="font-sans tabular-nums font-black text-xs text-blue-950 bg-white border-2 border-blue-500 px-2 py-0.5 rounded-md inline-block shadow-2xs min-w-[32px]">
+                          {row.m3 > 0 ? row.m3 : '—'}
                         </span>
                       </td>
                       <td className="py-2.5 px-2 text-center font-sans tabular-nums text-xs font-bold text-slate-700 border-r border-slate-200">
@@ -3808,7 +4071,9 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
                           <circle cx={p1 * 2} cy="6" r="3.8" fill="#64748b" stroke="#ffffff" strokeWidth="1.2" />
                           <circle cx={p2 * 2} cy="6" r="3.8" fill="#2563eb" stroke="#ffffff" strokeWidth="1.2" />
-                          <circle cx={p3 * 2} cy="6" r="5" fill="#e11d48" stroke="#ffffff" strokeWidth="1.6" />
+                          {row.m3 > 0 && (
+                            <circle cx={p3 * 2} cy="6" r="5" fill="#e11d48" stroke="#ffffff" strokeWidth="1.6" />
+                          )}
                         </svg>
                       </td>
                     </tr>
@@ -3826,7 +4091,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   className="text-[11.5px] font-black uppercase tracking-wider"
                   style={{ color: effectivePrimaryHex }}
                 >
-                  1.1 Bölgesel Deri Kıvrımı (Skinfold mm) Dönemsel Değişim Analizi (I → II → III)
+                  1.1 Bölgesel Deri Kıvrımı (Skinfold mm) Dönemsel Değişim Analizi (I → II)
                 </span>
                 <span className="text-[10px] font-sans tabular-nums font-bold text-slate-700">
                   Düşük Değer = Daha Yüksek Yağsız Kas Tanımlaması
@@ -3849,7 +4114,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                         </span>
                       </div>
                       <div className="text-[9.5px] font-sans tabular-nums text-slate-700 font-bold mt-1">
-                        I: {sf.m1} · II: {sf.m2} · III: {sf.m3}
+                        I: {sf.m1} · II: {sf.m2} {sf.m3 > 0 ? `· III: ${sf.m3}` : ''}
                       </div>
                     </div>
                   );
@@ -3905,7 +4170,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 {heightGain >= 0 ? `+${heightGain}` : heightGain} cm
               </div>
               <div className="text-[10px] text-emerald-900 font-extrabold mt-0.5">
-                I: {heightRow?.m1 ?? 145} → III: {heightRow?.m3 ?? 149.5} cm
+                I: {heightRow?.m1 ?? 145} → II: {heightRow?.m2 ?? 146.2} cm
               </div>
             </div>
             <div className="p-2.5 rounded-xl bg-slate-50 border-2 border-slate-200/90 shadow-2xs">
@@ -4143,35 +4408,38 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
             'Performans ve Sağlık: Sürat, Çabukluk, Reaksiyon, Kuvvet, Patlayıcı Güç, Denge, Esneklik ve Aerobik Kapasite'
           )}
 
-          {/* 3-Dot Scale Measurement Legend Banner for Page 2 */}
-          <div className="bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-2xs mb-2.5 text-xs">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <span className="text-[10.5px] font-black uppercase text-slate-900 tracking-wider flex items-center gap-1">
-                  <Info className="w-3.5 h-3.5 text-blue-600 inline shrink-0" />
-                  <span>Fiziksel Uygunluk (3 Nokta) Kılavuzu:</span>
-                </span>
-                <span className="flex items-center gap-1 font-bold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">
-                  <span className="w-2.5 h-2.5 rounded-full bg-slate-400 border border-slate-600 inline-block shrink-0" />
-                  <span>Gri = 1. Test ({currentReport.date1})</span>
-                </span>
-                <span className="flex items-center gap-1 font-bold text-blue-900 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 text-[10px]">
-                  <span className="w-2.5 h-2.5 rounded-full bg-blue-600 border border-white inline-block shrink-0" />
-                  <span>Mavi = 2. Test ({currentReport.date2})</span>
-                </span>
-                <span className="flex items-center gap-1 font-black text-rose-950 bg-rose-50 px-2 py-0.5 rounded border border-rose-300 text-[10px]">
-                  <span className="w-3 h-3 rounded-full bg-rose-600 border border-white inline-block shrink-0" />
-                  <span>Kırmızı = 3. Test ({currentReport.date3})</span>
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="px-3.5 py-1.5 rounded-lg bg-slate-900 text-white border border-slate-700 font-sans text-xs font-semibold shadow-2xs flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block shrink-0" />
-                  <span>Normatif Referans Kaynağı: Eurofit &amp; Fleishman Biyomekanik Test Normları</span>
-                </span>
+          {!hideScaleLegend && (
+            <div className="bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-2xs mb-2.5 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="text-[10.5px] font-black uppercase text-slate-900 tracking-wider flex items-center gap-1">
+                    <Info className="w-3.5 h-3.5 text-blue-600 inline shrink-0" />
+                    <span>Fiziksel Uygunluk (3 Nokta) Kılavuzu:</span>
+                  </span>
+                  <span className="flex items-center gap-1 font-bold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-400 border border-slate-600 inline-block shrink-0" />
+                    <span>Gri = 1. Test ({currentReport.date1})</span>
+                  </span>
+                  <span className="flex items-center gap-1 font-bold text-blue-900 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 text-[10px]">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-600 border border-white inline-block shrink-0" />
+                    <span>Mavi = 2. Test ({currentReport.date2})</span>
+                  </span>
+                  {currentReport.date3 !== '—' && currentReport.date3 !== '' && (
+                    <span className="flex items-center gap-1 font-black text-rose-950 bg-rose-50 px-2 py-0.5 rounded border border-rose-300 text-[10px]">
+                      <span className="w-3 h-3 rounded-full bg-rose-600 border border-white inline-block shrink-0" />
+                      <span>III. Test ({currentReport.date3})</span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="px-3.5 py-1.5 rounded-lg bg-slate-900 text-white border border-slate-700 font-sans text-xs font-semibold shadow-2xs flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block shrink-0" />
+                    <span>Normatif Referans Kaynağı: Eurofit &amp; Fleishman Biyomekanik Test Normları</span>
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* 15. TEST SONUÇLARI VE HEDEFLER — İLK BAKIŞTA 3 KATEGORİLİ GÖRSEL DURUM PANOSU */}
           {(() => {
@@ -4278,7 +4546,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                     className="py-2 px-2 text-center w-[9.5%] font-black"
                     style={{ backgroundColor: 'rgba(255,255,255,0.22)', color: '#ffffff' }}
                   >
-                    3. Test (Son)
+                    {currentReport.date3 !== '—' ? '3. Test (Son)' : '—'}
                   </th>
                   <th
                     className="py-2 px-2 text-center w-[10%] font-black"
@@ -4332,13 +4600,13 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       className={`border-b border-slate-200/90 ${rowVisualStyle}`}
                     >
                       <td className="py-1.5 pr-2 pl-2.5 border-r border-slate-200">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-extrabold text-slate-900 text-xs tracking-tight">{row.name}</span>
-                          <span className="text-[9.5px] font-sans tabular-nums font-bold text-slate-500">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-extrabold text-slate-900 text-xs tracking-tight truncate">{row.name}</span>
+                          <span className="text-[9.5px] font-sans tabular-nums font-bold text-slate-500 shrink-0 whitespace-nowrap">
                             ({row.unit})
                           </span>
                         </div>
-                        <div className="text-[9.5px] text-slate-600 font-medium leading-tight mt-0.5">
+                        <div className="text-[9.5px] text-slate-600 font-medium leading-normal mt-0.5">
                           <strong className={isNeedsDev ? 'text-rose-700' : 'text-emerald-800'}>
                              {guidance.drillTag}
                           </strong>
@@ -4352,7 +4620,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       </td>
                       <td className="py-1.5 px-2 text-center border-r border-slate-200 bg-white/90">
                         <span
-                          className={`font-sans tabular-nums font-black text-xs px-2 py-0.5 rounded-md inline-block border-2 ${
+                          className={`font-sans tabular-nums font-black text-xs px-2 py-0.5 rounded-md inline-block border-2 min-w-[32px] ${
                             isNeedsDev
                               ? 'bg-rose-50 text-rose-950 border-rose-500'
                               : isMaintain
@@ -4360,7 +4628,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                               : 'bg-emerald-50 text-emerald-950 border-emerald-500'
                           }`}
                         >
-                          {row.m3}
+                          {row.m3 > 0 ? row.m3 : '—'}
                         </span>
                       </td>
                       <td className="py-1.5 px-2 text-center border-r border-slate-200 bg-slate-50">
@@ -4401,14 +4669,16 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                           <line x1="100" y1="0" x2="100" y2="12" stroke="#0f172a" strokeWidth="1.5" strokeDasharray="2,1" />
                           <circle cx={p1 * 2} cy="6" r="3.5" fill="#64748b" stroke="#ffffff" strokeWidth="1.2" />
                           <circle cx={p2 * 2} cy="6" r="3.5" fill="#2563eb" stroke="#ffffff" strokeWidth="1.2" />
-                          <circle
-                            cx={p3 * 2}
-                            cy="6"
-                            r="4.8"
-                            fill={isNeedsDev ? '#e11d48' : isMaintain ? '#d97706' : '#059669'}
-                            stroke="#ffffff"
-                            strokeWidth="1.5"
-                          />
+                          {row.m3 > 0 && (
+                            <circle
+                              cx={p3 * 2}
+                              cy="6"
+                              r="4.8"
+                              fill={isNeedsDev ? '#e11d48' : isMaintain ? '#d97706' : '#059669'}
+                              stroke="#ffffff"
+                              strokeWidth="1.5"
+                            />
+                          )}
                         </svg>
                       </td>
                     </tr>
@@ -4483,7 +4753,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         badgeClass: 'bg-blue-600 text-white',
         borderClass: 'border-blue-200',
         bgClass: 'bg-blue-50/30',
-        deltaText: speedRow ? `${(speedRow.m1 - speedRow.m3).toFixed(2)} sn iyileşme` : '+4% İlerleme',
+        deltaText: speedRow && speedRow.m3 > 0 ? `${(speedRow.m1 - speedRow.m3).toFixed(2)} sn iyileşme` : '—',
       },
       {
         id: 'power',
@@ -4496,7 +4766,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         badgeClass: 'bg-indigo-600 text-white',
         borderClass: 'border-indigo-200',
         bgClass: 'bg-indigo-50/30',
-        deltaText: powerRow ? `+${(powerRow.m3 - powerRow.m1).toFixed(1)} cm artış` : '+8% İlerleme',
+        deltaText: powerRow && powerRow.m3 > 0 ? `+${(powerRow.m3 - powerRow.m1).toFixed(1)} cm artış` : '—',
       },
       {
         id: 'agility',
@@ -4509,7 +4779,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         badgeClass: 'bg-emerald-600 text-white',
         borderClass: 'border-emerald-200',
         bgClass: 'bg-emerald-50/30',
-        deltaText: agilityRow ? `${(agilityRow.m1 - agilityRow.m3).toFixed(2)} sn iyileşme` : '+5% İlerleme',
+        deltaText: agilityRow && agilityRow.m3 > 0 ? `${(agilityRow.m1 - agilityRow.m3).toFixed(2)} sn iyileşme` : '—',
       },
       {
         id: 'endurance',
@@ -4522,7 +4792,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         badgeClass: 'bg-slate-700 text-white',
         borderClass: 'border-slate-300',
         bgClass: 'bg-slate-50',
-        deltaText: enduranceRow ? `+${(enduranceRow.m3 - enduranceRow.m1).toFixed(0)} mekik` : '+6% İlerleme',
+        deltaText: enduranceRow && enduranceRow.m3 > 0 ? `+${(enduranceRow.m3 - enduranceRow.m1).toFixed(0)} mekik` : '—',
       },
     ];
 
@@ -4580,7 +4850,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       <div className="text-[11px] text-slate-500 font-semibold">Mevcut Ölçüm Sonucu</div>
                       <div className="flex items-baseline justify-between mt-0.5">
                         <span className="text-2xl font-black text-slate-900 tabular-nums">
-                          {item.row?.m3 ?? '-'} <span className="text-xs font-semibold text-slate-500">{item.row?.unit}</span>
+                          {item.row?.m3 && item.row.m3 > 0 ? item.row.m3 : '—'} <span className="text-xs font-semibold text-slate-500">{item.row?.unit}</span>
                         </span>
                         <span className="px-2 py-0.5 rounded-full bg-slate-900 text-white text-xs font-extrabold tabular-nums">
                           %{currentPercentile}
@@ -4690,7 +4960,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 {[
                   { label: 'I. Test', date: currentReport.scoreHistory?.p1Date, score: currentReport.scoreHistory?.p1Score, ringClass: 'border-slate-300 bg-slate-50 text-slate-700' },
                   { label: 'II. Test', date: currentReport.scoreHistory?.p2Date, score: currentReport.scoreHistory?.p2Score, ringClass: 'border-blue-300 bg-blue-50 text-blue-800' },
-                  { label: 'III. Test (Son)', date: currentReport.scoreHistory?.p3Date, score: currentReport.scoreHistory?.p3Score, ringClass: 'border-emerald-400 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-200' },
+                  ...(currentReport.date3 !== '—' ? [{ label: 'III. Test (Son)', date: currentReport.scoreHistory?.p3Date, score: currentReport.scoreHistory?.p3Score, ringClass: 'border-emerald-400 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-200' }] : []),
                 ].map((item, idx) => (
                   <div key={idx} className="flex items-center gap-2">
                     <div className={`w-10 h-10 rounded-xl border ${item.ringClass} flex flex-col items-center justify-center font-sans shrink-0`}>
@@ -4783,25 +5053,23 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       }
     ];
 
-    const fallbackComment = `${currentReport.athleteName}, ${currentReport.sportBranch} branşı altyapı grubumuzda %${currentReport.scoreHistory.p3Score} genel performans puanı ile kulübümüzün gelişim gösteren ve en yüksek potansiyelli sporcularından biridir. Yapılan biyomotor ve performans analizlerine göre belirlenen antrenman programına katılım ve süreklilik, gelişimi en üst düzeye taşıyacaktır.`;
-    const finalComment = currentReport.expertComment || fallbackComment;
+    const finalComment =
+      !currentReport.expertComment || isStaleExpertComment(currentReport.expertComment)
+        ? generateAthleteInterpretiveExpertComment(currentReport)
+        : currentReport.expertComment;
 
     return (
       <div
         id="sportsfly-lab-page-5"
         className={`a4-print-page relative overflow-hidden min-h-[1460px] flex flex-col justify-between rounded-xl p-5 sm:p-7 shadow-xs print:shadow-none font-sans ${activeTemplate.pageFrameClass}`}
       >
-        {renderPageWatermark()}
-        <div className="space-y-6 font-sans relative z-10">
-          {/* Header Bar */}
-          <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
-            <h2 className="text-xs sm:text-[13px] font-black uppercase text-slate-900 tracking-tight">
-              9. YAPAY ZEKA TABANLI PERFORMANS ÖNERİLERİ VE GELİŞİME AÇIK YÖNLER
-            </h2>
-            <span className="text-[10px] font-sans font-extrabold text-slate-400">
-              Otomatik Metrik &amp; SD Sapma Analizi
-            </span>
-          </div>
+        <div>
+          {renderPageHeader(
+            4,
+            'Yapay Zeka Tabanlı Performans Önerileri & Gelişim Rehberi',
+            'Otomatik Metrik & SD Sapma Analizi ile Sporcuya Özel Antrenman ve Gelişim Tavsiyeleri'
+          )}
+          <div className="space-y-6 font-sans relative z-10">
 
           {/* 3 Improvement Areas Cards Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
@@ -4915,6 +5183,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
             </span>
             <span>tarafından gelişim takibi amacıyla hassasiyetle yapılmıştır; kesinlikle tıbbi tanı, teşhis, tedavi veya bir hekim raporu niteliği taşımamaktadır.</span>
           </div>
+          </div>
         </div>
 
         {renderPageFooter(4)}
@@ -4983,9 +5252,9 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 p-1 shadow-xs cursor-pointer hover:border-indigo-400 transition-colors overflow-hidden group"
                 title="Firma Profilini Görüntüle / Kapat"
               >
-                {activeCompanyProfile.logoDataUrl ? (
+                {effectiveAnalysisFirmLogo ? (
                   <img
-                    src={activeCompanyProfile.logoDataUrl}
+                    src={effectiveAnalysisFirmLogo}
                     alt={activeCompanyProfile.companyName}
                     className="w-full h-full object-contain"
                   />
@@ -5153,6 +5422,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   </span>
                 )}
               </button>
+
 
               <button
                 type="button"
@@ -5967,7 +6237,51 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   >
                     <Activity className="w-3.5 h-3.5" />
                     <span>
-                      B) Anatomik Vücut Haritası İnfografiği: {showBodyMapInfographic ? 'Açık' : 'Kapalı'}
+                      B) Vücut Haritası: {showBodyMapInfographic ? 'Açık' : 'Kapalı'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHideSectionNumbers((prev) => !prev);
+                      notify(
+                        !hideSectionNumbers
+                          ? 'C) Bölüm Numaraları (Daire İkonları) gizlendi.'
+                          : 'C) Bölüm Numaraları (Daire İkonları) aktif edildi.'
+                      );
+                    }}
+                    className={`px-3 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                      hideSectionNumbers
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                    }`}
+                  >
+                    <Square className="w-3.5 h-3.5" />
+                    <span>
+                      C) Bölüm No: {hideSectionNumbers ? 'Gizli' : 'Görünür'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHideScaleLegend((prev) => !prev);
+                      notify(
+                        !hideScaleLegend
+                          ? 'D) Skala Ölçüm Göstergesi (Açıklama Çubuğu) gizlendi.'
+                          : 'D) Skala Ölçüm Göstergesi (Açıklama Çubuğu) aktif edildi.'
+                      );
+                    }}
+                    className={`px-3 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                      hideScaleLegend
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                    }`}
+                  >
+                    <Info className="w-3.5 h-3.5" />
+                    <span>
+                      D) Skala Göstergesi: {hideScaleLegend ? 'Gizli' : 'Görünür'}
                     </span>
                   </button>
                 </div>
@@ -6882,7 +7196,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                           %{rep.scoreHistory.p3Score}
                         </div>
                         <div className="text-[10px] text-slate-400 mt-0.5">
-                          I: %{rep.scoreHistory.p1Score} → III: %{rep.scoreHistory.p3Score}
+                          I: %{rep.scoreHistory.p1Score} → II: %{rep.scoreHistory.p2Score}
                         </div>
                       </td>
                       <td className="py-3 px-3 text-right">
@@ -7399,7 +7713,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   %{activeAiAnalysis.readinessScore}
                 </div>
                 <p className="text-[11px] text-slate-300 mt-1">
-                  I. Ölçüm (%{currentReport.scoreHistory.p1Score}) → III. Ölçüm (%{currentReport.scoreHistory.p3Score})
+                  I. Ölçüm (%{currentReport.scoreHistory.p1Score}) → II. Ölçüm (%{currentReport.scoreHistory.p2Score})
                 </p>
               </div>
               <div className="mt-3 pt-2.5 border-t border-slate-700 flex items-center justify-between text-[11px]">
@@ -7568,38 +7882,38 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         </div>
       )}
 
-      {/* Interactive A4 PDF Document Preview Bar (Shown when 'PDF Olarak Görüntüle' is active) */}
+      {/* Interactive A4 PDF Document Preview Bar (Shown when 'PDF Olarak Görüntüle' is active - Sticky at Top) */}
       {isPdfPreviewMode && (
         <div
           id="sportsfly-lab-preview-bar"
-          className="bg-slate-900 text-white rounded-2xl p-3.5 sm:px-5 border border-slate-700 flex flex-wrap items-center justify-between gap-3 shadow-lg print:hidden animate-in fade-in duration-200"
+          className="sticky top-0 z-40 bg-slate-900/95 dark:bg-slate-900/95 backdrop-blur-md text-white rounded-2xl p-2.5 sm:p-3.5 sm:px-5 border border-slate-700/80 flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 shadow-xl print:hidden animate-in fade-in duration-200"
         >
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shrink-0 shadow-xs">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-blue-600 flex items-center justify-center shrink-0 shadow-xs">
               <FileText className="w-4 h-4 text-white" />
             </div>
-            <div>
-              <div className="text-xs sm:text-sm font-extrabold tracking-tight flex items-center gap-2">
-                <span>A4 PDF Önizleme Modu — {currentReport.athleteName}</span>
-                <span className="text-[11px] font-sans tabular-nums font-normal text-slate-300">
+            <div className="min-w-0">
+              <div className="text-xs sm:text-sm font-extrabold tracking-tight flex items-center gap-2 truncate">
+                <span className="truncate">A4 PDF Önizleme Modu — {currentReport.athleteName}</span>
+                <span className="text-[10px] sm:text-[11px] font-sans tabular-nums font-normal text-slate-300 hidden md:inline shrink-0">
                   (210 × 297 mm · 5 Sayfa · Baskıya Hazır)
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-slate-400 hidden sm:block">
                 Karnenin A4 yazdırma stillerini inceleyebilir, doğrudan yazıcıdan çıktı alabilir veya PDF olarak indirebilirsiniz.
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0">
             {/* Zoom Controls */}
-            <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700 text-xs">
+            <div className="flex items-center gap-0.5 sm:gap-1 bg-slate-800 p-0.5 sm:p-1 rounded-xl border border-slate-700 text-xs">
               {[85, 100, 110].map((z) => (
                 <button
                   key={z}
                   type="button"
                   onClick={() => setPdfZoom(z)}
-                  className={`px-2.5 py-1 rounded-lg font-sans tabular-nums font-bold transition-colors cursor-pointer ${
+                  className={`px-2 sm:px-2.5 py-1 rounded-lg font-sans tabular-nums font-bold transition-colors cursor-pointer text-[11px] sm:text-xs ${
                     pdfZoom === z ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'
                   }`}
                 >
@@ -7611,33 +7925,46 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
             <button
               type="button"
               onClick={handlePrintA4}
-              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs whitespace-nowrap"
+              title="A4 formatında yazdırın"
             >
-              <Printer className="w-4 h-4" />
-              <span>A4 Yazdır</span>
+              <Printer className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+              <span className="hidden sm:inline">A4 Yazdır</span>
+              <span className="sm:hidden">Yazdır</span>
             </button>
 
             <button
               type="button"
               onClick={handleDownloadPDF}
               disabled={isGeneratingPDF}
-              className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-900 text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-900 text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs whitespace-nowrap disabled:opacity-60"
+              title="Tüm karneyi PDF olarak indirin"
             >
-              <FileDown className="w-4 h-4 text-blue-600" />
+              {isGeneratingPDF ? (
+                <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-blue-600 rounded-full animate-spin shrink-0" />
+              ) : (
+                <FileDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 shrink-0" />
+              )}
               <span>
                 {isGeneratingPDF
                   ? `İndiriliyor (${pdfProgressPage || 1}/5)...`
-                  : 'Tüm Karneyi İndir'}
+                  : (
+                    <>
+                      <span className="hidden sm:inline">Tüm Karneyi İndir</span>
+                      <span className="sm:hidden">İndir</span>
+                    </>
+                  )}
               </span>
             </button>
 
             <button
               type="button"
               onClick={() => setIsPdfPreviewMode(false)}
-              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+              className="px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
+              title="PDF önizleme modunu kapat"
             >
-              <X className="w-4 h-4" />
-              <span>Kapat</span>
+              <X className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+              <span className="hidden sm:inline">Kapat</span>
             </button>
           </div>
         </div>
@@ -7724,9 +8051,9 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   </div>
                 </div>
                 <div className="text-right font-sans tabular-nums">
-                  <div className="text-[10px] text-slate-400 uppercase">3. Ölçüm Puanı</div>
+                  <div className="text-[10px] text-slate-400 uppercase">Performans Puanı</div>
                   <div className="text-sm font-black text-emerald-600">
-                    %{currentReport.scoreHistory.p3Score}
+                    %{currentReport.scoreHistory.p2Score || currentReport.scoreHistory.p3Score}
                   </div>
                 </div>
               </div>
@@ -7740,7 +8067,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   required
                   value={archiveTitleInput}
                   onChange={(e) => setArchiveTitleInput(e.target.value)}
-                  placeholder="Örn: Ege Örnektir - 2026 Yaz Dönemi 3. Ölçüm Karnesi"
+                  placeholder="Örn: Ege Örnektir - 2026 Yaz Dönemi Performans Karnesi"
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
                 />
               </div>
@@ -8192,6 +8519,206 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 </div>
               </div>
 
+              {/* Parent Info & Sports Background Edit Section */}
+              <div className="space-y-3 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+                <h4 className="font-bold text-slate-900 dark:text-white text-xs uppercase tracking-wider flex items-center gap-2">
+                  <Users className="w-4 h-4 text-red-600" />
+                  <span>Veli Bilgileri &amp; Anne-Baba Spor Geçmişi Düzenleme</span>
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Anne Bilgileri Edit */}
+                  <div className="space-y-2 p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <div className="font-extrabold text-slate-800 dark:text-slate-200 text-xs">Anne Bilgileri &amp; Spor Geçmişi</div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-0.5">Anne Adı Soyadı</label>
+                      <input
+                        type="text"
+                        value={currentReport.parentInfo?.anneAdSoyad || ''}
+                        onChange={(e) =>
+                          handleUpdateCurrentReport({
+                            ...currentReport,
+                            parentInfo: { ...(currentReport.parentInfo || {}), anneAdSoyad: e.target.value },
+                          })
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-900 text-xs"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Boy (cm)</label>
+                        <input
+                          type="text"
+                          value={currentReport.parentInfo?.anneBoy || ''}
+                          onChange={(e) =>
+                            handleUpdateCurrentReport({
+                              ...currentReport,
+                              parentInfo: { ...(currentReport.parentInfo || {}), anneBoy: e.target.value },
+                            })
+                          }
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Kilo (kg)</label>
+                        <input
+                          type="text"
+                          value={currentReport.parentInfo?.anneKilo || ''}
+                          onChange={(e) =>
+                            handleUpdateCurrentReport({
+                              ...currentReport,
+                              parentInfo: { ...(currentReport.parentInfo || {}), anneKilo: e.target.value },
+                            })
+                          }
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-slate-900 text-xs"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 items-center pt-1">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Spor Yapıyor mu?</label>
+                        <select
+                          value={currentReport.parentInfo?.anneSporYapiyorMu || 'Evet'}
+                          onChange={(e) =>
+                            handleUpdateCurrentReport({
+                              ...currentReport,
+                              parentInfo: { ...(currentReport.parentInfo || {}), anneSporYapiyorMu: e.target.value as any },
+                            })
+                          }
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-slate-900 text-xs bg-white"
+                        >
+                          <option value="Evet">Evet</option>
+                          <option value="Hayir">Hayır</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Branş(lar)</label>
+                        <input
+                          type="text"
+                          value={currentReport.parentInfo?.anneBranslar || ''}
+                          onChange={(e) =>
+                            handleUpdateCurrentReport({
+                              ...currentReport,
+                              parentInfo: { ...(currentReport.parentInfo || {}), anneBranslar: e.target.value },
+                            })
+                          }
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Spor Geçmişi</label>
+                        <input
+                          type="text"
+                          value={currentReport.parentInfo?.anneSporGecmisi || ''}
+                          onChange={(e) =>
+                            handleUpdateCurrentReport({
+                              ...currentReport,
+                              parentInfo: { ...(currentReport.parentInfo || {}), anneSporGecmisi: e.target.value },
+                            })
+                          }
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-slate-900 text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Baba Bilgileri Edit */}
+                  <div className="space-y-2 p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <div className="font-extrabold text-slate-800 dark:text-slate-200 text-xs">Baba Bilgileri &amp; Spor Geçmişi</div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-0.5">Baba Adı Soyadı</label>
+                      <input
+                        type="text"
+                        value={currentReport.parentInfo?.babaAdSoyad || ''}
+                        onChange={(e) =>
+                          handleUpdateCurrentReport({
+                            ...currentReport,
+                            parentInfo: { ...(currentReport.parentInfo || {}), babaAdSoyad: e.target.value },
+                          })
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-900 text-xs"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Boy (cm)</label>
+                        <input
+                          type="text"
+                          value={currentReport.parentInfo?.babaBoy || ''}
+                          onChange={(e) =>
+                            handleUpdateCurrentReport({
+                              ...currentReport,
+                              parentInfo: { ...(currentReport.parentInfo || {}), babaBoy: e.target.value },
+                            })
+                          }
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Kilo (kg)</label>
+                        <input
+                          type="text"
+                          value={currentReport.parentInfo?.babaKilo || ''}
+                          onChange={(e) =>
+                            handleUpdateCurrentReport({
+                              ...currentReport,
+                              parentInfo: { ...(currentReport.parentInfo || {}), babaKilo: e.target.value },
+                            })
+                          }
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-slate-900 text-xs"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 items-center pt-1">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Spor Yapıyor mu?</label>
+                        <select
+                          value={currentReport.parentInfo?.babaSporYapiyorMu || 'Evet'}
+                          onChange={(e) =>
+                            handleUpdateCurrentReport({
+                              ...currentReport,
+                              parentInfo: { ...(currentReport.parentInfo || {}), babaSporYapiyorMu: e.target.value as any },
+                            })
+                          }
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-slate-900 text-xs bg-white"
+                        >
+                          <option value="Evet">Evet</option>
+                          <option value="Hayir">Hayır</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Branş(lar)</label>
+                        <input
+                          type="text"
+                          value={currentReport.parentInfo?.babaBranslar || ''}
+                          onChange={(e) =>
+                            handleUpdateCurrentReport({
+                              ...currentReport,
+                              parentInfo: { ...(currentReport.parentInfo || {}), babaBranslar: e.target.value },
+                            })
+                          }
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Spor Geçmişi</label>
+                        <input
+                          type="text"
+                          value={currentReport.parentInfo?.babaSporGecmisi || ''}
+                          onChange={(e) =>
+                            handleUpdateCurrentReport({
+                              ...currentReport,
+                              parentInfo: { ...(currentReport.parentInfo || {}), babaSporGecmisi: e.target.value },
+                            })
+                          }
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-slate-900 text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Expert Comment */}
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -8199,7 +8726,11 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 </label>
                 <textarea
                   rows={3}
-                  value={currentReport.expertComment}
+                  value={
+                    !currentReport.expertComment || isStaleExpertComment(currentReport.expertComment)
+                      ? generateAthleteInterpretiveExpertComment(currentReport)
+                      : currentReport.expertComment
+                  }
                   onChange={(e) =>
                     handleUpdateCurrentReport({ ...currentReport, expertComment: e.target.value })
                   }

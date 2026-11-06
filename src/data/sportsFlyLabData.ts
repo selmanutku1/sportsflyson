@@ -170,6 +170,150 @@ export interface SportsFlyLabReport {
   };
   expertComment: string;
   aiRecommendations?: LabAiPerformanceAnalysis;
+  parentInfo?: {
+    anneAdSoyad?: string;
+    anneDogumTarihi?: string;
+    anneBoy?: string;
+    anneKilo?: string;
+    anneSporYapiyorMu?: 'Evet' | 'Hayir' | '';
+    anneBranslar?: string;
+    anneSporGecmisi?: string;
+
+    babaAdSoyad?: string;
+    babaDogumTarihi?: string;
+    babaBoy?: string;
+    babaKilo?: string;
+    babaSporYapiyorMu?: 'Evet' | 'Hayir' | '';
+    babaBranslar?: string;
+    babaSporGecmisi?: string;
+  };
+  isAiForecast?: boolean;
+}
+
+export function isStaleExpertComment(comment?: string): boolean {
+  if (!comment || !comment.trim()) return true;
+  // Normalize string to handle Turkish locale dotless/dotted I casing (I/İ/ı/i) and diacritics
+  const norm = comment
+    .toLowerCase()
+    .replace(/ı/g, 'i')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c');
+
+  return (
+    norm.includes('ai projeksiyon') ||
+    norm.includes('projeksiyon') ||
+    norm.includes('sportsfly intelligence') ||
+    norm.includes('yapay zeka algoritmasi') ||
+    norm.includes('basariyla hesaplanmistir') ||
+    norm.includes('hesaplanmistir') ||
+    norm.includes('tahmini gelisim hedefleri') ||
+    norm.includes('beklenen tahmini') ||
+    norm.includes('2. test donemi') ||
+    norm.includes('fiziksel gelisim sureci ve motor performans') ||
+    norm.length < 80
+  );
+}
+
+export function generateAthleteInterpretiveExpertComment(report: SportsFlyLabReport): string {
+  if (!report) return '';
+
+  const name = report.athleteName || 'Sporcu';
+  const branch = report.sportBranch || 'Genel Gelişim';
+  const p1 = report.scoreHistory?.p1Score || 72;
+  const p2 = report.scoreHistory?.p2Score || 78;
+  const scoreDiff = p2 - p1;
+  const d1 = report.date1 || 'I. Ölçüm';
+  const d2 = report.date2 || 'II. Ölçüm';
+
+  // Maturation & Biological Growth
+  const matStatus = report.maturationStatus || 'Normal Büyüme Hızı';
+  const phvAge = report.phvAge ? `${report.phvAge} yaş` : '13.0 yaş';
+  const predHeight = report.predictedAdultHeight ? `${report.predictedAdultHeight.toFixed(1)} cm` : '';
+
+  // Body Composition
+  const boyRow = report.bodyComposition?.find((b) => b.id === 'height' || b.name?.toLowerCase().includes('boy'));
+  const kiloRow = report.bodyComposition?.find((b) => b.id === 'weight' || b.name?.toLowerCase().includes('ağırlık') || b.name?.toLowerCase().includes('kilo'));
+  const yagRow = report.bodyComposition?.find((b) => b.id === 'body_fat' || b.name?.toLowerCase().includes('yağ'));
+  const boyM1 = boyRow?.m1 || 0;
+  const boyM2 = boyRow?.m2 || boyM1;
+  const kiloM1 = kiloRow?.m1 || 0;
+  const kiloM2 = kiloRow?.m2 || kiloM1;
+  const yagM2 = yagRow?.m2 || yagRow?.m1 || 0;
+
+  // Somatotype
+  const somatoCat = report.somatotype?.m2?.category || report.somatotype?.m1?.category || 'Mezomorfik Ektomorf';
+
+  // Group Rank & Percentile
+  const rank = report.groupInfo?.groupRank || 1;
+  const count = report.groupInfo?.groupAthleteCount || 15;
+  const ageRange = report.groupInfo?.ageRange || `${report.ageYears?.toFixed(1) || '11'} Yaş`;
+  const percentile = report.groupInfo?.groupPositionPercentile || 94;
+
+  // Motor Performance Highlights
+  const motorList = report.motorPerformance || [];
+  const validMotor = motorList.filter((m) => m && (m.m2 > 0 || m.m1 > 0));
+  // Sort descending by percentile
+  const sortedStrengths = [...validMotor].sort((a, b) => (b.percentile || 0) - (a.percentile || 0));
+  const top1 = sortedStrengths[0];
+  const top2 = sortedStrengths[1];
+
+  // Areas needing support/development: lowest percentile
+  const sortedNeeds = [...validMotor].sort((a, b) => (a.percentile || 50) - (b.percentile || 50));
+  const need1 = sortedNeeds[0];
+  const need2 = sortedNeeds[1];
+
+  // Cardio / VO2peak
+  const vo2 = report.cardio?.test2Vo2 || report.cardio?.test1Vo2 || 0;
+  const cardioDist = report.cardio?.test2Distance || report.cardio?.test1Distance || 0;
+
+  // Paragraph 1: Genel Profil ve Testler Arası Performans Gelişimi
+  const scoreTrendText =
+    scoreDiff > 0
+      ? `genel performans skorunu %${p1}'den %${p2}'ye yükselterek (+%${scoreDiff}) pozitif bir gelişim ivmesi kaydetmiştir`
+      : `genel performans skorunu %${p2} seviyesinde koruyarak istikrarlı bir atletik form tablosu sergilemiştir`;
+
+  const p1Text = `${name}, ${branch} branşında I. test (${d1}) ve II. test (${d2}) ölçüm periyotları kapsamında takip edilen performans analizinde ${scoreTrendText}. Sporcumuz, ${ageRange} kategorisindeki ${count} sporcu arasında ${rank}. sırada (%${percentile} persentil diliminde) yer alarak grubunun en yüksek potansiyele sahip sporcuları arasında yer almaktadır.`;
+
+  // Paragraph 2: Antropometrik Profil, Biyolojik Olgunlaşma ve Somatotip Analizi
+  const boyChangeText = boyM1 && boyM2 && boyM2 !== boyM1 ? `${boyM1} cm → ${boyM2} cm` : `${boyM2 || 146} cm`;
+  const kiloChangeText = kiloM1 && kiloM2 && kiloM2 !== kiloM1 ? `${kiloM1} kg → ${kiloM2} kg` : `${kiloM2 || 41} kg`;
+  const predHeightText = predHeight ? ` ve tahmini yetişkin boyu ${predHeight} (Zirve Büyüme Hızı - PHV Yaşı: ${phvAge})` : '';
+
+  const p2Text = `Antropometri ve biyolojik olgunlaşma parametreleri incelendiğinde; ${matStatus} evresinde bulunan sporcunun boy uzunluğu (${boyChangeText}) ve vücut ağırlığı (${kiloChangeText}) gelişimi yaş ve cinsiyet standartlarına uygundur${predHeightText}. Belirlenen ${somatoCat} somatotip morfolojisi, sporcunun branşındaki dikey sıçrama, erişim yüksekliği ve dinamik kinetik zincir aktarımını mekanik olarak destekleyen avantajlı bir yapı sergilemektedir (Vücut Yağ Oranı: %${yagM2}).`;
+
+  // Paragraph 3: Biyomotorik Güçlü Yönler ve Fonksiyonel Kapasite
+  let strengthsComment = '';
+  if (top1 && top2) {
+    strengthsComment = `Biyomotor yetenek testlerinde sporcunun öne çıkan en güçlü yönleri; ${top1.name} (${top1.m2 || top1.m1} ${top1.unit}, %${top1.percentile} persentil) ve ${top2.name} (${top2.m2 || top2.m1} ${top2.unit}, %${top2.percentile} persentil) parametreleridir. Patlayıcı kuvvet ve ivmelenme mekaniğindeki bu yüksek verim, saha içi hızlı reaksiyon ve çabukluk reflekslerini doğrudan güçlendirmektedir.`;
+  } else {
+    strengthsComment = `Biyomotor testlerde patlayıcı güç, hız ve çabukluk parametrelerinde yaş grubu ortalamasının belirgin şekilde üzerinde bir gelişim göstermektedir.`;
+  }
+
+  let cardioComment = '';
+  if (vo2 > 0) {
+    cardioComment = ` Kardiyorespiratuar dayanıklılık testinde elde edilen ${vo2} ml/kg/dk VO2peak değeri (${cardioDist} m mekik koşusu), sporcunun yüksek yoğunluklu eforlar sonrasında hızlı toparlanma (recovery) kabiliyetine sahip olduğunu doğrulamaktadır.`;
+  }
+
+  const p3Text = `${strengthsComment}${cardioComment}`;
+
+  // Paragraph 4: Öncelikli Gelişim Alanları ve Dönemsel Antrenman Reçetesi
+  let focusAreas = '';
+  if (need1 && need1.name !== top1?.name) {
+    focusAreas = `${need1.name}${need2 && need2.name !== top2?.name ? ' ve ' + need2.name : ''}`;
+  } else {
+    focusAreas = 'dinamik denge stabilizasyonu, gövde core kuvveti ve posterior zincir esnekliği';
+  }
+
+  const nextDateText = report.nextTargetDate && report.nextTargetDate !== '—' ? `III. gelişim testine (${report.nextTargetDate})` : 'bir sonraki ölçüm dönemine';
+
+  const p4Text = `Gelecek antrenman döneminde; ${focusAreas} alanlarına odaklanan özel çalışma protokollerinin (unilateral denge egzersizleri, eksantrik kuvvet yüklemeleri ve antrenman sonu miyofasyal esneme) haftalık mikro döngülere eklenmesi tavsiye edilmektedir. Sporcumuzun antrenman devamlılığı ve disiplini, ${nextDateText} kadar bu yüksek potansiyeli başarıyla üst seviyeye taşıyacaktır.`;
+
+  return `${p1Text}\n\n${p2Text}\n\n${p3Text}\n\n${p4Text}`;
 }
 
 export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
@@ -185,13 +329,30 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
     ageMonths: 122.3,
     date1: '01.02.2026',
     date2: '10.05.2026',
-    date3: '10.08.2026',
+    date3: '—',
     nextTargetDate: '08.11.2026',
+    isAiForecast: true,
     phvAge: 12.84,
     phvHeight: 165.8,
     predictedAdultHeight: 172.72,
     sittingHeight: 76.3,
     maturationStatus: 'Geç Ergen (Normal Büyüme Hızı)',
+    parentInfo: {
+      anneAdSoyad: 'Ayşe Örnektir',
+      anneDogumTarihi: '15.06.1982',
+      anneBoy: '168',
+      anneKilo: '58',
+      anneSporYapiyorMu: 'Evet',
+      anneBranslar: 'Voleybol, Pilates',
+      anneSporGecmisi: '8 yıl lisanslı voleybol',
+      babaAdSoyad: 'Murat Örnektir',
+      babaDogumTarihi: '20.03.1980',
+      babaBoy: '182',
+      babaKilo: '78',
+      babaSporYapiyorMu: 'Evet',
+      babaBranslar: 'Basketbol, Fitness',
+      babaSporGecmisi: '10 yıl amatör basketbol',
+    },
     bodyComposition: [
       {
         id: 'bmi',
@@ -200,7 +361,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Yüksek BKİ olumsuz kardiyovasküler profil ile ilişkilidir. BKİ yüksek olarak değerlendirilmiştir.',
         m1: 19.82,
         m2: 19.30,
-        m3: 19.33,
+        m3: 0,
         percentile: 85,
         status: 'yüksek',
         sd: 1.04,
@@ -215,7 +376,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Sporcunun boy uzunluğu yaşıtlarına göre uzun (avantajlı) olarak değerlendirilmiştir.',
         m1: 142.6,
         m2: 146.1,
-        m3: 149.5,
+        m3: 0,
         percentile: 93,
         status: 'uzun',
         sd: 1.46,
@@ -230,7 +391,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Sporcunun vücut ağırlığı sağlıklı fiziksel uygunluk bölgesinde (normal) değerlendirilmiştir.',
         m1: 40.3,
         m2: 41.2,
-        m3: 43.2,
+        m3: 0,
         percentile: 87,
         status: 'normal',
         sd: 1.14,
@@ -245,7 +406,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Slaughter formülü deri altı yağ tahmini. Yüksek yağ yüzdesi dayanıklılık ve sıçrama verimini etkiler.',
         m1: 27.4,
         m2: 29.6,
-        m3: 33.8,
+        m3: 0,
         percentile: 97,
         status: 'yüksek',
         sd: 1.83,
@@ -260,7 +421,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Bedenin sırt bölgesindeki deri altı yağ oranını gösteren antropometrik ölçümdür.',
         m1: 16.8,
         m2: 14.4,
-        m3: 9.2,
+        m3: 0,
         percentile: 44,
         status: 'normal',
         sd: -0.15,
@@ -275,7 +436,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Üst kol arka bölgesi deri altı yağ kalınlığı ölçümüdür.',
         m1: 16.4,
         m2: 20.4,
-        m3: 17.0,
+        m3: 0,
         percentile: 61,
         status: 'normal',
         sd: 0.27,
@@ -290,7 +451,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Baldırın iç yüzeyinde en geniş çevre seviyesinden alınan deri kıvrım ölçümüdür.',
         m1: 20.2,
         m2: 19.8,
-        m3: 30.0,
+        m3: 0,
         percentile: 93,
         status: 'yüksek',
         sd: 1.50,
@@ -305,7 +466,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Kalça üstü yan karın deri altı yağ kalınlığını izlemede kullanılır.',
         m1: 20.2,
         m2: 16.4,
-        m3: 19.2,
+        m3: 0,
         percentile: 91,
         status: 'yüksek',
         sd: 1.33,
@@ -320,7 +481,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Üst ekstremite kemik gelişimi ve iskelet sağlamlığının (mezomorfi) belirlenmesinde kullanılır.',
         m1: 5.6,
         m2: 5.9,
-        m3: 6.2,
+        m3: 0,
         percentile: 98,
         status: 'yüksek',
         sd: 2.13,
@@ -335,7 +496,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Alt ekstremite diz eklemi kemik genişliği ve büyüme takibinde kullanılır.',
         m1: 8.7,
         m2: 9.0,
-        m3: 9.1,
+        m3: 0,
         percentile: 79,
         status: 'normal',
         sd: 0.80,
@@ -350,7 +511,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Alt bacak kas çevresi gelişimini ve patlayıcı kuvvet potansiyelini izlemede kullanılır.',
         m1: 30.6,
         m2: 32.8,
-        m3: 31.1,
+        m3: 0,
         percentile: 90,
         status: 'yüksek',
         sd: 1.27,
@@ -365,7 +526,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Üst kol fleksiyonda kas çevresi ölçümüdür, üst gövde kas kütlesini yansıtır.',
         m1: 22.6,
         m2: 23.0,
-        m3: 22.3,
+        m3: 0,
         percentile: 78,
         status: 'normal',
         sd: 0.77,
@@ -382,7 +543,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Anaerobik kapasite, ivmelenme ve maksimal hız yeteneği değerlendirilmiştir.',
         m1: 4.12,
         m2: 3.95,
-        m3: 3.85,
+        m3: 0,
         percentile: 89,
         status: 'yüksek',
         sd: 1.25,
@@ -398,7 +559,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Hareket hızı, çeviklik, koordinasyon ve 180° yön değiştirme yeteneği değerlendirilmiştir.',
         m1: 24.1,
         m2: 19.5,
-        m3: 20.3,
+        m3: 0,
         percentile: 95,
         status: 'yüksek',
         sd: 1.61,
@@ -414,7 +575,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Üst beden reaksiyon süresi ve el-göz koordinasyonu değerlendirilmiştir.',
         m1: 12.0,
         m2: 11.5,
-        m3: 11.7,
+        m3: 0,
         percentile: 89,
         status: 'yüksek',
         sd: 1.23,
@@ -430,7 +591,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'İzometrik kas kasılması ile gövde ve sırt ekstansör kuvveti değerlendirilmiştir.',
         m1: 32.5,
         m2: 28.0,
-        m3: 43.0,
+        m3: 0,
         percentile: 62,
         status: 'normal',
         sd: 0.30,
@@ -445,7 +606,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'El ve ön kol kaslarının maksimum izometrik kavrama kuvveti değerlendirilmiştir.',
         m1: 19.0,
         m2: 19.9,
-        m3: 23.8,
+        m3: 0,
         percentile: 98,
         status: 'mükemmel',
         sd: 2.13,
@@ -460,7 +621,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Alt ve üst beden koordinasyonu ile yatay patlayıcı bacak gücü değerlendirilmiştir.',
         m1: 123,
         m2: 140,
-        m3: 147,
+        m3: 0,
         percentile: 78,
         status: 'normal',
         sd: 0.79,
@@ -475,7 +636,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Alt beden dikey patlayıcı kuvveti ve bacak kas gücü değerlendirilmiştir.',
         m1: 16.8,
         m2: 20.4,
-        m3: 27.0,
+        m3: 0,
         percentile: 91,
         status: 'yüksek',
         sd: 1.33,
@@ -490,7 +651,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Dinamik dengenin yanı sıra bacak, pelvik ve gövde stabilizasyon gücü değerlendirilmiştir.',
         m1: 28,
         m2: 93,
-        m3: 19,
+        m3: 0,
         percentile: 19,
         status: 'normal',
         sd: -0.89,
@@ -505,7 +666,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Sırt ve hamstring kaslarının esnekliğini ölçer. Yaralanma önleme ve postür için kritiktir.',
         m1: 37.0,
         m2: 40.0,
-        m3: 40.5,
+        m3: 0,
         percentile: 100,
         status: 'mükemmel',
         sd: 2.78,
@@ -520,7 +681,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Maksimal oksijen tüketimi (VO2peak) ve aerobik dayanıklılık kondisyonu değerlendirilmiştir.',
         m1: 23.0,
         m2: 30.3,
-        m3: 35.0,
+        m3: 0,
         percentile: 27,
         status: 'normal',
         sd: -0.63,
@@ -534,13 +695,13 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
       p1Score: 64,
       p2Date: '10.05.2026',
       p2Score: 76,
-      p3Date: '10.08.2026',
-      p3Score: 88,
+      p3Date: '—',
+      p3Score: 0,
     },
     somatotype: {
       m1: { endo: 6.8, meso: 4.4, ecto: 1.9, category: 'Mezomorfik Endomorfi' },
       m2: { endo: 6.3, meso: 4.7, ecto: 2.4, category: 'Mezomorfik Endomorfi' },
-      m3: { endo: 5.5, meso: 4.1, ecto: 2.6, category: 'Mezomorfik Endomorfi' },
+      m3: { endo: 0, meso: 0, ecto: 0, category: '—' },
       eliteRef: { sport: 'Elit Voleybol', endo: 3.9, meso: 2.2, ecto: 3.4, refScore: 94 },
     },
     potential: {
@@ -559,10 +720,10 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
       test2Shuttles: 34,
       test2Vo2: 30.3,
       test2Status: 'Ortalama',
-      test3Distance: 940,
-      test3Shuttles: 47,
-      test3Vo2: 35.0,
-      test3Status: 'İyi (Healthy Fitness Zone)',
+      test3Distance: 0,
+      test3Shuttles: 0,
+      test3Vo2: 0,
+      test3Status: '—',
       totalRunTime: '00:05:53',
       basalMetabolicRate: 1291,
       functionalCapacityMet: 10,
@@ -573,12 +734,12 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
       sprint20mRelativeWatt: 7.0,
     },
     ipsativeTargets: [
-      { parameter: 'Esneklik', unit: 'cm', m1: 36.5, m2: 39.5, m3: 40.5, target: 42.19, groupRank: '20/4' },
-      { parameter: 'Kavrama Kuvveti', unit: 'kg/m', m1: 19.0, m2: 19.9, m3: 23.8, target: 24.6, groupRank: '20/3' },
-      { parameter: 'Sırt Kuvveti', unit: 'kg/m', m1: 32.5, m2: 28.0, m3: 42.5, target: 47.62, groupRank: '20/8' },
-      { parameter: 'Durarak Uzun Atlama', unit: 'cm', m1: 123, m2: 140, m3: 147, target: 156, groupRank: '20/3' },
-      { parameter: 'Aerobik Kapasite', unit: 'ml/kg/dk', m1: 23.01, m2: 30.3, m3: 35.0, target: 39.91, groupRank: '20/11' },
-      { parameter: 'Dikey Sıçrama', unit: 'cm', m1: 16.78, m2: 20.41, m3: 26.97, target: 29.87, groupRank: '20/9' },
+      { parameter: 'Esneklik', unit: 'cm', m1: 36.5, m2: 39.5, m3: 0, target: 42.19, groupRank: '20/4' },
+      { parameter: 'Kavrama Kuvveti', unit: 'kg/m', m1: 19.0, m2: 19.9, m3: 0, target: 24.6, groupRank: '20/3' },
+      { parameter: 'Sırt Kuvveti', unit: 'kg/m', m1: 32.5, m2: 28.0, m3: 0, target: 47.62, groupRank: '20/8' },
+      { parameter: 'Durarak Uzun Atlama', unit: 'cm', m1: 123, m2: 140, m3: 0, target: 156, groupRank: '20/3' },
+      { parameter: 'Aerobik Kapasite', unit: 'ml/kg/dk', m1: 23.01, m2: 30.3, m3: 0, target: 39.91, groupRank: '20/11' },
+      { parameter: 'Dikey Sıçrama', unit: 'cm', m1: 16.78, m2: 20.41, m3: 0, target: 29.87, groupRank: '20/9' },
     ],
     groupInfo: {
       groupNo: 3,
@@ -591,7 +752,13 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
       groupPositionPercentile: 94,
     },
     expertComment:
-      'Sporcumuzun 3 ölçüm periyodundaki genel sportif performans skoru %50 seviyesinden %75 seviyesine yükselmiştir. Sürat (%89), Çabukluk (%95), Kavrama Kuvveti (%98), Dikey Sıçrama (%91) ve Esneklik (%100) parametrelerinde yaşıtlarının oldukça üzerinde elit bir profil sergilemektedir. Somatotip analizinde endomorfi bileşeni 6,8\'den 5,5\'e gerileyerek sağlıklı kas-iskelet dengesine yaklaşmıştır. Aerobik dayanıklılık (VO2peak: 35,0 ml/kg/dk) ve tek ayak dinamik denge egzersizlerinin haftalık antrenman programında desteklenmesi, 12,84 PHV büyüme atağı öncesinde atletik potansiyelini maksimuma çıkaracaktır.',
+      `Ege Örnektir, Voleybol / Çoklu Branş Gelişim branşında I. test (01.02.2026) ve II. test (10.05.2026) periyotlarında takip edilen performans analizinde genel performans skorunu %72'den %76'ya yükselterek (+%4) pozitif bir gelişim ivmesi kaydetmiştir. Sporcumuz, 10,02 - 10,99 Yaş kategorisindeki 15 sporcu arasında 1. sırada (%94 persentil diliminde) yer alarak grubunun en yüksek potansiyele sahip sporcuları arasında yer almaktadır.
+
+Antropometri ve biyolojik olgunlaşma parametreleri incelendiğinde; Geç Ergen (Normal Büyüme Hızı) evresinde bulunan sporcunun boy uzunluğu (142.6 cm → 146.1 cm) ve vücut ağırlığı (40.3 kg → 41.2 kg) gelişimi yaş ve cinsiyet standartlarına uygundur ve tahmini yetişkin boyu 172.7 cm (Zirve Büyüme Hızı - PHV Yaşı: 12.8 yaş) olarak öngörülmektedir. Belirlenen Mezomorf - Ektomorf somatotip morfolojisi, sporcunun branşındaki dikey sıçrama, erişim yüksekliği ve dinamik kinetik zincir aktarımını mekanik olarak destekleyen avantajlı bir yapı sergilemektedir (Vücut Yağ Oranı: %29.6).
+
+Biyomotor yetenek testlerinde sporcunun öne çıkan en güçlü yönleri; Çabukluk Testi (10x5m) (19.5 sn, %95 persentil) ve Sürat Testi (20m) (3.95 sn, %89 persentil) parametreleridir. Patlayıcı kuvvet ve ivmelenme mekaniğindeki bu yüksek verim, saha içi hızlı reaksiyon ve çabukluk reflekslerini doğrudan güçlendirmektedir. Kardiyorespiratuar dayanıklılık testinde elde edilen 46.8 ml/kg/dk VO2peak değeri (540 m mekik koşusu), sporcunun yüksek yoğunluklu eforlar sonrasında hızlı toparlanma (recovery) kabiliyetine sahip olduğunu doğrulamaktadır.
+
+Gelecek antrenman döneminde; statik/dinamik denge stabilizasyonu ve arka zincir esneklik mobilitesinin artırılmasına yönelik özel çalışma protokollerinin (unilateral denge egzersizleri, eksantrik kuvvet yüklemeleri ve antrenman sonu miyofasyal esneme) haftalık mikro döngülere eklenmesi tavsiye edilmektedir. Sporcumuzun antrenman devamlılığı ve disiplini, III. gelişim testine (08.11.2026) kadar bu yüksek potansiyeli başarıyla üst seviyeye taşıyacaktır.`,
   },
   {
     id: 'lab-rep-2',
@@ -605,8 +772,9 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
     ageMonths: 148.8,
     date1: '15.01.2026',
     date2: '15.04.2026',
-    date3: '15.08.2026',
+    date3: '—',
     nextTargetDate: '15.11.2026',
+    isAiForecast: true,
     phvAge: 13.6,
     phvHeight: 174.5,
     predictedAdultHeight: 186.4,
@@ -620,7 +788,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Yaş grubuna göre ideal atletik beden kütle indeksi aralığındadır.',
         m1: 18.4,
         m2: 18.6,
-        m3: 18.8,
+        m3: 0,
         percentile: 64,
         status: 'normal',
         sd: 0.42,
@@ -635,7 +803,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Basketbol branşı için 95. persentil üzerinde üstün boy uzunluğu.',
         m1: 158.0,
         m2: 161.2,
-        m3: 164.5,
+        m3: 0,
         percentile: 96,
         status: 'uzun',
         sd: 1.78,
@@ -650,7 +818,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Boy uzunluğu ile uyumlu sağlıklı kas-kilo dengesi.',
         m1: 46.0,
         m2: 48.3,
-        m3: 50.8,
+        m3: 0,
         percentile: 78,
         status: 'normal',
         sd: 0.85,
@@ -665,7 +833,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Atletik performans için optimal deri altı yağ yüzdesi.',
         m1: 16.8,
         m2: 15.4,
-        m3: 14.2,
+        m3: 0,
         percentile: 42,
         status: 'normal',
         sd: -0.25,
@@ -680,7 +848,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Sırt bölgesi deri kıvrım kalınlığı normal aralıktadır.',
         m1: 9.4,
         m2: 8.8,
-        m3: 8.2,
+        m3: 0,
         percentile: 40,
         status: 'normal',
         sd: -0.22,
@@ -695,7 +863,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Üst kol deri altı yağ kalınlığı optimal seviyededir.',
         m1: 11.2,
         m2: 10.5,
-        m3: 9.8,
+        m3: 0,
         percentile: 46,
         status: 'normal',
         sd: -0.10,
@@ -710,7 +878,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Alt bacak deri altı yağ ölçümü sağlıklı aralıktadır.',
         m1: 12.0,
         m2: 11.4,
-        m3: 10.6,
+        m3: 0,
         percentile: 48,
         status: 'normal',
         sd: -0.05,
@@ -725,7 +893,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Göbek yanı deri kıvrım kalınlığı atletik sınırlar içerisindedir.',
         m1: 9.8,
         m2: 9.1,
-        m3: 8.4,
+        m3: 0,
         percentile: 45,
         status: 'normal',
         sd: -0.14,
@@ -740,7 +908,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Dirsek kemik çapı gelişimi yaş normlarının üzerindedir.',
         m1: 6.1,
         m2: 6.3,
-        m3: 6.5,
+        m3: 0,
         percentile: 88,
         status: 'yüksek',
         sd: 1.20,
@@ -755,7 +923,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Diz eklemi kemik genişliği güçlü alt ekstremite yapısını gösterir.',
         m1: 9.2,
         m2: 9.4,
-        m3: 9.6,
+        m3: 0,
         percentile: 86,
         status: 'yüksek',
         sd: 1.12,
@@ -770,7 +938,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Gastrocnemius kas çevresi düzenli artış göstermektedir.',
         m1: 32.4,
         m2: 33.1,
-        m3: 34.0,
+        m3: 0,
         percentile: 84,
         status: 'normal',
         sd: 0.98,
@@ -785,7 +953,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Üst kol fleksiyonda kas çevresi gelişimi pozitiftir.',
         m1: 24.1,
         m2: 24.8,
-        m3: 25.6,
+        m3: 0,
         percentile: 82,
         status: 'normal',
         sd: 0.91,
@@ -802,7 +970,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Kısa mesafe ivmelenme ve sprint hızı.',
         m1: 3.78,
         m2: 3.65,
-        m3: 3.52,
+        m3: 0,
         percentile: 94,
         status: 'yüksek',
         sd: 1.55,
@@ -818,7 +986,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Çok yönlü yön değiştirme ve saha içi çeviklik.',
         m1: 19.8,
         m2: 18.9,
-        m3: 18.2,
+        m3: 0,
         percentile: 96,
         status: 'mükemmel',
         sd: 1.75,
@@ -834,7 +1002,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Görsel uyaranlara verilen motor tepki hızı.',
         m1: 11.2,
         m2: 10.8,
-        m3: 10.4,
+        m3: 0,
         percentile: 92,
         status: 'yüksek',
         sd: 1.40,
@@ -850,7 +1018,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Core ve sırt izometrik kuvvet kapasitesi.',
         m1: 48.0,
         m2: 52.5,
-        m3: 58.0,
+        m3: 0,
         percentile: 84,
         status: 'yüksek',
         sd: 1.02,
@@ -865,7 +1033,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Top hakimiyeti ve üst ekstremite izometrik kuvveti.',
         m1: 24.5,
         m2: 26.8,
-        m3: 29.2,
+        m3: 0,
         percentile: 95,
         status: 'mükemmel',
         sd: 1.68,
@@ -880,7 +1048,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Patlayıcı alt ekstremite sıçrama mesafesi.',
         m1: 158,
         m2: 168,
-        m3: 176,
+        m3: 0,
         percentile: 90,
         status: 'yüksek',
         sd: 1.28,
@@ -895,7 +1063,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Ribaund ve blok yüksekliği için kritik dikey sıçrama.',
         m1: 28.5,
         m2: 32.0,
-        m3: 36.4,
+        m3: 0,
         percentile: 95,
         status: 'mükemmel',
         sd: 1.64,
@@ -910,7 +1078,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Tek ayak proprioseptif denge süresi.',
         m1: 45,
         m2: 62,
-        m3: 78,
+        m3: 0,
         percentile: 82,
         status: 'yüksek',
         sd: 0.92,
@@ -925,7 +1093,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Hamstring ve lomber esneklik erişim mesafesi.',
         m1: 26.0,
         m2: 28.5,
-        m3: 31.0,
+        m3: 0,
         percentile: 86,
         status: 'yüksek',
         sd: 1.08,
@@ -940,7 +1108,7 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
         description: 'Mekik koşusu VO2peak kardiyorespiratuar dayanıklılık.',
         m1: 41.2,
         m2: 44.8,
-        m3: 48.5,
+        m3: 0,
         percentile: 88,
         status: 'yüksek',
         sd: 1.18,
@@ -954,13 +1122,13 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
       p1Score: 68,
       p2Date: '15.04.2026',
       p2Score: 79,
-      p3Date: '15.08.2026',
-      p3Score: 88,
+      p3Date: '—',
+      p3Score: 0,
     },
     somatotype: {
       m1: { endo: 3.2, meso: 4.8, ecto: 3.6, category: 'Ektomorfik Mezomorfi' },
       m2: { endo: 2.9, meso: 5.1, ecto: 3.7, category: 'Ektomorfik Mezomorfi' },
-      m3: { endo: 2.6, meso: 5.4, ecto: 3.8, category: 'Ektomorfik Mezomorfi' },
+      m3: { endo: 0, meso: 0, ecto: 0, category: '—' },
       eliteRef: { sport: 'Elit Basketbol', endo: 2.5, meso: 5.2, ecto: 3.9, refScore: 94 },
     },
     potential: {
@@ -979,10 +1147,10 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
       test2Shuttles: 56,
       test2Vo2: 44.8,
       test2Status: 'İyi',
-      test3Distance: 1400,
-      test3Shuttles: 70,
-      test3Vo2: 48.5,
-      test3Status: 'Mükemmel (Elit Bölge)',
+      test3Distance: 0,
+      test3Shuttles: 0,
+      test3Vo2: 0,
+      test3Status: '—',
       totalRunTime: '00:08:25',
       basalMetabolicRate: 1540,
       functionalCapacityMet: 13.8,
@@ -993,12 +1161,12 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
       sprint20mRelativeWatt: 8.8,
     },
     ipsativeTargets: [
-      { parameter: 'Esneklik', unit: 'cm', m1: 26.0, m2: 28.5, m3: 31.0, target: 33.5, groupRank: '15/3' },
-      { parameter: 'Kavrama Kuvveti', unit: 'kg/m', m1: 24.5, m2: 26.8, m3: 29.2, target: 31.5, groupRank: '15/1' },
-      { parameter: 'Sırt Kuvveti', unit: 'kg/m', m1: 48.0, m2: 52.5, m3: 58.0, target: 63.0, groupRank: '15/2' },
-      { parameter: 'Durarak Uzun Atlama', unit: 'cm', m1: 158, m2: 168, m3: 176, target: 185, groupRank: '15/2' },
-      { parameter: 'Aerobik Kapasite', unit: 'ml/kg/dk', m1: 41.2, m2: 44.8, m3: 48.5, target: 51.0, groupRank: '15/2' },
-      { parameter: 'Dikey Sıçrama', unit: 'cm', m1: 28.5, m2: 32.0, m3: 36.4, target: 39.5, groupRank: '15/1' },
+      { parameter: 'Esneklik', unit: 'cm', m1: 26.0, m2: 28.5, m3: 0, target: 33.5, groupRank: '15/3' },
+      { parameter: 'Kavrama Kuvveti', unit: 'kg/m', m1: 24.5, m2: 26.8, m3: 0, target: 31.5, groupRank: '15/1' },
+      { parameter: 'Sırt Kuvveti', unit: 'kg/m', m1: 48.0, m2: 52.5, m3: 0, target: 63.0, groupRank: '15/2' },
+      { parameter: 'Durarak Uzun Atlama', unit: 'cm', m1: 158, m2: 168, m3: 0, target: 185, groupRank: '15/2' },
+      { parameter: 'Aerobik Kapasite', unit: 'ml/kg/dk', m1: 41.2, m2: 44.8, m3: 0, target: 51.0, groupRank: '15/2' },
+      { parameter: 'Dikey Sıçrama', unit: 'cm', m1: 28.5, m2: 32.0, m3: 0, target: 39.5, groupRank: '15/1' },
     ],
     groupInfo: {
       groupNo: 1,
@@ -1011,7 +1179,13 @@ export const DEFAULT_LAB_REPORTS: SportsFlyLabReport[] = [
       groupPositionPercentile: 94,
     },
     expertComment:
-      'Kaan, U14 Basketbol altyapı grubumuzda %88 genel performans puanı ve %94 Elit Basketbol Somatotip uyumu ile kulübün en yüksek potansiyelli sporcularından biridir. 186,4 cm yetişkin boy tahmini ve yüksek dikey sıçrama gücü (36,4 cm) ile forvet/kanat pozisyonu için ideal fiziksel profile sahiptir.',
+      `Kaan Yıldırım, Basketbol U14 Altyapı branşında I. test (15.01.2026) ve II. test (15.04.2026) periyotlarında takip edilen performans analizinde genel performans skorunu %75'ten %79'a yükselterek (+%4) pozitif bir gelişim ivmesi kaydetmiştir. Sporcumuz, 12,00 - 12,99 Yaş kategorisindeki 15 sporcu arasında 1. sırada (%94 persentil diliminde) yer alarak grubunun en yüksek potansiyele sahip sporcuları arasında yer almaktadır.
+
+Antropometri ve biyolojik olgunlaşma parametreleri incelendiğinde; Erken Ergen (Hızlı Büyüme Hızı) evresinde bulunan sporcunun boy uzunluğu (164.2 cm → 167.8 cm) ve dikey erişim potansiyeli basketbol branşında belirgin bir saha üstünlüğü sağlamaktadır. Tahmini yetişkin boyu 192.4 cm (Zirve Büyüme Hızı - PHV Yaşı: 13.4 yaş) olarak hesaplanan sporcunun Dengeli Mezomorf somatotip yapısı, pota altı temaslarına ve yön değiştirme dinamiklerine uygun sağlam bir kinetik altyapı sunmaktadır (Vücut Yağ Oranı: %16.4).
+
+Biyomotor yetenek testlerinde sporcunun öne çıkan en güçlü yönleri; Dikey Sıçrama (44.5 cm, %96 persentil) ve Sürat Testi (20m) (3.48 sn, %92 persentil) parametreleridir. Patlayıcı kuvvet ve dikey itiş mekaniğindeki bu üstün seviye, hücum ribaundları ve hızlı hücum geçişlerinde fark yaratmaktadır. Kardiyorespiratuar dayanıklılık testinde elde edilen 49.4 ml/kg/dk VO2peak değeri, tam saha pres ve yüksek tempolu savunma baskısında yorgunluk direncini kanıtlamaktadır.
+
+Gelecek antrenman döneminde; lateral reaktif çeviklik, ayak çabukluğu merdiveni ve propriyoseptif ayak bileği stabilizasyon çalışmalarının haftalık antrenman periyodizasyonuna eklenmesi tavsiye edilmektedir. Sporcumuzun disiplinli çalışma temposu, III. gelişim testine (15.11.2026) kadar gelişimini elit altyapı standartlarında sürdürmesini sağlayacaktır.`,
   },
 ];
 
@@ -1097,15 +1271,7 @@ export function applyBrandingToReport(
           ),
       };
 
-  const updatedScoreHistory =
-    isLegacyDefaultGroup && report.scoreHistory?.p3Score === 75
-      ? {
-          ...report.scoreHistory,
-          p1Score: 64,
-          p2Score: 76,
-          p3Score: 88,
-        }
-      : report.scoreHistory;
+  const updatedScoreHistory = report.scoreHistory;
 
   const updatedSomatotype =
     report.id === 'lab-rep-1' && report.somatotype?.eliteRef?.refScore === 87
@@ -1118,14 +1284,41 @@ export function applyBrandingToReport(
         }
       : report.somatotype;
 
+  const cleanedExpertComment =
+    !report.expertComment || isStaleExpertComment(report.expertComment)
+      ? generateAthleteInterpretiveExpertComment(report)
+      : report.expertComment;
+
+  const cleanedScoreHistory = {
+    ...report.scoreHistory,
+    p3Date: '—',
+    p3Score: 0,
+  };
+
+  const cleanedBodyComp = (report.bodyComposition || []).map((b) => ({ ...b, m3: 0 }));
+  const cleanedMotor = (report.motorPerformance || []).map((m) => ({ ...m, m3: 0 }));
+  const cleanedIpsative = (report.ipsativeTargets || []).map((i) => ({ ...i, m3: 0 }));
+  const cleanedCardio = report.cardio
+    ? { ...report.cardio, test3Distance: 0, test3Shuttles: 0, test3Vo2: 0, test3Status: '—' }
+    : report.cardio;
+  const cleanedSomatotype = updatedSomatotype
+    ? { ...updatedSomatotype, m3: { endo: 0, meso: 0, ecto: 0, category: '—' } }
+    : updatedSomatotype;
+
   return {
     ...report,
+    date3: '—',
     clubName: cleanSchool,
     branchName: cleanBranch,
     clubLogoUrl: cleanLogo,
     groupInfo: updatedGroupInfo,
-    scoreHistory: updatedScoreHistory,
-    somatotype: updatedSomatotype,
+    scoreHistory: cleanedScoreHistory,
+    bodyComposition: cleanedBodyComp,
+    motorPerformance: cleanedMotor,
+    ipsativeTargets: cleanedIpsative,
+    cardio: cleanedCardio,
+    somatotype: cleanedSomatotype,
+    expertComment: cleanedExpertComment,
   };
 }
 
@@ -1208,9 +1401,9 @@ function getDefaultLabArchives(): SportsFlyLabArchivedReport[] {
     const branded = applyBrandingToReport(rawRep, activeBranding);
     return {
       archiveId: `lab-arch-default-${idx + 1}`,
-      archiveTitle: `${branded.athleteName} — ${branded.date3} 3. Dönem Performans Karnesi`,
-      archiveNote: `${branded.sportBranch} · Genel Performans Puanı: %${branded.scoreHistory.p3Score}`,
-      savedAt: `${branded.date3} 14:30`,
+      archiveTitle: `${branded.athleteName} — Performans Gelişim Karnesi`,
+      archiveNote: `${branded.sportBranch} · Genel Performans Puanı: %${branded.scoreHistory.p2Score || branded.scoreHistory.p3Score}`,
+      savedAt: `${branded.date2 !== '—' ? branded.date2 : branded.date1} 14:30`,
       savedTimestamp: Date.now() - idx * 86400000,
       reportSnapshot: branded,
     };
@@ -1265,7 +1458,7 @@ export function archiveLabReport(
 
   const cleanTitle =
     archiveTitle.trim() ||
-    `${brandedSnapshot.athleteName} — ${brandedSnapshot.date3} Dönem Karnesi`;
+    `${brandedSnapshot.athleteName} — ${brandedSnapshot.date3 !== '—' ? brandedSnapshot.date3 : brandedSnapshot.date2} Dönem Karnesi`;
 
   const newEntry: SportsFlyLabArchivedReport = {
     archiveId: `lab-arch-${Date.now()}`,
@@ -1333,7 +1526,7 @@ export function archiveBatchLabReports(
       archiveTitle: `${brandedSnapshot.athleteName} — ${groupLabel} (${brandedSnapshot.sportBranch})`,
       archiveNote:
         batchNote?.trim() ||
-        `Toplu Excel Karne Üretimi · 3. Ölçüm Genel Performans: %${brandedSnapshot.scoreHistory.p3Score}`,
+        `Toplu Excel Karne Üretimi · Güncel Genel Performans: %${brandedSnapshot.scoreHistory.p2Score || brandedSnapshot.scoreHistory.p3Score}`,
       savedAt: nowStr,
       savedTimestamp: Date.now() - idx,
       reportSnapshot: brandedSnapshot,
@@ -1375,7 +1568,7 @@ export function getStoredLabExcelHistory(): UploadedExcelFileRecord[] {
       athleteCount: 6,
       clubName: 'Ataşehir Spor Okulları',
       status: 'Karneler Üretildi',
-      groupTitle: '2026 Dönemi 3. Ölçüm Taraması',
+      groupTitle: '2026 Dönemi Performans Taraması',
     },
     {
       id: 'excel-hist-2',
@@ -1425,59 +1618,59 @@ export const SAMPLE_BATCH_ATHLETE_ROWS: Record<string, string | number>[] = [
     Yas: 11.4,
     Olcum_1_Tarihi: '14.01.2026',
     Olcum_2_Tarihi: '18.05.2026',
-    Olcum_3_Tarihi: '22.09.2026',
+    Olcum_3_Tarihi: '—',
     Boy_1: 142.6,
     Boy_2: 146.1,
-    Boy_3: 149.5,
+    Boy_3: 0,
     Agirlik_1: 40.3,
     Agirlik_2: 41.2,
-    Agirlik_3: 43.2,
+    Agirlik_3: 0,
     BKI_1: 19.82,
     BKI_2: 19.3,
-    BKI_3: 19.33,
+    BKI_3: 0,
     Yag_Yuzdesi_1: 24.4,
     Yag_Yuzdesi_2: 22.8,
-    Yag_Yuzdesi_3: 20.6,
-    Subscapula_3: 9.2,
-    Triceps_3: 17.0,
-    Calf_DKK_3: 30.0,
-    Supraspinal_3: 19.2,
-    Humerus_3: 6.2,
-    Femur_3: 9.1,
-    Calf_Cevre_3: 31.1,
-    Biceps_Cevre_3: 22.3,
-    Oturma_Boyu_3: 78.5,
-    Kulac_3: 151.3,
+    Yag_Yuzdesi_3: 0,
+    Subscapula_3: 0,
+    Triceps_3: 0,
+    Calf_DKK_3: 0,
+    Supraspinal_3: 0,
+    Humerus_3: 0,
+    Femur_3: 0,
+    Calf_Cevre_3: 0,
+    Biceps_Cevre_3: 0,
+    Oturma_Boyu_3: 0,
+    Kulac_3: 0,
     Surat_1: 4.12,
     Surat_2: 3.95,
-    Surat_3: 3.82,
+    Surat_3: 0,
     Cabukluk_1: 22.4,
     Cabukluk_2: 20.1,
-    Cabukluk_3: 19.2,
-    Reaksiyon_3: 11.7,
-    Sirt_Kuvveti_3: 45.0,
-    Kavrama_Kuvveti_3: 24.5,
-    Durarak_Uzun_Atlama_3: 154,
-    Dikey_Sicrama_3: 29.5,
-    Denge_3: 19,
-    Esneklik_3: 41.0,
-    VO2max_3: 38.4,
+    Cabukluk_3: 0,
+    Reaksiyon_3: 0,
+    Sirt_Kuvveti_3: 0,
+    Kavrama_Kuvveti_3: 0,
+    Durarak_Uzun_Atlama_3: 0,
+    Dikey_Sicrama_3: 0,
+    Denge_3: 0,
+    Esneklik_3: 0,
+    VO2max_3: 0,
     PACER_Mesafe_1: 360,
     PACER_Mesafe_2: 440,
-    PACER_Mesafe_3: 540,
-    PACER_Mekik_3: 27,
+    PACER_Mesafe_3: 0,
+    PACER_Mekik_3: 0,
     Endomorfi_1: 4.5,
     Endomorfi_2: 4.1,
-    Endomorfi_3: 3.8,
-    Endomorfi: 3.8,
+    Endomorfi_3: 0,
+    Endomorfi: 0,
     Mezomorfi_1: 4.1,
     Mezomorfi_2: 4.4,
-    Mezomorfi_3: 4.6,
-    Mezomorfi: 4.6,
+    Mezomorfi_3: 0,
+    Mezomorfi: 0,
     Ektomorfi_1: 2.3,
     Ektomorfi_2: 2.6,
-    Ektomorfi_3: 2.9,
-    Ektomorfi: 2.9,
+    Ektomorfi_3: 0,
+    Ektomorfi: 0,
     Somatotip_Kategorisi: 'Endomorfik Mezomorf',
     Elit_Referans_Endo: 3.9,
     Elit_Referans_Mezo: 2.2,
@@ -1490,15 +1683,15 @@ export const SAMPLE_BATCH_ATHLETE_ROWS: Record<string, string | number>[] = [
     Olgunlasma_Durumu: 'Geç Ergen (Normal Büyüme Hızı)',
     Skor_P1: 64,
     Skor_P2: 70,
-    Skor_P3: 76,
-    Genel_Performans_Puani: 76,
+    Skor_P3: 0,
+    Genel_Performans_Puani: 70,
     Brans_Referans_Puani: 82,
     BMR: 1291,
     MET: 11,
     Maksimum_Kalp_Hizi: 209,
     Anaerobik_Guc_Watt: 365,
     Uzman_Gorusu:
-      'Ege 3. ölçüm döneminde patlayıcı dikey sıçrama ve 20m sürat parametrelerinde belirgin ivme yakalamıştır. Heath-Carter değişim tablosunda mezomorfi artışı ve yağ oranı düşüşü olumludur.',
+      'Ege, SportsFly Intelligence AI tarafından öngörülen 2. test dönemi beklenen değerleri doğrultusunda sürat ve patlayıcı güç parametrelerinde yüksek gelişim potansiyeli sergilemektedir.',
   },
   {
     Sporcu_Adi: 'Kerem Yılmaz',
@@ -1510,59 +1703,59 @@ export const SAMPLE_BATCH_ATHLETE_ROWS: Record<string, string | number>[] = [
     Yas: 11.8,
     Olcum_1_Tarihi: '14.01.2026',
     Olcum_2_Tarihi: '18.05.2026',
-    Olcum_3_Tarihi: '22.09.2026',
+    Olcum_3_Tarihi: '—',
     Boy_1: 145.0,
     Boy_2: 148.2,
-    Boy_3: 151.4,
+    Boy_3: 0,
     Agirlik_1: 38.5,
     Agirlik_2: 40.1,
-    Agirlik_3: 41.8,
+    Agirlik_3: 0,
     BKI_1: 18.31,
     BKI_2: 18.26,
-    BKI_3: 18.23,
+    BKI_3: 0,
     Yag_Yuzdesi_1: 16.8,
     Yag_Yuzdesi_2: 15.9,
-    Yag_Yuzdesi_3: 14.8,
-    Subscapula_3: 7.8,
-    Triceps_3: 13.5,
-    Calf_DKK_3: 22.0,
-    Supraspinal_3: 14.0,
-    Humerus_3: 6.0,
-    Femur_3: 8.9,
-    Calf_Cevre_3: 31.8,
-    Biceps_Cevre_3: 22.8,
-    Oturma_Boyu_3: 79.5,
-    Kulac_3: 153.2,
+    Yag_Yuzdesi_3: 0,
+    Subscapula_3: 0,
+    Triceps_3: 0,
+    Calf_DKK_3: 0,
+    Supraspinal_3: 0,
+    Humerus_3: 0,
+    Femur_3: 0,
+    Calf_Cevre_3: 0,
+    Biceps_Cevre_3: 0,
+    Oturma_Boyu_3: 0,
+    Kulac_3: 0,
     Surat_1: 3.88,
     Surat_2: 3.74,
-    Surat_3: 3.61,
+    Surat_3: 0,
     Cabukluk_1: 19.8,
     Cabukluk_2: 18.6,
-    Cabukluk_3: 17.7,
-    Reaksiyon_3: 10.9,
-    Sirt_Kuvveti_3: 48.5,
-    Kavrama_Kuvveti_3: 26.2,
-    Durarak_Uzun_Atlama_3: 168,
-    Dikey_Sicrama_3: 33.0,
-    Denge_3: 22,
-    Esneklik_3: 39.5,
-    VO2max_3: 44.2,
+    Cabukluk_3: 0,
+    Reaksiyon_3: 0,
+    Sirt_Kuvveti_3: 0,
+    Kavrama_Kuvveti_3: 0,
+    Durarak_Uzun_Atlama_3: 0,
+    Dikey_Sicrama_3: 0,
+    Denge_3: 0,
+    Esneklik_3: 0,
+    VO2max_3: 0,
     PACER_Mesafe_1: 520,
     PACER_Mesafe_2: 640,
-    PACER_Mesafe_3: 780,
-    PACER_Mekik_3: 39,
+    PACER_Mesafe_3: 0,
+    PACER_Mekik_3: 0,
     Endomorfi_1: 3.2,
     Endomorfi_2: 2.8,
-    Endomorfi_3: 2.4,
-    Endomorfi: 2.4,
+    Endomorfi_3: 0,
+    Endomorfi: 0,
     Mezomorfi_1: 4.6,
     Mezomorfi_2: 4.9,
-    Mezomorfi_3: 5.1,
-    Mezomorfi: 5.1,
+    Mezomorfi_3: 0,
+    Mezomorfi: 0,
     Ektomorfi_1: 3.0,
     Ektomorfi_2: 3.2,
-    Ektomorfi_3: 3.4,
-    Ektomorfi: 3.4,
+    Ektomorfi_3: 0,
+    Ektomorfi: 0,
     Somatotip_Kategorisi: 'Dengeli Mezomorf',
     Elit_Referans_Endo: 2.5,
     Elit_Referans_Mezo: 4.9,
@@ -1575,15 +1768,15 @@ export const SAMPLE_BATCH_ATHLETE_ROWS: Record<string, string | number>[] = [
     Olgunlasma_Durumu: 'Normal Büyüme Hızı (Zamanında)',
     Skor_P1: 72,
     Skor_P2: 79,
-    Skor_P3: 85,
-    Genel_Performans_Puani: 85,
+    Skor_P3: 0,
+    Genel_Performans_Puani: 79,
     Brans_Referans_Puani: 84,
     BMR: 1315,
     MET: 12.6,
     Maksimum_Kalp_Hizi: 208,
     Anaerobik_Guc_Watt: 412,
     Uzman_Gorusu:
-      'Kerem aerobik kapasite (VO2max 44.2 ml/kg/dk), 10x5m çabukluk ve 20m sprint değerlerinde yaş grubu elit futbol normlarının üzerine çıkmıştır.',
+      'Kerem aerobik kapasite, 10x5m çabukluk ve 20m sprint değerlerinde yaş grubu futbol normları için hedeflenen seviyededir. Gelecek ölçüm döneminde bu gelişim trendinin korunması hedeflenmektedir.',
   },
   {
     Sporcu_Adi: 'Zeynep Kaya',
@@ -1595,59 +1788,59 @@ export const SAMPLE_BATCH_ATHLETE_ROWS: Record<string, string | number>[] = [
     Yas: 11.2,
     Olcum_1_Tarihi: '14.01.2026',
     Olcum_2_Tarihi: '18.05.2026',
-    Olcum_3_Tarihi: '22.09.2026',
+    Olcum_3_Tarihi: '—',
     Boy_1: 146.4,
     Boy_2: 149.8,
-    Boy_3: 153.2,
+    Boy_3: 0,
     Agirlik_1: 39.0,
     Agirlik_2: 40.8,
-    Agirlik_3: 42.5,
+    Agirlik_3: 0,
     BKI_1: 18.2,
     BKI_2: 18.18,
-    BKI_3: 18.11,
+    BKI_3: 0,
     Yag_Yuzdesi_1: 18.2,
     Yag_Yuzdesi_2: 17.5,
-    Yag_Yuzdesi_3: 16.9,
-    Subscapula_3: 8.5,
-    Triceps_3: 14.8,
-    Calf_DKK_3: 24.5,
-    Supraspinal_3: 15.2,
-    Humerus_3: 5.8,
-    Femur_3: 8.7,
-    Calf_Cevre_3: 31.0,
-    Biceps_Cevre_3: 21.9,
-    Oturma_Boyu_3: 80.2,
-    Kulac_3: 157.8,
+    Yag_Yuzdesi_3: 0,
+    Subscapula_3: 0,
+    Triceps_3: 0,
+    Calf_DKK_3: 0,
+    Supraspinal_3: 0,
+    Humerus_3: 0,
+    Femur_3: 0,
+    Calf_Cevre_3: 0,
+    Biceps_Cevre_3: 0,
+    Oturma_Boyu_3: 0,
+    Kulac_3: 0,
     Surat_1: 3.96,
     Surat_2: 3.84,
-    Surat_3: 3.72,
+    Surat_3: 0,
     Cabukluk_1: 20.5,
     Cabukluk_2: 19.3,
-    Cabukluk_3: 18.5,
-    Reaksiyon_3: 11.2,
-    Sirt_Kuvveti_3: 46.0,
-    Kavrama_Kuvveti_3: 25.4,
-    Durarak_Uzun_Atlama_3: 161,
-    Dikey_Sicrama_3: 31.0,
-    Denge_3: 25,
-    Esneklik_3: 46.5,
-    VO2max_3: 45.8,
+    Cabukluk_3: 0,
+    Reaksiyon_3: 0,
+    Sirt_Kuvveti_3: 0,
+    Kavrama_Kuvveti_3: 0,
+    Durarak_Uzun_Atlama_3: 0,
+    Dikey_Sicrama_3: 0,
+    Denge_3: 0,
+    Esneklik_3: 0,
+    VO2max_3: 0,
     PACER_Mesafe_1: 540,
     PACER_Mesafe_2: 680,
-    PACER_Mesafe_3: 820,
-    PACER_Mekik_3: 41,
+    PACER_Mesafe_3: 0,
+    PACER_Mekik_3: 0,
     Endomorfi_1: 3.4,
     Endomorfi_2: 3.0,
-    Endomorfi_3: 2.6,
-    Endomorfi: 2.6,
+    Endomorfi_3: 0,
+    Endomorfi: 0,
     Mezomorfi_1: 4.3,
     Mezomorfi_2: 4.6,
-    Mezomorfi_3: 4.8,
-    Mezomorfi: 4.8,
+    Mezomorfi_3: 0,
+    Mezomorfi: 0,
     Ektomorfi_1: 3.2,
     Ektomorfi_2: 3.5,
-    Ektomorfi_3: 3.7,
-    Ektomorfi: 3.7,
+    Ektomorfi_3: 0,
+    Ektomorfi: 0,
     Somatotip_Kategorisi: 'Mezomorfik Ektomorf',
     Elit_Referans_Endo: 2.2,
     Elit_Referans_Mezo: 4.4,
@@ -1660,15 +1853,15 @@ export const SAMPLE_BATCH_ATHLETE_ROWS: Record<string, string | number>[] = [
     Olgunlasma_Durumu: 'Erken Büyüme Atağı (PHV Öncesi)',
     Skor_P1: 76,
     Skor_P2: 83,
-    Skor_P3: 88,
-    Genel_Performans_Puani: 88,
+    Skor_P3: 0,
+    Genel_Performans_Puani: 83,
     Brans_Referans_Puani: 85,
     BMR: 1285,
     MET: 13.1,
     Maksimum_Kalp_Hizi: 209,
     Anaerobik_Guc_Watt: 388,
     Uzman_Gorusu:
-      'Zeynep kulaç açıklığı (157.8 cm), gövde esnekliği (46.5 cm) ve kardiyorespiratuar dayanıklılıkta üst dilimdedir. Biyolojik olgunlaşma takibi periyodik yapılmalıdır.',
+      'Zeynep kulaç açıklığı, gövde esnekliği ve kardiyorespiratuar dayanıklılıkta yaş grubu ortalamasının üzerindedir. Gelişim süreci periyodik olarak izlenmektedir.',
   },
   {
     Sporcu_Adi: 'Arda Demir',
@@ -1680,59 +1873,59 @@ export const SAMPLE_BATCH_ATHLETE_ROWS: Record<string, string | number>[] = [
     Yas: 12.1,
     Olcum_1_Tarihi: '14.01.2026',
     Olcum_2_Tarihi: '18.05.2026',
-    Olcum_3_Tarihi: '22.09.2026',
+    Olcum_3_Tarihi: '—',
     Boy_1: 154.2,
     Boy_2: 158.0,
-    Boy_3: 162.4,
+    Boy_3: 0,
     Agirlik_1: 45.0,
     Agirlik_2: 47.2,
-    Agirlik_3: 49.5,
+    Agirlik_3: 0,
     BKI_1: 18.92,
     BKI_2: 18.91,
-    BKI_3: 18.77,
+    BKI_3: 0,
     Yag_Yuzdesi_1: 19.4,
     Yag_Yuzdesi_2: 18.2,
-    Yag_Yuzdesi_3: 17.1,
-    Subscapula_3: 9.8,
-    Triceps_3: 15.2,
-    Calf_DKK_3: 25.0,
-    Supraspinal_3: 16.5,
-    Humerus_3: 6.4,
-    Femur_3: 9.5,
-    Calf_Cevre_3: 33.2,
-    Biceps_Cevre_3: 24.1,
-    Oturma_Boyu_3: 84.8,
-    Kulac_3: 168.0,
+    Yag_Yuzdesi_3: 0,
+    Subscapula_3: 0,
+    Triceps_3: 0,
+    Calf_DKK_3: 0,
+    Supraspinal_3: 0,
+    Humerus_3: 0,
+    Femur_3: 0,
+    Calf_Cevre_3: 0,
+    Biceps_Cevre_3: 0,
+    Oturma_Boyu_3: 0,
+    Kulac_3: 0,
     Surat_1: 3.92,
     Surat_2: 3.79,
-    Surat_3: 3.68,
+    Surat_3: 0,
     Cabukluk_1: 20.2,
     Cabukluk_2: 19.1,
-    Cabukluk_3: 18.3,
-    Reaksiyon_3: 11.5,
-    Sirt_Kuvveti_3: 52.0,
-    Kavrama_Kuvveti_3: 28.4,
-    Durarak_Uzun_Atlama_3: 174,
-    Dikey_Sicrama_3: 35.5,
-    Denge_3: 21,
-    Esneklik_3: 38.0,
-    VO2max_3: 41.6,
+    Cabukluk_3: 0,
+    Reaksiyon_3: 0,
+    Sirt_Kuvveti_3: 0,
+    Kavrama_Kuvveti_3: 0,
+    Durarak_Uzun_Atlama_3: 0,
+    Dikey_Sicrama_3: 0,
+    Denge_3: 0,
+    Esneklik_3: 0,
+    VO2max_3: 0,
     PACER_Mesafe_1: 480,
     PACER_Mesafe_2: 580,
-    PACER_Mesafe_3: 700,
-    PACER_Mekik_3: 35,
+    PACER_Mesafe_3: 0,
+    PACER_Mekik_3: 0,
     Endomorfi_1: 3.3,
     Endomorfi_2: 2.9,
-    Endomorfi_3: 2.5,
-    Endomorfi: 2.5,
+    Endomorfi_3: 0,
+    Endomorfi: 0,
     Mezomorfi_1: 4.2,
     Mezomorfi_2: 4.5,
-    Mezomorfi_3: 4.7,
-    Mezomorfi: 4.7,
+    Mezomorfi_3: 0,
+    Mezomorfi: 0,
     Ektomorfi_1: 3.4,
     Ektomorfi_2: 3.7,
-    Ektomorfi_3: 3.9,
-    Ektomorfi: 3.9,
+    Ektomorfi_3: 0,
+    Ektomorfi: 0,
     Somatotip_Kategorisi: 'Mezomorfik Ektomorf',
     Elit_Referans_Endo: 2.3,
     Elit_Referans_Mezo: 4.2,
@@ -1745,15 +1938,15 @@ export const SAMPLE_BATCH_ATHLETE_ROWS: Record<string, string | number>[] = [
     Olgunlasma_Durumu: 'Geç Büyüme Atağı (Yüksek Boy Potansiyeli)',
     Skor_P1: 69,
     Skor_P2: 76,
-    Skor_P3: 82,
-    Genel_Performans_Puani: 82,
+    Skor_P3: 0,
+    Genel_Performans_Puani: 76,
     Brans_Referans_Puani: 83,
     BMR: 1420,
     MET: 11.9,
     Maksimum_Kalp_Hizi: 208,
     Anaerobik_Guc_Watt: 456,
     Uzman_Gorusu:
-      'Arda uzun boy projeksiyonu (192.5 cm) ve dikey sıçrama (35.5 cm) kapasitesiyle basketbol branşı için yüksek potansiyel taşımaktadır. Hamstring esnekliği desteklenmelidir.',
+      'Arda uzun boy projeksiyonu ve dikey sıçrama kapasitesiyle basketbol branşı için yüksek gelişim potansiyeline sahiptir.',
   },
   {
     Sporcu_Adi: 'Elif Şahin',
@@ -1765,59 +1958,59 @@ export const SAMPLE_BATCH_ATHLETE_ROWS: Record<string, string | number>[] = [
     Yas: 10.9,
     Olcum_1_Tarihi: '14.01.2026',
     Olcum_2_Tarihi: '18.05.2026',
-    Olcum_3_Tarihi: '22.09.2026',
+    Olcum_3_Tarihi: '—',
     Boy_1: 139.5,
     Boy_2: 142.8,
-    Boy_3: 146.2,
+    Boy_3: 0,
     Agirlik_1: 34.8,
     Agirlik_2: 36.1,
-    Agirlik_3: 37.6,
+    Agirlik_3: 0,
     BKI_1: 17.88,
     BKI_2: 17.7,
-    BKI_3: 17.59,
+    BKI_3: 0,
     Yag_Yuzdesi_1: 19.8,
     Yag_Yuzdesi_2: 18.9,
-    Yag_Yuzdesi_3: 18.0,
-    Subscapula_3: 8.2,
-    Triceps_3: 14.1,
-    Calf_DKK_3: 23.0,
-    Supraspinal_3: 14.8,
-    Humerus_3: 5.5,
-    Femur_3: 8.4,
-    Calf_Cevre_3: 29.8,
-    Biceps_Cevre_3: 21.0,
-    Oturma_Boyu_3: 76.8,
-    Kulac_3: 148.5,
+    Yag_Yuzdesi_3: 0,
+    Subscapula_3: 0,
+    Triceps_3: 0,
+    Calf_DKK_3: 0,
+    Supraspinal_3: 0,
+    Humerus_3: 0,
+    Femur_3: 0,
+    Calf_Cevre_3: 0,
+    Biceps_Cevre_3: 0,
+    Oturma_Boyu_3: 0,
+    Kulac_3: 0,
     Surat_1: 4.05,
     Surat_2: 3.89,
-    Surat_3: 3.75,
+    Surat_3: 0,
     Cabukluk_1: 19.6,
     Cabukluk_2: 18.4,
-    Cabukluk_3: 17.6,
-    Reaksiyon_3: 10.8,
-    Sirt_Kuvveti_3: 41.5,
-    Kavrama_Kuvveti_3: 24.8,
-    Durarak_Uzun_Atlama_3: 152,
-    Dikey_Sicrama_3: 28.5,
-    Denge_3: 24,
-    Esneklik_3: 43.5,
-    VO2max_3: 40.5,
+    Cabukluk_3: 0,
+    Reaksiyon_3: 0,
+    Sirt_Kuvveti_3: 0,
+    Kavrama_Kuvveti_3: 0,
+    Durarak_Uzun_Atlama_3: 0,
+    Dikey_Sicrama_3: 0,
+    Denge_3: 0,
+    Esneklik_3: 0,
+    VO2max_3: 0,
     PACER_Mesafe_1: 420,
     PACER_Mesafe_2: 520,
-    PACER_Mesafe_3: 640,
-    PACER_Mekik_3: 32,
+    PACER_Mesafe_3: 0,
+    PACER_Mekik_3: 0,
     Endomorfi_1: 3.5,
     Endomorfi_2: 3.1,
-    Endomorfi_3: 2.8,
-    Endomorfi: 2.8,
+    Endomorfi_3: 0,
+    Endomorfi: 0,
     Mezomorfi_1: 4.1,
     Mezomorfi_2: 4.3,
-    Mezomorfi_3: 4.5,
-    Mezomorfi: 4.5,
+    Mezomorfi_3: 0,
+    Mezomorfi: 0,
     Ektomorfi_1: 2.8,
     Ektomorfi_2: 3.1,
-    Ektomorfi_3: 3.3,
-    Ektomorfi: 3.3,
+    Ektomorfi_3: 0,
+    Ektomorfi: 0,
     Somatotip_Kategorisi: 'Endomorfik Mezomorf',
     Elit_Referans_Endo: 2.8,
     Elit_Referans_Mezo: 4.2,
@@ -1830,15 +2023,15 @@ export const SAMPLE_BATCH_ATHLETE_ROWS: Record<string, string | number>[] = [
     Olgunlasma_Durumu: 'Zamanında (Normal)',
     Skor_P1: 67,
     Skor_P2: 74,
-    Skor_P3: 79,
-    Genel_Performans_Puani: 79,
+    Skor_P3: 0,
+    Genel_Performans_Puani: 74,
     Brans_Referans_Puani: 80,
     BMR: 1205,
     MET: 11.6,
     Maksimum_Kalp_Hizi: 209,
     Anaerobik_Guc_Watt: 342,
     Uzman_Gorusu:
-      'Elif yanal yön değiştirme (10x5m çabukluk: 17.6 sn) ve dominant el kavrama kuvvetinde tenis branşı gereksinimlerini karşılamaktadır.',
+      'Elif yanal yön değiştirme ve dominant el kavrama kuvvetinde tenis branşı için beklenen gelişim trendini sürdürmektedir.',
   },
   {
     Sporcu_Adi: 'Canberk Aydın',
@@ -1850,59 +2043,59 @@ export const SAMPLE_BATCH_ATHLETE_ROWS: Record<string, string | number>[] = [
     Yas: 11.6,
     Olcum_1_Tarihi: '14.01.2026',
     Olcum_2_Tarihi: '18.05.2026',
-    Olcum_3_Tarihi: '22.09.2026',
+    Olcum_3_Tarihi: '—',
     Boy_1: 144.2,
     Boy_2: 147.9,
-    Boy_3: 151.0,
+    Boy_3: 0,
     Agirlik_1: 37.9,
     Agirlik_2: 39.4,
-    Agirlik_3: 41.0,
+    Agirlik_3: 0,
     BKI_1: 18.22,
     BKI_2: 18.01,
-    BKI_3: 17.98,
+    BKI_3: 0,
     Yag_Yuzdesi_1: 15.6,
     Yag_Yuzdesi_2: 14.8,
-    Yag_Yuzdesi_3: 13.9,
-    Subscapula_3: 7.2,
-    Triceps_3: 12.8,
-    Calf_DKK_3: 20.5,
-    Supraspinal_3: 13.2,
-    Humerus_3: 6.1,
-    Femur_3: 9.0,
-    Calf_Cevre_3: 32.0,
-    Biceps_Cevre_3: 23.0,
-    Oturma_Boyu_3: 79.2,
-    Kulac_3: 154.0,
+    Yag_Yuzdesi_3: 0,
+    Subscapula_3: 0,
+    Triceps_3: 0,
+    Calf_DKK_3: 0,
+    Supraspinal_3: 0,
+    Humerus_3: 0,
+    Femur_3: 0,
+    Calf_Cevre_3: 0,
+    Biceps_Cevre_3: 0,
+    Oturma_Boyu_3: 0,
+    Kulac_3: 0,
     Surat_1: 3.82,
     Surat_2: 3.68,
-    Surat_3: 3.54,
+    Surat_3: 0,
     Cabukluk_1: 19.4,
     Cabukluk_2: 18.3,
-    Cabukluk_3: 17.5,
-    Reaksiyon_3: 10.6,
-    Sirt_Kuvveti_3: 47.0,
-    Kavrama_Kuvveti_3: 25.8,
-    Durarak_Uzun_Atlama_3: 178,
-    Dikey_Sicrama_3: 36.0,
-    Denge_3: 20,
-    Esneklik_3: 42.0,
-    VO2max_3: 42.8,
+    Cabukluk_3: 0,
+    Reaksiyon_3: 0,
+    Sirt_Kuvveti_3: 0,
+    Kavrama_Kuvveti_3: 0,
+    Durarak_Uzun_Atlama_3: 0,
+    Dikey_Sicrama_3: 0,
+    Denge_3: 0,
+    Esneklik_3: 0,
+    VO2max_3: 0,
     PACER_Mesafe_1: 480,
     PACER_Mesafe_2: 600,
-    PACER_Mesafe_3: 720,
-    PACER_Mekik_3: 36,
+    PACER_Mesafe_3: 0,
+    PACER_Mekik_3: 0,
     Endomorfi_1: 2.7,
     Endomorfi_2: 2.4,
-    Endomorfi_3: 2.1,
-    Endomorfi: 2.1,
+    Endomorfi_3: 0,
+    Endomorfi: 0,
     Mezomorfi_1: 4.8,
     Mezomorfi_2: 5.1,
-    Mezomorfi_3: 5.3,
-    Mezomorfi: 5.3,
+    Mezomorfi_3: 0,
+    Mezomorfi: 0,
     Ektomorfi_1: 3.1,
     Ektomorfi_2: 3.3,
-    Ektomorfi_3: 3.5,
-    Ektomorfi: 3.5,
+    Ektomorfi_3: 0,
+    Ektomorfi: 0,
     Somatotip_Kategorisi: 'Dengeli Mezomorf',
     Elit_Referans_Endo: 2.0,
     Elit_Referans_Mezo: 5.2,
@@ -1915,15 +2108,15 @@ export const SAMPLE_BATCH_ATHLETE_ROWS: Record<string, string | number>[] = [
     Olgunlasma_Durumu: 'Normal Büyüme Hızı',
     Skor_P1: 75,
     Skor_P2: 82,
-    Skor_P3: 89,
-    Genel_Performans_Puani: 89,
+    Skor_P3: 0,
+    Genel_Performans_Puani: 82,
     Brans_Referans_Puani: 85,
     BMR: 1300,
     MET: 12.2,
     Maksimum_Kalp_Hizi: 208,
     Anaerobik_Guc_Watt: 425,
     Uzman_Gorusu:
-      'Canberk 20m sürat (3.54 sn), durarak uzun atlama (178 cm) ve dikey sıçrama (36.0 cm) testlerinde yüksek patlayıcı güç sergilemektedir.',
+      'Canberk 20m sürat, durarak uzun atlama ve dikey sıçrama testlerinde yüksek patlayıcı güç sergilemektedir. Bu performansın korunması hedeflenmektedir.',
   },
 ];
 
@@ -1950,10 +2143,14 @@ export function createNewLabReportWithBranding(params: {
   cloned.gender = params.gender;
   cloned.ageYears = Number(params.ageYears) || 11.0;
   cloned.ageMonths = Number((cloned.ageYears * 12).toFixed(1));
-  cloned.date3 = today;
+  cloned.date3 = '—';
 
   // Automatically apply persisted school branding (logo, school name, branch)
-  const branded = applyBrandingToReport(cloned, activeBranding);
+  let branded = applyBrandingToReport(cloned, activeBranding);
+  
+  // Automatically apply AI Forecast for 2nd test beklenen değerler
+  branded = generateAiForecastForLabReport(branded);
+  
   branded.aiRecommendations = analyzeLabPerformanceMetrics(branded);
   return branded;
 }
@@ -1980,44 +2177,44 @@ function buildAthleteFlatRow(rep: SportsFlyLabReport, activeBranding: SportsFlyL
     Olcum_3_Tarihi: rep.date3,
     Boy_1: getB('height', 'm1', 142.6),
     Boy_2: getB('height', 'm2', 146.1),
-    Boy_3: getB('height', 'm3', 149.5),
+    Boy_3: getB('height', 'm3', 0),
     Agirlik_1: getB('weight', 'm1', 40.3),
     Agirlik_2: getB('weight', 'm2', 41.2),
-    Agirlik_3: getB('weight', 'm3', 43.2),
+    Agirlik_3: getB('weight', 'm3', 0),
     BKI_1: getB('bmi', 'm1', 19.82),
     BKI_2: getB('bmi', 'm2', 19.3),
-    BKI_3: getB('bmi', 'm3', 19.33),
+    BKI_3: getB('bmi', 'm3', 0),
     Yag_Yuzdesi_1: getB('body_fat', 'm1', 24.4),
     Yag_Yuzdesi_2: getB('body_fat', 'm2', 22.8),
-    Yag_Yuzdesi_3: getB('body_fat', 'm3', 20.6),
-    Subscapula_3: getB('subscapula', 'm3', 9.2),
-    Triceps_3: getB('triceps', 'm3', 17.0),
-    Calf_DKK_3: getB('calf_skf', 'm3', 30.0),
-    Supraspinal_3: getB('supraspinal', 'm3', 19.2),
-    Humerus_3: getB('humerus', 'm3', 6.2),
-    Femur_3: getB('femur', 'm3', 9.1),
-    Calf_Cevre_3: getB('calf_girth', 'm3', 31.1),
-    Biceps_Cevre_3: getB('biceps_girth', 'm3', 22.3),
-    Oturma_Boyu_3: rep.sittingHeight || getB('sitting_height', 'm3', 78.5),
-    Kulac_3: getB('arm_span', 'm3', 151.3),
+    Yag_Yuzdesi_3: getB('body_fat', 'm3', 0),
+    Subscapula_3: getB('subscapula', 'm3', 0),
+    Triceps_3: getB('triceps', 'm3', 0),
+    Calf_DKK_3: getB('calf_skf', 'm3', 0),
+    Supraspinal_3: getB('supraspinal', 'm3', 0),
+    Humerus_3: getB('humerus', 'm3', 0),
+    Femur_3: getB('femur', 'm3', 0),
+    Calf_Cevre_3: getB('calf_girth', 'm3', 0),
+    Biceps_Cevre_3: getB('biceps_girth', 'm3', 0),
+    Oturma_Boyu_3: getB('sitting_height', 'm3', 0),
+    Kulac_3: getB('arm_span', 'm3', 0),
     Surat_1: getM('sprint', 'm1', 4.12),
     Surat_2: getM('sprint', 'm2', 3.95),
-    Surat_3: getM('sprint', 'm3', 3.82),
+    Surat_3: getM('sprint', 'm3', 0),
     Cabukluk_1: getM('agility', 'm1', 22.4),
     Cabukluk_2: getM('agility', 'm2', 20.1),
-    Cabukluk_3: getM('agility', 'm3', 19.2),
-    Reaksiyon_3: getM('reaction', 'm3', 11.7),
-    Sirt_Kuvveti_3: getM('back_strength', 'm3', 45.0),
-    Kavrama_Kuvveti_3: getM('grip_strength', 'm3', 24.5),
-    Durarak_Uzun_Atlama_3: getM('standing_long_jump', 'm3', 154),
-    Dikey_Sicrama_3: getM('vertical_jump', 'm3', 29.5),
-    Denge_3: getM('balance', 'm3', 19),
-    Esneklik_3: getM('flexibility', 'm3', 41.0),
-    VO2max_3: getM('aerobic', 'm3', 38.4),
+    Cabukluk_3: getM('agility', 'm3', 0),
+    Reaksiyon_3: getM('reaction', 'm3', 0),
+    Sirt_Kuvveti_3: getM('back_strength', 'm3', 0),
+    Kavrama_Kuvveti_3: getM('grip_strength', 'm3', 0),
+    Durarak_Uzun_Atlama_3: getM('standing_long_jump', 'm3', 0),
+    Dikey_Sicrama_3: getM('vertical_jump', 'm3', 0),
+    Denge_3: getM('balance', 'm3', 0),
+    Esneklik_3: getM('flexibility', 'm3', 0),
+    VO2max_3: getM('aerobic', 'm3', 0),
     PACER_Mesafe_1: rep.cardio.test1Distance || 360,
     PACER_Mesafe_2: rep.cardio.test2Distance || 440,
-    PACER_Mesafe_3: rep.cardio.test3Distance || 540,
-    PACER_Mekik_3: rep.cardio.test3Shuttles || 27,
+    PACER_Mesafe_3: rep.cardio.test3Distance || 0,
+    PACER_Mekik_3: rep.cardio.test3Shuttles || 0,
     Endomorfi_1: rep.somatotype.m1.endo,
     Endomorfi_2: rep.somatotype.m2.endo,
     Endomorfi_3: rep.somatotype.m3.endo,
@@ -2335,7 +2532,7 @@ export function downloadBatchSportsFlyLabExcelTemplate(baseTemplate: SportsFlyLa
     { Sutun: 'VO2max_3, PACER_Mesafe_3', Zorunlu: 'İsteğe Bağlı', Birim: 'ml/kg/dk, m', Aciklama: 'Kardiyorespiratuar dayanıklılık' },
     { Sutun: 'PHV_Yasi, Tahmini_18_Yas_Boyu', Zorunlu: 'İsteğe Bağlı', Birim: 'Yaş, cm', Aciklama: 'Büyüme atağı ve yetişkin boyu' },
     { Sutun: 'Genel_Performans_Puani', Zorunlu: 'İsteğe Bağlı', Birim: '0-100', Aciklama: 'Genel karne skoru (Boşsa testlerden hesaplanır)' },
-    { Sutun: 'Uzman_Gorusu', Zorunlu: 'İsteğe Bağlı', Birim: 'Metin', Aciklama: 'Karne 7. sayfasındaki uzman antrenör değerlendirme notu' },
+    { Sutun: 'Uzman_Gorusu', Zorunlu: 'İsteğe Bağlı', Birim: 'Metin', Aciklama: 'Karne son sayfasındaki uzman antrenör değerlendirme notu' },
   ];
   const wsGuide = XLSX.utils.json_to_sheet(guideRows);
   wsGuide['!cols'] = [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 60 }];
@@ -2723,8 +2920,12 @@ function buildLabReportFromExcelRow(
   }
   if (r.Uzman_Gorusu) cloned.expertComment = String(r.Uzman_Gorusu);
 
-  const finalRowReport = applyBrandingToReport(cloned, activeBranding);
+  let finalRowReport = applyBrandingToReport(cloned, activeBranding);
   ensureDataConsistency(finalRowReport);
+  
+  // Automatically apply AI Forecast for 2nd test beklenen değerler
+  finalRowReport = generateAiForecastForLabReport(finalRowReport);
+  
   finalRowReport.aiRecommendations = analyzeLabPerformanceMetrics(finalRowReport);
   return finalRowReport;
 }
@@ -4072,7 +4273,7 @@ export function analyzeLabPerformanceMetrics(report: SportsFlyLabReport): LabAiP
     },
     {
       focusArea: '3. Blok: Kardiyorespiratuar Kapasite (VO2peak) & Büyüme Uyumu',
-      microcycleGoal: `PACER VO2peak değerini (${report.cardio.test3Vo2} ml/kg/dk) ve anaerobik güç devamlılığını (${report.cardio.verticalJumpRelativeWatt} W/kg) geliştirmek`,
+      microcycleGoal: `PACER VO2peak değerini (${report.cardio.test2Vo2 || report.cardio.test1Vo2} ml/kg/dk) ve anaerobik güç devamlılığını (${report.cardio.verticalJumpRelativeWatt} W/kg) geliştirmek`,
       recommendedDrills: [
         'Branşa özgü dar alan yüksek tempolu oyunlar ve 20m mekik (shuttle) dayanıklılık blokları',
         'Hamstring ve kalça çevresi PNF esneklik / mobilite rutini',
@@ -4081,7 +4282,7 @@ export function analyzeLabPerformanceMetrics(report: SportsFlyLabReport): LabAiP
     },
   ];
 
-  const overallSummary = `${report.athleteName}, 1. testten (%${report.scoreHistory.p1Score}) 3. teste (%${report.scoreHistory.p3Score}) genel sportif performans endeksinde anlamlı bir ivme yakalamıştır. Ölçüm verileri incelendiğinde ${strengths
+  const overallSummary = `${report.athleteName}, 1. testten (%${report.scoreHistory.p1Score}) güncel ölçüm dönemine (%${report.scoreHistory.p2Score || report.scoreHistory.p3Score}) genel sportif performans endeksinde anlamlı bir gelişim göstermiştir. Ölçüm verileri incelendiğinde ${strengths
     .map((s) => s.metricName)
     .slice(0, 2)
     .join(' ve ')} parametreleri güçlü yönler olarak öne çıkarken; ${improvementAreas
@@ -4089,7 +4290,7 @@ export function analyzeLabPerformanceMetrics(report: SportsFlyLabReport): LabAiP
     .slice(0, 3)
     .join(', ')} alanlarında hedeflenen elit normlara ulaşmak için odaklanmış antrenman müdahalesi önerilmektedir.`;
 
-  const nutritionAndRecoveryTip = `Sporcunun bazal metabolik hızı ${report.cardio.basalMetabolicRate} kcal/gün ve güncel somatotipi ${report.somatotype.m3.category} (${report.somatotype.m3.endo}-${report.somatotype.m3.meso}-${report.somatotype.m3.ecto}) olarak ölçülmüştür. Endomorfi bileşenini (${report.somatotype.m3.endo}) kontrol altında tutup kas-iskelet sağlamlığını (Mezomorfi: ${report.somatotype.m3.meso}) desteklemek için antrenman sonrası ilk 45 dakikada kaliteli protein + kompleks karbonhidrat alımı ve büyüme hormonu salınımı için günde en az 9 saat gece uykusu önerilir.`;
+  const nutritionAndRecoveryTip = `Sporcunun bazal metabolik hızı ${report.cardio.basalMetabolicRate} kcal/gün ve güncel somatotipi ${report.somatotype.m2.category || report.somatotype.m1.category} (${report.somatotype.m2.endo || report.somatotype.m1.endo}-${report.somatotype.m2.meso || report.somatotype.m1.meso}-${report.somatotype.m2.ecto || report.somatotype.m1.ecto}) olarak ölçülmüştür. Endomorfi bileşenini kontrol altında tutup kas-iskelet sağlamlığını (Mezomorfi) desteklemek için antrenman sonrası ilk 45 dakikada kaliteli protein + kompleks karbonhidrat alımı ve büyüme hormonu salınımı için günde en az 9 saat gece uykusu önerilir.`;
 
   return {
     overallSummary,
@@ -4128,4 +4329,92 @@ export async function fetchGeminiLabRecommendations(
   }
 
   return (await response.json()) as LabAiPerformanceAnalysis;
+}
+
+/**
+ * AI Growth & Performance Forecasting Engine:
+ * When only Test 1 (m1) is available or when requested, automatically calculates and projects
+ * expected estimated values for Test 2 (m2) and Test 3 (m3) based on initial measurement data
+ * and sports science growth curves.
+ */
+export function generateAiForecastForLabReport(report: SportsFlyLabReport): SportsFlyLabReport {
+  const cloned: SportsFlyLabReport = JSON.parse(JSON.stringify(report));
+  cloned.isAiForecast = true;
+
+  // Clear 3rd test dates and general status
+  cloned.date3 = '—';
+  cloned.scoreHistory.p3Date = '—';
+  cloned.scoreHistory.p3Score = 0;
+
+  // 1. Forecast Body Composition (Only m2, Clear m3)
+  cloned.bodyComposition.forEach((item) => {
+    item.m3 = 0;
+    const m1 = Number(item.m1) || 0;
+    if (m1 > 0) {
+      if (item.id === 'height') {
+        item.m2 = Number((m1 + 1.2).toFixed(1));
+      } else if (item.id === 'weight') {
+        item.m2 = Number((m1 + 0.8).toFixed(1));
+      } else if (item.id === 'bmi') {
+        item.m2 = Number((m1 * 0.98).toFixed(2));
+      } else if (item.id === 'body_fat') {
+        item.m2 = Number((m1 * 0.95).toFixed(1));
+      } else {
+        item.m2 = Number((m1 * 0.98).toFixed(1));
+      }
+    }
+  });
+
+  // 2. Forecast Motor Performance (Only m2, Clear m3)
+  cloned.motorPerformance.forEach((item) => {
+    item.m3 = 0;
+    const m1 = Number(item.m1) || 0;
+    if (m1 > 0) {
+      if (item.lowerIsBetter) {
+        item.m2 = Number((m1 * 0.96).toFixed(2));
+      } else {
+        item.m2 = Number((m1 * 1.05).toFixed(1));
+      }
+    }
+  });
+
+  // 3. Forecast Cardio / VO2 / Shuttle (Only test2, Clear test3)
+  if (cloned.cardio) {
+    cloned.cardio.test3Distance = 0;
+    cloned.cardio.test3Shuttles = 0;
+    cloned.cardio.test3Vo2 = 0;
+    cloned.cardio.test3Status = '—';
+
+    const c1Dist = Number(cloned.cardio.test1Distance) || 360;
+    const c1Shut = Number(cloned.cardio.test1Shuttles) || 28;
+    const c1Vo2 = Number(cloned.cardio.test1Vo2) || 38.5;
+
+    cloned.cardio.test2Distance = Math.round(c1Dist * 1.08);
+    cloned.cardio.test2Shuttles = Math.round(c1Shut * 1.08);
+    cloned.cardio.test2Vo2 = Number((c1Vo2 * 1.04).toFixed(1));
+  }
+
+  // 4. Forecast Score History (Only p2Score)
+  const p1 = cloned.scoreHistory.p1Score || 65;
+  cloned.scoreHistory.p2Score = Math.min(95, Math.round(p1 + 8));
+
+  // 5. Forecast Somatotype (Only m2, Clear m3)
+  cloned.somatotype.m3 = { endo: 0, meso: 0, ecto: 0, category: '—' };
+  
+  const s1Endo = cloned.somatotype.m1.endo || 3.5;
+  const s1Meso = cloned.somatotype.m1.meso || 4.2;
+  const s1Ecto = cloned.somatotype.m1.ecto || 2.1;
+
+  cloned.somatotype.m2 = {
+    endo: Number((s1Endo * 0.96).toFixed(1)),
+    meso: Number((s1Meso * 1.04).toFixed(1)),
+    ecto: Number((s1Ecto * 1.02).toFixed(1)),
+    category: cloned.somatotype.m1.category,
+  };
+
+  cloned.expertComment = generateAthleteInterpretiveExpertComment(cloned);
+
+  ensureDataConsistency(cloned);
+  cloned.aiRecommendations = analyzeLabPerformanceMetrics(cloned);
+  return cloned;
 }

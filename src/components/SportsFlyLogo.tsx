@@ -1,71 +1,48 @@
 import React, { useState, useEffect } from 'react';
-import { fetchCompanyProfileFromFirestore } from '../services/companyProfileService';
+
+export const SPORTSFLY_DEFAULT_LOGO = '/sportsfly-logo.png';
+export const SPORTSFLY_DEFAULT_SVG = '/sportsfly-logo.svg';
 
 export const useSportsFlyLogo = () => {
-  const [customLogo, setCustomLogo] = useState<string | null>(() => {
-    return typeof window !== 'undefined' ? localStorage.getItem('sportsfly_custom_logo') : null;
+  const [customLogo, setCustomLogo] = useState<string>(() => {
+    if (typeof window === 'undefined') return SPORTSFLY_DEFAULT_LOGO;
+    try {
+      const stored = localStorage.getItem('sportsfly_custom_logo');
+      if (stored && (stored.toLowerCase().includes('rota') || stored.includes('rota-performans'))) {
+        localStorage.removeItem('sportsfly_custom_logo');
+        return SPORTSFLY_DEFAULT_LOGO;
+      }
+      return stored || SPORTSFLY_DEFAULT_LOGO;
+    } catch (e) {
+      return SPORTSFLY_DEFAULT_LOGO;
+    }
   });
 
   useEffect(() => {
-    // Fetch from Firestore company profile on mount to ensure cross-device and cross-session persistence
-    const syncLogoFromFirestore = async () => {
-      try {
-        const profile = await fetchCompanyProfileFromFirestore();
-        if (profile && profile.logoDataUrl && profile.logoDataUrl.trim() !== '') {
-          try {
-            localStorage.setItem('sportsfly_custom_logo', profile.logoDataUrl);
-          } catch (e) {
-            // ignore quota
-          }
-          setCustomLogo(profile.logoDataUrl);
-        }
-      } catch (err) {
-        console.warn('[Logo] Failed to fetch company profile logo from Firestore:', err);
-      }
-    };
-    syncLogoFromFirestore();
-
     const handleStorage = () => {
       try {
-        setCustomLogo(localStorage.getItem('sportsfly_custom_logo'));
-      } catch (e) {}
-    };
-
-    const handleProfileUpdate = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail && detail.logoDataUrl !== undefined) {
-        if (detail.logoDataUrl) {
-          try {
-            localStorage.setItem('sportsfly_custom_logo', detail.logoDataUrl);
-          } catch (e) {
-            // ignore quota
-          }
-          setCustomLogo(detail.logoDataUrl);
-        } else {
-          try {
-            localStorage.removeItem('sportsfly_custom_logo');
-          } catch (e) {}
-          setCustomLogo(null);
+        const stored = localStorage.getItem('sportsfly_custom_logo');
+        if (stored && (stored.toLowerCase().includes('rota') || stored.includes('rota-performans'))) {
+          localStorage.removeItem('sportsfly_custom_logo');
+          setCustomLogo(SPORTSFLY_DEFAULT_LOGO);
+          return;
         }
-      } else {
-        try {
-          setCustomLogo(localStorage.getItem('sportsfly_custom_logo'));
-        } catch (e) {}
+        setCustomLogo(stored || SPORTSFLY_DEFAULT_LOGO);
+      } catch (e) {
+        setCustomLogo(SPORTSFLY_DEFAULT_LOGO);
       }
     };
 
     window.addEventListener('storage', handleStorage);
     window.addEventListener('sportsfly-logo-changed', handleStorage as EventListener);
-    window.addEventListener('sportsfly_company_profile_updated', handleProfileUpdate as EventListener);
 
     return () => {
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('sportsfly-logo-changed', handleStorage as EventListener);
-      window.removeEventListener('sportsfly_company_profile_updated', handleProfileUpdate as EventListener);
     };
   }, []);
 
-  return customLogo;
+  return customLogo || SPORTSFLY_DEFAULT_LOGO;
 };
 
 interface SportsFlyLogoProps {
@@ -75,16 +52,22 @@ interface SportsFlyLogoProps {
 }
 
 /**
- * Exact user-provided photographic logo for SportsFly.
+ * Exact user-provided photographic and brand logo for SportsFly.
  */
 export const SportsFlyVectorMark: React.FC<{ className?: string }> = ({ className = 'w-7 h-7' }) => {
   const customLogo = useSportsFlyLogo();
+  const effectiveSrc = (!customLogo || customLogo.toLowerCase().includes('rota'))
+    ? SPORTSFLY_DEFAULT_LOGO
+    : customLogo;
   
   return (
     <img
-      src={customLogo || "/sportsfly-logo.svg"}
+      src={effectiveSrc}
       alt="SportsFly Logo"
       className={`object-contain shrink-0 align-middle ${className}`}
+      onError={(e) => {
+        (e.target as HTMLImageElement).src = SPORTSFLY_DEFAULT_SVG;
+      }}
     />
   );
 };
@@ -95,6 +78,9 @@ export const SportsFlyLogo: React.FC<SportsFlyLogoProps> = ({
   showText = false,
 }) => {
   const customLogo = useSportsFlyLogo();
+  const effectiveSrc = (!customLogo || customLogo.toLowerCase().includes('rota'))
+    ? SPORTSFLY_DEFAULT_LOGO
+    : customLogo;
   const dimensionStyle = size
     ? { width: typeof size === 'number' ? `${size}px` : size, height: typeof size === 'number' ? `${size}px` : size }
     : undefined;
@@ -106,9 +92,12 @@ export const SportsFlyLogo: React.FC<SportsFlyLogoProps> = ({
         style={dimensionStyle}
       >
         <img
-          src={customLogo || "/sportsfly-logo.svg"}
+          src={effectiveSrc}
           alt="SportsFly Logo"
           className="w-full h-full object-contain"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = SPORTSFLY_DEFAULT_SVG;
+          }}
         />
       </div>
       {showText && (
@@ -122,13 +111,21 @@ export const SportsFlyLogo: React.FC<SportsFlyLogoProps> = ({
 
 export const SportsFlyIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => {
   const customLogo = useSportsFlyLogo();
+  const effectiveSrc = (!customLogo || customLogo.toLowerCase().includes('rota'))
+    ? SPORTSFLY_DEFAULT_SVG
+    : customLogo;
+
   return (
     <span className={`inline-flex items-center justify-center shrink-0 align-middle ${className}`}>
       <img
-        src={customLogo || "/sportsfly-logo.svg"}
+        src={effectiveSrc}
         alt="SportsFly Logo"
         className="w-full h-full object-contain"
+        onError={(e) => {
+          (e.target as HTMLImageElement).src = SPORTSFLY_DEFAULT_SVG;
+        }}
       />
     </span>
   );
 };
+

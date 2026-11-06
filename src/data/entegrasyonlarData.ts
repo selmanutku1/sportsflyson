@@ -40,11 +40,64 @@ export const INITIAL_INTEGRATIONS: EntegrasyonItem[] = [
     targetPage: 'turnuva-yonetimi',
     connectedAt: '01.03.2024',
   },
+  {
+    id: 'int-kulup-web-sitesi',
+    name: 'Kulüp Web Sitesi Portalı',
+    category: 'Web Sitesi',
+    description: 'Kulübünüze özel [kulup].sportsfly.com.tr adresli profesyonel web sitesi. Spor okulu görselleri, branşlar, antrenör kadrosu, online ön kayıt ve iletişim altyapısı ile anında yayında.',
+    logoUrl: 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=200&auto=format&fit=crop&q=80',
+    iconName: 'Globe',
+    badge: 'Yeni',
+    isRecommended: true,
+    isActive: true,
+    isInternalModule: true,
+    targetPage: 'kulup-web-sitesi',
+    connectedAt: '24.10.2026',
+  },
+  {
+    id: 'int-sportsfly-intelligence',
+    name: 'SportsFly Intelligence AI',
+    category: 'Yapay Zeka & Büyüme Asistanı',
+    description: 'Akademinizin entegre büyüme asistanı. Yapay zeka destekli analizler, yenilemeleri öngörür, üye kaybını (churn) belirler ve üye tutma oranını ve performansı artırmak için önerilerde bulunur.',
+    logoUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=200&auto=format&fit=crop&q=80',
+    iconName: 'Sparkles',
+    badge: 'Yapay Zeka',
+    isRecommended: true,
+    isActive: true,
+    isInternalModule: true,
+    targetPage: 'sportsfly-intelligence',
+    connectedAt: '24.10.2026',
+  },
 ];
 
 const INTEGRATIONS_STORAGE_KEY = 'sportsfly_integrations_list_v2';
 
 export function getStoredIntegrations(): EntegrasyonItem[] {
+  try {
+    const raw = localStorage.getItem(INTEGRATIONS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Sync updated names and merge missing initial integrations
+        const existingIds = new Set(parsed.map((item: EntegrasyonItem) => item.id));
+        const missing = INITIAL_INTEGRATIONS.filter((item) => !existingIds.has(item.id));
+        const synced = parsed.map((item: EntegrasyonItem) => {
+          if (item.id === 'int-kulup-web-sitesi') {
+            return {
+              ...item,
+              name: 'Kulüp Web Sitesi Portalı',
+            };
+          }
+          return item;
+        });
+        const merged = [...synced, ...missing];
+        if (missing.length > 0 || parsed.some((p: EntegrasyonItem) => p.id === 'int-kulup-web-sitesi' && p.name !== 'Kulüp Web Sitesi Portalı')) {
+          saveStoredIntegrations(merged);
+        }
+        return merged;
+      }
+    }
+  } catch (e) {}
   return INITIAL_INTEGRATIONS;
 }
 

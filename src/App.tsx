@@ -109,6 +109,16 @@ const EnvanterYonetimiView = lazy(() =>
     default: m.EnvanterYonetimiView,
   }))
 );
+const ClubWebsiteBuilderView = lazy(() =>
+  import('./components/views/moduller/ClubWebsiteBuilderView').then((m) => ({
+    default: m.ClubWebsiteBuilderView,
+  }))
+);
+const SportsFlyIntelligenceView = lazy(() =>
+  import('./components/views/moduller/SportsFlyIntelligenceView').then((m) => ({
+    default: m.SportsFlyIntelligenceView,
+  }))
+);
 import { EntegrasyonlarView } from './components/views/EntegrasyonlarView';
 import { PaketlerView } from './components/views/PaketlerView';
 const OnKayitView = lazy(() =>
@@ -525,6 +535,11 @@ export default function App() {
         description:
           'Sanal POS, SMS başlığı, WhatsApp bildirimleri ve ek kulüp modüllerini tek tıkla etkinleştirin.',
       },
+      'kulup-web-sitesi': {
+        title: 'Kulüp Web Sitesi Portalı | SportsFly',
+        description:
+          'Kulübünüze özel [kulup].sportsfly.com.tr adresli web sitenizi logolar, branşlar, antrenör kadrosu ve ön kayıt formuyla yönetin.',
+      },
       'spor-okulu-basvurulari': {
         title: 'Spor Okulu Başvuruları | SportsFly Süper Admin',
         description:
@@ -694,6 +709,10 @@ export default function App() {
         return <EpostaServisYapilandirmasiView />;
       case 'entegrasyonlar':
         return <EntegrasyonlarView onNavigate={handlePageSelect} onLogout={handleLogout} isReadOnly={!isAuthenticated} />;
+      case 'kulup-web-sitesi':
+        return <ClubWebsiteBuilderView onNavigate={handlePageSelect} onLogout={handleLogout} />;
+      case 'sportsfly-intelligence':
+        return <SportsFlyIntelligenceView />;
       case 'paketler':
       case 'paket-yonetimi':
         return <PaketlerView />;

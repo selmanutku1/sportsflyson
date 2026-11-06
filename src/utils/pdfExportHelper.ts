@@ -65,14 +65,15 @@ async function prepareCloneForPdfCapture(
   const stageWrapper = document.createElement('div');
   stageWrapper.className = 'pdf-export-stage light';
   stageWrapper.style.position = 'fixed';
-  stageWrapper.style.left = '-10000px';
+  stageWrapper.style.left = '0';
   stageWrapper.style.top = '0';
   stageWrapper.style.width = `${stageWidthPx}px`;
   stageWrapper.style.minWidth = `${stageWidthPx}px`;
   stageWrapper.style.maxWidth = `${stageWidthPx}px`;
   stageWrapper.style.backgroundColor = '#ffffff';
   stageWrapper.style.color = '#0f172a';
-  stageWrapper.style.zIndex = '-9999';
+  stageWrapper.style.zIndex = '-99999';
+  stageWrapper.style.opacity = '1';
   stageWrapper.style.pointerEvents = 'none';
   stageWrapper.style.overflow = 'visible';
 
@@ -80,27 +81,30 @@ async function prepareCloneForPdfCapture(
   clonedRoot.style.width = `${stageWidthPx}px`;
   clonedRoot.style.minWidth = `${stageWidthPx}px`;
   clonedRoot.style.maxWidth = `${stageWidthPx}px`;
-  if (enforceFullA4Height) {
-    clonedRoot.style.width = `${stageWidthPx}px`;
-    clonedRoot.style.height = `${targetA4HeightPx}px`;
-    clonedRoot.style.minHeight = `${targetA4HeightPx}px`;
-    clonedRoot.style.maxHeight = `${targetA4HeightPx}px`;
-    clonedRoot.style.display = 'flex';
-    clonedRoot.style.flexDirection = 'column';
-    clonedRoot.style.justifyContent = 'space-between';
-    clonedRoot.style.padding = '16px 20px';
-    clonedRoot.style.border = 'none';
-    clonedRoot.style.borderRadius = '0px';
-    clonedRoot.style.boxShadow = 'none';
-    clonedRoot.style.overflow = 'hidden';
-  }
+  clonedRoot.style.minHeight = enforceFullA4Height ? `${targetA4HeightPx}px` : 'auto';
+  clonedRoot.style.height = 'auto';
+  clonedRoot.style.maxHeight = 'none';
+  clonedRoot.style.display = 'flex';
+  clonedRoot.style.flexDirection = 'column';
+  clonedRoot.style.justifyContent = 'flex-start'; // Force override to prevent overlap
+  clonedRoot.style.alignItems = 'stretch';
+  clonedRoot.style.padding = '16px 20px';
+  clonedRoot.style.border = 'none';
+  clonedRoot.style.borderRadius = '0px';
+  clonedRoot.style.position = 'relative';
+  clonedRoot.style.overflow = 'visible';
   clonedRoot.style.margin = '0';
   clonedRoot.style.boxSizing = 'border-box';
   clonedRoot.style.backgroundColor = '#ffffff';
   clonedRoot.style.color = '#0f172a';
-  clonedRoot.style.overflow = 'visible';
   clonedRoot.style.transform = 'none';
   clonedRoot.style.zoom = '100%';
+
+  // Force all descendants to be visible to avoid clipping in html2canvas
+  const allElements = clonedRoot.querySelectorAll('*');
+  allElements.forEach((el) => {
+    (el as HTMLElement).style.overflow = 'visible';
+  });
 
   // Remove elements that should be hidden in print/PDF
   const ignoredNodes = clonedRoot.querySelectorAll(
@@ -108,18 +112,10 @@ async function prepareCloneForPdfCapture(
   );
   ignoredNodes.forEach((node) => node.remove());
 
-  // Unclip any scrollable tables or truncated lines that could clip in SVG foreignObject
-  const scrollContainers = clonedRoot.querySelectorAll('.overflow-x-auto, .overflow-hidden');
-  scrollContainers.forEach((el) => {
-    if (el instanceof HTMLElement && !el.classList.contains('rounded-full')) {
-      el.style.overflowX = 'visible';
-    }
-  });
-
   stageWrapper.appendChild(clonedRoot);
   document.body.appendChild(stageWrapper);
 
-  // Wait one frame for browser layout of the 1120px stage
+  // Wait one frame for browser layout of the stage
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
   // Inline all images cleanly without corrupting data: URLs
@@ -134,6 +130,7 @@ async function prepareCloneForPdfCapture(
       continue;
     }
 
+    let inlined = false;
     if (sourceImg && sourceImg.complete && sourceImg.naturalWidth > 0) {
       try {
         const c = document.createElement('canvas');
@@ -144,14 +141,20 @@ async function prepareCloneForPdfCapture(
           ctx.drawImage(sourceImg, 0, 0);
           clonedImg.src = c.toDataURL('image/png');
           clonedImg.removeAttribute('srcset');
-          continue;
+          inlined = true;
         }
       } catch {
-        // Ignore canvas CORS taint if any
+        // Ignore canvas CORS taint
       }
     }
 
-    await inlineImageAsDataUrl(clonedImg);
+    if (!inlined) {
+      try {
+        await inlineImageAsDataUrl(clonedImg);
+      } catch {
+        // Keep original image src if inlining fails
+      }
+    }
   }
 
   // Lock explicit pixel dimensions and namespace on all SVG elements so SVG-inside-SVG foreignObject never distorts aspect ratios
@@ -173,7 +176,53 @@ async function prepareCloneForPdfCapture(
     }
   });
 
+  // Ensure all SVG <text> elements in the clone have explicit fill, fontSize, fontWeight, and fontFamily attributes
+  const sourceTexts = Array.from(sourceEl.querySelectorAll('svg text'));
+  const clonedTexts = Array.from(clonedRoot.querySelectorAll('svg text'));
+  for (let i = 0; i < clonedTexts.length; i++) {
+    const cText = clonedTexts[i] as SVGTextElement;
+    const sText = sourceTexts[i] as SVGTextElement;
+    if (sText) {
+      try {
+        const comp = window.getComputedStyle(sText);
+        if (comp.fill && comp.fill !== 'none' && (!cText.getAttribute('fill') || cText.getAttribute('fill') === 'currentColor')) {
+          cText.setAttribute('fill', comp.fill);
+        }
+        if (!cText.getAttribute('font-size') && comp.fontSize) {
+          cText.setAttribute('font-size', comp.fontSize);
+        }
+        if (!cText.getAttribute('font-weight') && comp.fontWeight) {
+          cText.setAttribute('font-weight', comp.fontWeight);
+        }
+        if (!cText.getAttribute('font-family') && comp.fontFamily) {
+          cText.setAttribute('font-family', comp.fontFamily);
+        }
+      } catch {
+        // Ignore style access issues
+      }
+    }
+    // Universal safeguard: if fill is still missing or transparent, default to #ffffff or inherit
+    if (!cText.getAttribute('fill')) {
+      const cls = cText.getAttribute('class') || '';
+      if (cls.includes('fill-white') || cls.includes('text-white')) {
+        cText.setAttribute('fill', '#ffffff');
+      } else if (cls.includes('fill-slate-600') || cls.includes('fill-slate-500')) {
+        cText.setAttribute('fill', '#475569');
+      } else if (cls.includes('fill-rose-700')) {
+        cText.setAttribute('fill', '#be123c');
+      } else if (cls.includes('fill-emerald-800')) {
+        cText.setAttribute('fill', '#065f46');
+      } else {
+        cText.setAttribute('fill', '#0f172a');
+      }
+    }
+  }
+
   // Wait one more frame after locking SVG dimensions
+  await new Promise((r) => requestAnimationFrame(r));
+  
+  // Explicitly force height to full scrollHeight to ensure capture captures everything
+  clonedRoot.style.height = `${clonedRoot.scrollHeight}px`;
   await new Promise((r) => requestAnimationFrame(r));
 
   const rect = clonedRoot.getBoundingClientRect();
@@ -191,7 +240,7 @@ async function prepareCloneForPdfCapture(
 }
 
 /**
- * Renders a prepared DOM element to a high-DPI HTMLCanvasElement with zero responsive collapse.
+ * Renders a prepared DOM element to a high-DPI HTMLCanvasElement with multi-tier fallback.
  */
 async function captureElementToCleanCanvas(
   sourceEl: HTMLElement,
@@ -202,7 +251,6 @@ async function captureElementToCleanCanvas(
     await prepareCloneForPdfCapture(sourceEl, stageWidthPx, enforceFullA4Height);
 
   try {
-    // Collect safe vertical break coordinates (bottoms of cards/sections) in canvas pixels
     const pixelRatio = 2;
     const rootTop = clonedRoot.getBoundingClientRect().top;
     const candidateBreakNodes = Array.from(
@@ -220,22 +268,81 @@ async function captureElementToCleanCanvas(
     });
     const blockBreakYsPx = Array.from(breakSet).sort((a, b) => a - b);
 
-    const canvas = await toCanvas(clonedRoot, {
-      width: captureWidth,
-      height: captureHeight,
-      canvasWidth: captureWidth * pixelRatio,
-      canvasHeight: captureHeight * pixelRatio,
-      pixelRatio,
-      backgroundColor: '#ffffff',
-      cacheBust: false, // CRITICAL: Never append ?timestamp to data:image/png;base64 URLs
-      skipFonts: false,
-      style: {
-        width: `${captureWidth}px`,
-        height: `${captureHeight}px`,
-        margin: '0',
-        transform: 'none',
-      },
-    });
+    let canvas: HTMLCanvasElement | null = null;
+
+    // Strategy 1: High-fidelity html2canvas rasterization directly on clonedRoot with desktop viewport
+    try {
+      const html2canvasModule = await import('html2canvas');
+      const html2canvas = (html2canvasModule.default || html2canvasModule) as (
+        el: HTMLElement,
+        opts?: any
+      ) => Promise<HTMLCanvasElement>;
+
+      canvas = await html2canvas(clonedRoot, {
+        scale: pixelRatio,
+        width: captureWidth,
+        height: captureHeight,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        imageTimeout: 12000,
+        windowWidth: stageWidthPx,
+        windowHeight: captureHeight,
+      });
+    } catch (h2cErr) {
+      console.warn('[PDF Export] Strategy 1 (html2canvas on clone) failed, falling back to source element:', h2cErr);
+    }
+
+    // Strategy 2: html2canvas on live source element directly if visible
+    if (!canvas && sourceEl && sourceEl.offsetHeight > 100) {
+      try {
+        const html2canvasModule = await import('html2canvas');
+        const html2canvas = (html2canvasModule.default || html2canvasModule) as (
+          el: HTMLElement,
+          opts?: any
+        ) => Promise<HTMLCanvasElement>;
+
+        canvas = await html2canvas(sourceEl, {
+          scale: pixelRatio,
+          backgroundColor: '#ffffff',
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          imageTimeout: 12000,
+          windowWidth: stageWidthPx,
+          windowHeight: captureHeight,
+        });
+      } catch (sourceH2cErr) {
+        console.warn('[PDF Export] Strategy 2 (html2canvas on source) failed, falling back to html-to-image:', sourceH2cErr);
+      }
+    }
+
+    // Strategy 3: html-to-image fallback as last resort
+    if (!canvas) {
+      try {
+        canvas = await toCanvas(clonedRoot, {
+          width: captureWidth,
+          height: captureHeight,
+          canvasWidth: captureWidth * pixelRatio,
+          canvasHeight: captureHeight * pixelRatio,
+          pixelRatio,
+          backgroundColor: '#ffffff',
+          cacheBust: false,
+          skipFonts: true,
+          fontEmbedCSS: '',
+          style: {
+            width: `${captureWidth}px`,
+            height: `${captureHeight}px`,
+            margin: '0',
+            transform: 'none',
+          },
+        });
+      } catch (toCanvasErr) {
+        console.error('[PDF Export] All rasterization strategies failed for element:', toCanvasErr);
+        throw new Error('Karne sayfası görselleştirilemedi. Lütfen sayfayı yenileyip tekrar deneyiniz.');
+      }
+    }
 
     return {
       canvas,
@@ -250,8 +357,7 @@ async function captureElementToCleanCanvas(
 }
 
 /**
- * Exports an array of A4 page elements (e.g. SportsFly Lab 7-page report card)
- * into a crisp, distortion-free A4 portrait PDF.
+ * Exports an array of A4 page elements into a crisp, distortion-free A4 portrait PDF.
  */
 export async function exportReportPagesToA4Pdf(options: {
   pageIds: string[];
@@ -279,23 +385,36 @@ export async function exportReportPagesToA4Pdf(options: {
       onPageProgress(i + 1, pageIds.length);
     }
 
-    const pageEl = document.getElementById(pageIds[i]);
-    if (!pageEl) continue;
-
-    // Capture at fixed 1040px desktop width (>=1024px lg breakpoint) with full A4 height ratio
-    const { canvas } = await captureElementToCleanCanvas(pageEl, 1040, true);
-
-    const imgData = canvas.toDataURL('image/jpeg', 0.96);
-    const renderW = availW;
-    const renderH = Math.min(availH, (canvas.height * availW) / canvas.width);
-    const offsetX = marginMm;
-    const offsetY = marginMm;
-
-    if (addedPages > 0) {
-      pdf.addPage();
+    const pageId = pageIds[i];
+    const pageEl = document.getElementById(pageId);
+    if (!pageEl) {
+      console.warn(`[PDF Export] Element with id "${pageId}" not found in DOM, skipping.`);
+      continue;
     }
-    pdf.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH, undefined, 'FAST');
-    addedPages++;
+
+    try {
+      // Capture at fixed 1040px desktop width (>=1024px lg breakpoint) with full A4 height ratio
+      const { canvas } = await captureElementToCleanCanvas(pageEl, 1040, true);
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.96);
+      const scale = Math.min(availW / canvas.width, availH / canvas.height);
+      const renderW = +(canvas.width * scale).toFixed(2);
+      const renderH = +(canvas.height * scale).toFixed(2);
+      const offsetX = +(marginMm + (availW - renderW) / 2).toFixed(2);
+      const offsetY = +(marginMm + (availH - renderH) / 2).toFixed(2);
+
+      if (addedPages > 0) {
+        pdf.addPage();
+      }
+      pdf.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH, undefined, 'FAST');
+      addedPages++;
+    } catch (pageErr) {
+      console.error(`[PDF Export] Error rendering page "${pageId}":`, pageErr);
+    }
+  }
+
+  if (addedPages === 0) {
+    throw new Error('Karne sayfaları bulunamadı veya görselleştirilemedi. Lütfen karneyi ekranda açıp tekrar deneyiniz.');
   }
 
   pdf.save(fileName);
@@ -467,18 +586,23 @@ export class BatchA4PdfBuilder {
       const pageEl = document.getElementById(pageIds[i]);
       if (!pageEl) continue;
 
-      const { canvas } = await captureElementToCleanCanvas(pageEl, 1040, true);
-      const imgData = canvas.toDataURL('image/jpeg', 0.95);
-      const renderW = this.availW;
-      const renderH = Math.min(this.availH, (canvas.height * this.availW) / canvas.width);
-      const offsetX = this.marginMm;
-      const offsetY = this.marginMm;
+      try {
+        const { canvas } = await captureElementToCleanCanvas(pageEl, 1040, false);
+        const imgData = canvas.toDataURL('image/jpeg', 0.95);
+        const scale = Math.min(this.availW / canvas.width, this.availH / canvas.height);
+        const renderW = +(canvas.width * scale).toFixed(2);
+        const renderH = +(canvas.height * scale).toFixed(2);
+        const offsetX = +(this.marginMm + (this.availW - renderW) / 2).toFixed(2);
+        const offsetY = +(this.marginMm + (this.availH - renderH) / 2).toFixed(2);
 
-      if (this.addedPages > 0) {
-        this.pdf.addPage();
+        if (this.addedPages > 0) {
+          this.pdf.addPage();
+        }
+        this.pdf.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH, undefined, 'FAST');
+        this.addedPages++;
+      } catch (pageErr) {
+        console.error(`[Batch PDF] Error capturing page "${pageIds[i]}":`, pageErr);
       }
-      this.pdf.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH, undefined, 'FAST');
-      this.addedPages++;
     }
   }
 
