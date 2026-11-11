@@ -16,6 +16,9 @@ export interface SporcuKarne {
     meso: number; // Mezomorfi (1-10)
     ecto: number; // Ektomorfi (1-10)
     category: string; // e.g. "Dengeli Mezomorf", "Mezomorfik Ektomorf"
+    m1?: { endo: number; meso: number; ecto: number; category: string };
+    m2?: { endo: number; meso: number; ecto: number; category: string };
+    m3?: { endo: number; meso: number; ecto: number; category: string };
     eliteRef?: {
       endo: number;
       meso: number;

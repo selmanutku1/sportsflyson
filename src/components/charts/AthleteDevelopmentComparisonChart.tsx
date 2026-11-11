@@ -30,40 +30,50 @@ export interface AthleteDevelopmentComparisonChartProps {
 }
 
 const cleanSubjectName = (rawName: string): string => {
-  const clean = rawName
-    .replace(/testi/gi, '')
-    .replace(/ölçümü/gi, '')
-    .replace(/\(20m\)/gi, '')
-    .replace(/\(10x5m\)/gi, '')
-    .trim();
-  const lower = clean.toLowerCase();
-  if (lower.includes('sürat') || lower.includes('sprint')) return 'Sürat (20m)';
-  if (lower.includes('çabukluk') || lower.includes('agility') || lower.includes('çeviklik')) return 'Çeviklik (10x5m)';
-  if (lower.includes('reaksiyon')) return 'Reaksiyon';
-  if (lower.includes('sırt') || lower.includes('back')) return 'Sırt Kuvveti';
-  if (lower.includes('kavrama') || lower.includes('grip')) return 'El Kavrama';
-  if (lower.includes('uzun atlama') || lower.includes('long jump')) return 'Uzun Atlama';
-  if (lower.includes('dikey') || lower.includes('vertical')) return 'Dikey Sıçrama';
-  if (lower.includes('denge') || lower.includes('balance')) return 'Statik Denge';
-  if (lower.includes('esneklik') || lower.includes('flexibility')) return 'Esneklik';
-  if (lower.includes('aerobik') || lower.includes('dayanıklılık') || lower.includes('pacer')) return 'Dayanıklılık (Pacer)';
-  return clean.charAt(0).toUpperCase() + clean.slice(1);
+  const lower = rawName.toLowerCase();
+  if (lower.includes('kol sürat') || lower.includes('arm speed')) {
+    return lower.includes('sağ') ? 'Kol Sürati (Sağ)' : lower.includes('sol') ? 'Kol Sürati (Sol)' : 'Kol Sürati';
+  }
+  if (lower.includes('10x5') || lower.includes('çabukluk') || lower.includes('çeviklik') || lower.includes('agility')) {
+    return 'Çeviklik (10x5m)';
+  }
+  if (lower.includes('20m') || lower.includes('sprint')) {
+    return '20m Sprint';
+  }
+  if (lower.includes('dikey') || lower.includes('vertical')) {
+    return 'Dikey Sıçrama';
+  }
+  if (lower.includes('uzun atlama') || lower.includes('long jump')) {
+    return 'Uzun Atlama';
+  }
+  if (lower.includes('pençe') || lower.includes('kavrama') || lower.includes('grip')) {
+    return lower.includes('sağ') ? 'Pençe (Sağ)' : lower.includes('sol') ? 'Pençe (Sol)' : 'Pençe Kuvveti';
+  }
+  if (lower.includes('denge') || lower.includes('flamingo') || lower.includes('balance')) {
+    return 'Flamingo Denge';
+  }
+  if (lower.includes('esneklik') || lower.includes('otur-uzan') || lower.includes('flexibility')) {
+    return 'Esneklik (Otur-Uzan)';
+  }
+  if (lower.includes('aerobik') || lower.includes('dayanıklılık') || lower.includes('pacer')) {
+    return 'Dayanıklılık (Pacer)';
+  }
+  return rawName.replace(/testi/gi, '').replace(/ölçümü/gi, '').trim();
 };
 
 // Determines if a test is considered one of the top critical motor metrics
 const isCriticalMetric = (name: string): boolean => {
   const lower = name.toLowerCase();
   return (
-    lower.includes('sürat') ||
     lower.includes('sprint') ||
+    lower.includes('20m') ||
     lower.includes('dikey') ||
     lower.includes('sıçrama') ||
-    lower.includes('çabukluk') ||
-    lower.includes('çeviklik') ||
     lower.includes('10x5') ||
-    lower.includes('aerobik') ||
-    lower.includes('dayanıklılık') ||
-    lower.includes('pacer')
+    lower.includes('çabukluk') ||
+    lower.includes('pençe') ||
+    lower.includes('kavrama') ||
+    lower.includes('kol sürat')
   );
 };
 
@@ -84,14 +94,15 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
   const groupDifference = athleticScore - grpAvgScore;
   const targetRemaining = targetScore - athleticScore;
 
-  // Process and filter chart data
+  // Process and filter chart data with guaranteed distinct categories
   const chartData = useMemo(() => {
     if (!report.motorPerformance || report.motorPerformance.length === 0) return [];
 
     const rows = report.motorPerformance.map((row) => {
-      const p3Val = row.percentile || Math.round(row.m3);
-      const grpVal = Math.max(35, Math.min(88, Math.round(p3Val * 0.82 + grpAvgScore * 0.18 - 4)));
-      const targetVal = Math.min(100, Math.max(p3Val + 8, 85));
+      const activeVal = row.m3 > 0 ? row.m3 : (row.m2 > 0 ? row.m2 : row.m1);
+      const pVal = row.percentile || Math.round(activeVal);
+      const grpVal = Math.max(35, Math.min(88, Math.round(pVal * 0.82 + grpAvgScore * 0.18 - 4)));
+      const targetVal = Math.min(100, Math.max(pVal + 8, 85));
       const label = cleanSubjectName(row.name);
       const isCritical = isCriticalMetric(row.name);
 
@@ -99,19 +110,26 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
         subject: label,
         fullName: row.name,
         isCritical,
-        'Mevcut Değer': p3Val,
+        'Mevcut Değer': pVal,
         'Hedef Değer': targetVal,
         'Grup Ortalaması': grpVal,
-        rawM3: row.m3,
+        rawM3: activeVal,
         unit: row.unit,
-        deltaGroup: p3Val - grpVal,
-        deltaTarget: targetVal - p3Val,
+        deltaGroup: pVal - grpVal,
+        deltaTarget: targetVal - pVal,
       };
     });
 
     if (filterMode === 'critical') {
-      const criticalRows = rows.filter((r) => r.isCritical);
-      return criticalRows.length >= 3 ? criticalRows.slice(0, 4) : rows.slice(0, 4);
+      const distinct: typeof rows = [];
+      const seen = new Set<string>();
+      rows.forEach((r) => {
+        if (!seen.has(r.subject) && distinct.length < 4) {
+          seen.add(r.subject);
+          distinct.push(r);
+        }
+      });
+      return distinct.length >= 4 ? distinct : rows.slice(0, 4);
     }
 
     return rows.slice(0, 10);
@@ -138,7 +156,7 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
           </h3>
         </div>
 
-        {/* Fixed Non-Variable Badge (Karne PDF için tekil ve sabit görünüm) */}
+        {/* Fixed Non-Variable Badge */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="px-3.5 py-2 rounded-xl bg-slate-100 border border-slate-200/90 text-sm font-extrabold text-slate-800 flex items-center gap-2 shadow-2xs font-sans">
             <Filter className="w-4 h-4 text-blue-600 shrink-0" />
@@ -147,51 +165,51 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
         </div>
       </div>
 
-      {/* 2. Top Summary KPI Chips (Clean, High Contrast Sans Typography) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-          <div className="flex items-center justify-between text-xs font-bold text-slate-600 uppercase">
+      {/* 2. Top Summary KPI Chips (Clean, High Contrast Sans Typography without Collision) */}
+      <div className="grid grid-cols-2 md:grid-cols-4 print:grid-cols-4 gap-3">
+        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-[10.5px] font-bold text-slate-600 uppercase tracking-wider">
             <span>Grup Ortalaması</span>
-            <Users className="w-4 h-4 text-slate-400" />
+            <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           </div>
-          <div className="text-2xl font-extrabold text-slate-700 mt-1 tabular-nums">
+          <div className="text-2xl font-black text-slate-800 my-1 font-sans tabular-nums leading-none">
             %{grpAvgScore}
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">Yaş & Cinsiyet Akran Normu</p>
+          <p className="text-[10px] text-slate-500 font-medium leading-tight">Yaş &amp; Cinsiyet Akran Normu</p>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-blue-50/80 border border-blue-200">
-          <div className="flex items-center justify-between text-xs font-bold text-blue-900 uppercase">
+        <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-[10.5px] font-bold text-blue-900 uppercase tracking-wider">
             <span>Hedef Değer</span>
-            <Target className="w-4 h-4 text-blue-600" />
+            <Target className="w-3.5 h-3.5 text-blue-600 shrink-0" />
           </div>
-          <div className="text-2xl font-extrabold text-blue-700 mt-1 tabular-nums">
+          <div className="text-2xl font-black text-blue-800 my-1 font-sans tabular-nums leading-none">
             %{targetScore}
           </div>
-          <p className="text-xs text-blue-700 mt-0.5">Biyomotorik Gelişim Eşiği</p>
+          <p className="text-[10px] text-blue-700 font-medium leading-tight">Biyomotorik Gelişim Eşiği</p>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-emerald-50/90 border border-emerald-300">
-          <div className="flex items-center justify-between text-xs font-bold text-emerald-950 uppercase">
+        <div className="p-3 rounded-xl bg-emerald-50/90 border border-emerald-300 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-[10.5px] font-bold text-emerald-950 uppercase tracking-wider">
             <span>Mevcut Değer</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
           </div>
-          <div className="text-2xl font-black text-emerald-700 mt-1 tabular-nums">
+          <div className="text-2xl font-black text-emerald-700 my-1 font-sans tabular-nums leading-none">
             %{athleticScore}
           </div>
-          <p className="text-xs text-emerald-800 font-semibold mt-0.5">O Anki Güncel Başarı</p>
+          <p className="text-[10px] text-emerald-800 font-bold leading-tight">O Anki Güncel Başarı</p>
         </div>
 
-        <div className="p-3.5 rounded-xl bg-slate-900 text-white border border-slate-800">
-          <div className="flex items-center justify-between text-xs font-bold text-slate-200 uppercase">
+        <div className="p-3 rounded-xl bg-slate-900 text-white border border-slate-800 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-[10.5px] font-bold text-slate-200 uppercase tracking-wider">
             <span>Gelişim Farkı</span>
-            <TrendingUp className="w-4 h-4 text-emerald-400" />
+            <TrendingUp className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
           </div>
-          <div className="text-2xl font-black text-white mt-1 tabular-nums">
+          <div className="text-2xl font-black text-emerald-400 my-1 font-sans tabular-nums leading-none">
             {groupDifference >= 0 ? `+${groupDifference}` : groupDifference}%
           </div>
-          <p className="text-xs text-slate-300 mt-0.5">
-            Grup Önünde · Hedefe {Math.max(0, targetRemaining)}%
+          <p className="text-[10px] text-slate-300 font-medium leading-tight">
+            Grup Önünde · Hedefe %{Math.max(0, targetRemaining)}
           </p>
         </div>
       </div>

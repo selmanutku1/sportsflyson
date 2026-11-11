@@ -28,14 +28,17 @@ import { SporcuKarne } from '../../data/mockKarneData';
 
 // Helper to normalize any LabParameterRow value (m1, m2, m3) to a 0-100 normative score using D3 scaleLinear
 const normalizeLabRowValue = (val: number, row: LabParameterRow): number => {
+  if (!Number.isFinite(val) || val === 0) return 50;
   const domainMin = row.refLow * 0.78;
   const domainMax = row.refHigh * 1.12;
+  if (domainMax === domainMin) return 50;
   const scale = d3
     .scaleLinear()
     .domain(row.lowerIsBetter ? [domainMax, domainMin] : [domainMin, domainMax])
     .range([15, 95])
     .clamp(true);
-  return Math.round(scale(val));
+  const result = scale(val);
+  return Number.isFinite(result) ? Math.round(result) : 50;
 };
 
 // ============================================================================
@@ -433,9 +436,13 @@ const buildD3LabRadarGeometry = (rows: LabParameterRow[], size = 320, radius = 1
 
   const axes = rows.map((row, i) => {
     const angle = (Math.PI * 2 * i) / totalAxes - Math.PI / 2;
-    const p1Norm = normalizeLabRowValue(row.m1, row);
-    const p2Norm = normalizeLabRowValue(row.m2, row);
-    const p3Norm = row.percentile || normalizeLabRowValue(row.m3, row);
+    const p1Val = Number.isFinite(row.m1) ? row.m1 : 0;
+    const p2Val = Number.isFinite(row.m2) ? row.m2 : 0;
+    const p3Val = Number.isFinite(row.m3) ? row.m3 : 0;
+    
+    const p1Norm = normalizeLabRowValue(p1Val, row);
+    const p2Norm = normalizeLabRowValue(p2Val, row);
+    const p3Norm = row.percentile || normalizeLabRowValue(p3Val, row);
 
     const labelRadius = radius + 24;
     return {
@@ -514,11 +521,11 @@ const buildD3LineGeometry = (
   const innerW = width - margin.left - margin.right;
   const innerH = height - margin.top - margin.bottom;
 
-  const values = points.map((p) => p.value);
+  const values = points.map((p) => (Number.isFinite(p.value) ? p.value : refMid));
   const allVals = [...values, refMid];
   const minVal = d3.min(allVals) ?? 0;
   const maxVal = d3.max(allVals) ?? 100;
-  const pad = Math.max(0.4, (maxVal - minVal) * 0.22);
+  const pad = Math.max(0.4, (maxVal - minVal) * 0.22) || 0.4;
 
   const xScale = d3
     .scalePoint<string>()
@@ -2639,33 +2646,33 @@ export const SecondMeasurementComparisonPanel: React.FC<SecondMeasurementPanelPr
 
       {/* KPI Cards: Önceki Ölçüm vs Mevcut Ölçüm */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-sans">
-        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 flex flex-col justify-between">
-          <span className="text-[9.5px] font-bold text-slate-500 uppercase block">1. Ölçüm ({report.date1})</span>
-          <span className="text-base font-black text-slate-700 mt-1 block font-sans tabular-nums">%{p1Score} Puan</span>
-          <span className="text-[9px] text-slate-500 font-medium">Başlangıç Referansı</span>
+        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 flex flex-col justify-between truncate">
+          <span className="text-[9.5px] font-bold text-slate-500 uppercase block truncate">1. Ölçüm ({report.date1})</span>
+          <span className="text-sm font-black text-slate-700 mt-1 block font-sans tabular-nums whitespace-nowrap">%{p1Score} Puan</span>
+          <span className="text-[9px] text-slate-500 font-medium truncate">Başlangıç Referansı</span>
         </div>
-        <div className="p-3 rounded-xl bg-sky-50/80 border-2 border-sky-400/90 flex flex-col justify-between">
-          <span className="text-[9.5px] font-extrabold text-sky-900 uppercase block">2. Ölçüm ({report.date2})</span>
-          <span className="text-lg font-black text-sky-700 mt-1 block font-sans tabular-nums">%{p2Score} Puan</span>
-          <span className="text-[9.5px] font-extrabold text-emerald-700 flex items-center gap-0.5 mt-0.5">
+        <div className="p-3 rounded-xl bg-sky-50/80 border-2 border-sky-400/90 flex flex-col justify-between truncate">
+          <span className="text-[9.5px] font-extrabold text-sky-900 uppercase block truncate">2. Ölçüm ({report.date2})</span>
+          <span className="text-sm font-black text-sky-700 mt-1 block font-sans tabular-nums whitespace-nowrap">%{p2Score} Puan</span>
+          <span className="text-[9px] font-extrabold text-emerald-700 flex items-center gap-0.5 mt-0.5 truncate">
             <ArrowUpRight className="w-3 h-3 text-emerald-600 shrink-0" />
-            <span>+%{p2Score - p1Score} İlerleme</span>
+            <span className="truncate">+{p2Score - p1Score} İlerleme</span>
           </span>
         </div>
-        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 flex flex-col justify-between">
-          <span className="text-[9.5px] font-bold text-slate-500 uppercase block">Dönemsel Değişim (Δ)</span>
-          <span className={`text-base font-black mt-1 block font-sans tabular-nums ${isProgress ? 'text-emerald-700' : 'text-slate-800'}`}>
+        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 flex flex-col justify-between truncate">
+          <span className="text-[9.5px] font-bold text-slate-500 uppercase block truncate">Dönemsel Değişim (Δ)</span>
+          <span className={`text-sm font-black mt-1 block font-sans tabular-nums whitespace-nowrap ${isProgress ? 'text-emerald-700' : 'text-slate-800'}`}>
             {isProgress ? `+${scoreDiff}` : scoreDiff} Puan
           </span>
-          <span className="text-[9px] text-slate-500 font-medium">1. → 2. Ölçüm Farkı</span>
+          <span className="text-[9px] text-slate-500 font-medium truncate">1. → 2. Ölçüm Farkı</span>
         </div>
-        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 flex flex-col justify-between">
-          <span className="text-[9.5px] font-bold text-slate-500 uppercase block font-sans">Gelişim Durumu</span>
-          <span className="text-xs font-black text-emerald-800 mt-1 flex items-center gap-1.5">
+        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 flex flex-col justify-between truncate">
+          <span className="text-[9.5px] font-bold text-slate-500 uppercase block truncate font-sans">Gelişim Durumu</span>
+          <span className="text-[10px] font-black text-emerald-800 mt-1 flex items-center gap-1.5 truncate">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-            <span>{isProgress ? 'Pozitif İlerleme' : 'Takip ve İzlem'}</span>
+            <span className="truncate">{isProgress ? 'Pozitif İlerleme' : 'Takip ve İzlem'}</span>
           </span>
-          <span className="text-[9px] text-slate-500 font-medium">10 Motor Test İncelemesi</span>
+          <span className="text-[9px] text-slate-500 font-medium truncate">10 Motor Test</span>
         </div>
       </div>
 

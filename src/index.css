@@ -265,16 +265,16 @@
   .a4-print-page {
     display: flex !important;
     flex-direction: column !important;
-    justify-content: flex-start !important; /* Changed from space-between */
+    justify-content: space-between !important;
     page-break-after: always !important;
     break-after: page !important;
-    page-break-inside: auto !important; /* Changed from avoid */
-    break-inside: auto !important; /* Changed from avoid */
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
     width: 100% !important;
-    height: 297mm !important; /* Fixed height for A4 */
-    max-height: 297mm !important;
+    min-height: 280mm !important;
+    height: auto !important;
     margin: 0 !important;
-    padding: 10mm !important; /* Standard print margin */
+    padding: 8mm !important;
     box-sizing: border-box !important;
     border: none !important;
     border-radius: 0 !important;

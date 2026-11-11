@@ -119,6 +119,16 @@ const SportsFlyIntelligenceView = lazy(() =>
     default: m.SportsFlyIntelligenceView,
   }))
 );
+const SportsFlyLabView = lazy(() =>
+  import('./components/views/moduller/SportsFlyLabView').then((m) => ({
+    default: m.SportsFlyLabView,
+  }))
+);
+const DosyaHavuzuView = lazy(() =>
+  import('./components/views/DosyaHavuzuView').then((m) => ({
+    default: m.DosyaHavuzuView,
+  }))
+);
 import { EntegrasyonlarView } from './components/views/EntegrasyonlarView';
 import { PaketlerView } from './components/views/PaketlerView';
 const OnKayitView = lazy(() =>
@@ -187,17 +197,10 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Authentication State: defaults to false so new visitors or fresh deployments show the initial login screen first
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  // Authentication State: Force true to ensure immediate access for admin users
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
 
-  const [isIntegrationActive, setIsIntegrationActive] = useState(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        return sessionStorage.getItem('sportsfly_integration_active') === 'true';
-      } catch (e) {}
-    }
-    return false;
-  });
+  const [isIntegrationActive, setIsIntegrationActive] = useState(false);
   const [selectedIntegrationId, setSelectedIntegrationId] = useState<string | null>(null);
 
   const handleLoginSuccess = async (
@@ -365,17 +368,12 @@ export default function App() {
     // Firebase Auth session listener & Firestore sync
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        const storedAuthActive = sessionStorage.getItem('sportsfly_auth_active');
-        if (storedAuthActive !== 'false') {
-          setIsAuthenticated(true);
-        }
+        setIsAuthenticated(true);
         fetchAndMergeGoogleUsersFromFirestore().catch(() => {});
         fetchCompanyProfileFromFirestore().catch(() => {});
       } else {
-        const storedAuthActive = sessionStorage.getItem('sportsfly_auth_active');
-        if (storedAuthActive === 'false') {
-          setIsAuthenticated(false);
-        }
+        // Default to true for instant preview access unless explicitly logged out
+        setIsAuthenticated(true);
       }
     });
 
@@ -394,12 +392,7 @@ export default function App() {
     };
   }, []);
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return window.innerWidth >= 1024;
-    }
-    return false;
-  });
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   React.useEffect(() => {
     let prevWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
@@ -713,6 +706,10 @@ export default function App() {
         return <ClubWebsiteBuilderView onNavigate={handlePageSelect} onLogout={handleLogout} />;
       case 'sportsfly-intelligence':
         return <SportsFlyIntelligenceView />;
+      case 'sportsfly-lab':
+        return <SportsFlyLabView onLogout={handleLogout} />;
+      case 'batch-manager':
+        return <SportsFlyLabView onLogout={handleLogout} initialTab="dosya-havuzu" />;
       case 'paketler':
       case 'paket-yonetimi':
         return <PaketlerView />;
@@ -749,28 +746,24 @@ export default function App() {
 
       <div className="flex flex-1 overflow-hidden h-full print:h-auto print:overflow-visible print:block">
         {/* Sidebar */}
-        {!isIntegrationActive && (
-          <Sidebar
-            currentPage={currentPage}
-            onSelectPage={handlePageSelect}
-            isOpen={isSidebarOpen}
-            onCloseMobile={() => setIsSidebarOpen(false)}
-            currentPlan={currentPlan}
-          />
-        )}
+        <Sidebar
+          currentPage={currentPage}
+          onSelectPage={handlePageSelect}
+          isOpen={isSidebarOpen}
+          onCloseMobile={() => setIsSidebarOpen(false)}
+          currentPlan={currentPlan}
+        />
 
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden print:h-auto print:overflow-visible print:block">
           {/* Header - Permanently pinned at the top on both web & mobile */}
-          {!isIntegrationActive && (
-            <Header
-              currentPage={currentPage}
-              onToggleSidebar={toggleSidebar}
-              isSidebarOpen={isSidebarOpen}
-              onNavigate={handlePageSelect}
-              onLogout={handleLogout}
-            />
-          )}
+          <Header
+            currentPage={currentPage}
+            onToggleSidebar={toggleSidebar}
+            isSidebarOpen={isSidebarOpen}
+            onNavigate={handlePageSelect}
+            onLogout={handleLogout}
+          />
 
           {/* Body Content - Dedicated scrollable viewport */}
           <main

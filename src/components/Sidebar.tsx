@@ -40,6 +40,7 @@ import {
   Blocks,
   Sparkles,
   Mail,
+  Database,
 } from 'lucide-react';
 import { NavPage, PackagePlanType } from '../types';
 import { SportsFlyLogo, SportsFlyIcon } from './SportsFlyLogo';
@@ -150,6 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     'aktivite-yonetimi',
     'sporcular',
     'sporcu-karnesi',
+    'sportsfly-lab',
     'egitim-planlama',
     'egitmenler',
     'gruplar',
@@ -319,6 +321,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <Lock className="w-2.5 h-2.5 text-amber-500 absolute top-1 right-1" />
                 )}
               </button>
+
+              <button
+                onClick={() => handleNavClick('sportsfly-lab', 'SportsFly Lab')}
+                title="SportsFly LAB (Biyomekanik Laboratuvar & Karne)"
+                className={`p-2.5 rounded-xl transition-all relative cursor-pointer ${
+                  !isGoogleRestricted && currentPage === 'sportsfly-lab'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Activity className="w-4 h-4" />
+              </button>
+
 
               <button
                 onClick={() => handleNavClick('egitim-planlama', 'Eğitim Planlama')}
@@ -954,6 +969,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <span>Sporcu Karnesi</span>
                       </div>
                       {isRestricted('sporcu-karnesi') && renderLockedPill()}
+                    </button>
+                  )}
+                  {shouldShowItem('sportsfly-lab') && (
+                    <button
+                      onClick={() => handleNavClick('sportsfly-lab', 'SportsFly Lab')}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                        !isGoogleRestricted && currentPage === 'sportsfly-lab'
+                          ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-2xs'
+                          : isRestricted('sportsfly-lab')
+                          ? 'text-slate-400 dark:text-slate-500 hover:bg-slate-100/70 dark:hover:bg-slate-800/40'
+                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Activity className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>SportsFly LAB</span>
+                      </div>
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                        LAB
+                      </span>
                     </button>
                   )}
                   {shouldShowItem('sube-ozet') && (

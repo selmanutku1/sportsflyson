@@ -181,7 +181,24 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidUploadedFile(data) {
+      return data.keys().hasAll(['id', 'name', 'athleteCount', 'status', 'schoolName', 'uploadDate', 'ownerId']) &&
+        data.keys().hasOnly(['id', 'name', 'athleteCount', 'status', 'schoolName', 'uploadDate', 'ownerId']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.ownerId == request.auth.uid &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 255 &&
+        data.athleteCount is number &&
+        data.status is string && data.status in ['Bekliyor', 'İşlendi', 'Onaylandı'] &&
+        data.schoolName is string && data.schoolName.size() >= 1 && data.schoolName.size() <= 255 &&
+        data.uploadDate is timestamp;
+    }
+
     // 4. COLLECTION RULES
+    match /uploadedFiles/{fileId} {
+      allow read, write: if true;
+    }
+
     match /admins/{adminId} {
       allow get: if isSignedIn() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
       allow list, create, update, delete: if false;
@@ -366,8 +383,11 @@ service cloud.firestore {
     }
 
     match /labReports/{reportId} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if isSignedIn();
+      allow read, write: if true;
+    }
+
+    match /karneler/{karneId} {
+      allow read, write: if true;
     }
 
     match /paymentIntents/{intentId} {

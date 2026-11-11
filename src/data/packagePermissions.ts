@@ -601,7 +601,12 @@ export function resolveActiveUserEmail(email?: string): string {
  */
 export function isGoogleRestrictedUser(role?: string, email?: string): boolean {
   const activeEmail = resolveActiveUserEmail(email);
-  if (activeEmail === SUPER_ADMIN_EMAIL) {
+  if (!activeEmail || activeEmail.toLowerCase() === SUPER_ADMIN_EMAIL) {
+    return false;
+  }
+
+  const roleStr = (role || '').toLowerCase();
+  if (roleStr.includes('süper') || roleStr.includes('super') || roleStr.includes('admin') || roleStr.includes('kurucu')) {
     return false;
   }
 
@@ -619,10 +624,16 @@ export function isGoogleRestrictedUser(role?: string, email?: string): boolean {
       if (stored) {
         const parsed = JSON.parse(stored);
         const storedEmail = (parsed?.email || '').trim().toLowerCase();
-        if (storedEmail === SUPER_ADMIN_EMAIL) {
+        if (!storedEmail || storedEmail === SUPER_ADMIN_EMAIL) {
+          return false;
+        }
+        if (parsed?.hasActivePackage === true) {
           return false;
         }
         const r = (parsed?.role || '').toLowerCase();
+        if (r.includes('süper') || r.includes('super') || r.includes('admin') || r.includes('kurucu')) {
+          return false;
+        }
         if (r.includes('google') && parsed?.hasActivePackage !== true) {
           return true;
         }
@@ -632,11 +643,8 @@ export function isGoogleRestrictedUser(role?: string, email?: string): boolean {
       }
     } catch (e) {}
   }
-  if (role) {
-    const r = role.toLowerCase();
-    if (r.includes('google')) {
-      return true;
-    }
+  if (roleStr.includes('google')) {
+    return true;
   }
   return false;
 }

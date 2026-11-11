@@ -74,7 +74,7 @@ export const DEFAULT_USER_PROFILE: UserProfileData = {
     dailyDigest: true,
   },
   preferences: {
-    defaultPage: 'on-kayit',
+    defaultPage: 'anasayfa',
     dateFormat: 'DD.MM.YYYY',
     soundEnabled: true,
     theme: 'light',

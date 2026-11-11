@@ -6,6 +6,9 @@ export interface SomatotypeData {
   meso: number;
   ecto: number;
   category: string;
+  m1?: { endo: number; meso: number; ecto: number; category: string };
+  m2?: { endo: number; meso: number; ecto: number; category: string };
+  m3?: { endo: number; meso: number; ecto: number; category: string };
   eliteRef?: {
     endo: number;
     meso: number;
@@ -37,25 +40,28 @@ export const SomatotypeRadarAndChart: React.FC<SomatotypeRadarAndChartProps> = (
     return somatotype.eliteRef || { endo: 2.5, meso: 5.2, ecto: 3.5 };
   }, [somatotype]);
 
-  // Calculated period trajectory points
-  // 1. Dönem Baseline (simulated/historical baseline relative to current)
+  // Real or Period trajectory points
+  // 1. Dönem Baseline
   const p1 = useMemo(() => {
-    const endo = Number(Math.max(1.0, Math.min(9.0, somatotype.endo + 0.5)).toFixed(1));
-    const meso = Number(Math.max(1.0, Math.min(9.0, somatotype.meso - 0.7)).toFixed(1));
-    const ecto = Number(Math.max(1.0, Math.min(9.0, somatotype.ecto - 0.3)).toFixed(1));
-    return { endo, meso, ecto };
+    if (somatotype.m1 && typeof somatotype.m1.endo === 'number' && somatotype.m1.endo > 0) {
+      return { endo: somatotype.m1.endo, meso: somatotype.m1.meso, ecto: somatotype.m1.ecto };
+    }
+    return { endo: somatotype.endo, meso: somatotype.meso, ecto: somatotype.ecto };
   }, [somatotype]);
 
   // 2. Dönem Midterm
   const p2 = useMemo(() => {
-    const endo = Number(Math.max(1.0, Math.min(9.0, somatotype.endo + 0.2)).toFixed(1));
-    const meso = Number(Math.max(1.0, Math.min(9.0, somatotype.meso - 0.3)).toFixed(1));
-    const ecto = Number(Math.max(1.0, Math.min(9.0, somatotype.ecto - 0.1)).toFixed(1));
-    return { endo, meso, ecto };
-  }, [somatotype]);
+    if (somatotype.m2 && typeof somatotype.m2.endo === 'number' && somatotype.m2.endo > 0) {
+      return { endo: somatotype.m2.endo, meso: somatotype.m2.meso, ecto: somatotype.m2.ecto };
+    }
+    return p1;
+  }, [somatotype, p1]);
 
   // Current (3. Dönem)
   const p3 = useMemo(() => {
+    if (somatotype.m3 && typeof somatotype.m3.endo === 'number' && somatotype.m3.endo > 0) {
+      return { endo: somatotype.m3.endo, meso: somatotype.m3.meso, ecto: somatotype.m3.ecto };
+    }
     return {
       endo: somatotype.endo,
       meso: somatotype.meso,
@@ -84,9 +90,14 @@ export const SomatotypeRadarAndChart: React.FC<SomatotypeRadarAndChartProps> = (
     const cx = 150;
     const cy = 130;
     const scale = 14;
+
+    // Handle NaN inputs
+    const safeX = Number.isFinite(x) ? x : 0;
+    const safeY = Number.isFinite(y) ? y : 0;
+
     // Constrain inside SVG padded box
-    const svgX = Math.max(20, Math.min(280, cx + x * scale));
-    const svgY = Math.max(20, Math.min(240, cy - y * scale)); // inverted Y for SVG
+    const svgX = Math.max(20, Math.min(280, cx + safeX * scale));
+    const svgY = Math.max(20, Math.min(240, cy - safeY * scale)); // inverted Y for SVG
     return { svgX, svgY };
   };
 
@@ -108,7 +119,8 @@ export const SomatotypeRadarAndChart: React.FC<SomatotypeRadarAndChartProps> = (
 
   const getRadarPoint = (value: number, angleDeg: number) => {
     // scale value 0-10 to 0-radarRadius
-    const r = (Math.min(10, Math.max(0, value)) / 10) * radarRadius;
+    const safeValue = Number.isFinite(value) ? value : 0;
+    const r = (Math.min(10, Math.max(0, safeValue)) / 10) * radarRadius;
     const rad = (angleDeg * Math.PI) / 180;
     const x = radarCenter.x + r * Math.cos(rad);
     const y = radarCenter.y - r * Math.sin(rad); // inverted Y

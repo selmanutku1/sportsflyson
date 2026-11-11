@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { toCanvas } from 'html-to-image';
+import JSZip from 'jszip';
 
 /**
  * Converts an HTMLImageElement's source to a safe Base64 data URL so that
@@ -59,9 +60,10 @@ async function prepareCloneForPdfCapture(
   captureHeight: number;
 }> {
   // Exact A4 printable ratio (200mm width x 287mm height = 1 : 1.435)
-  const targetA4HeightPx = Math.round(stageWidthPx * (287 / 200));
+  // Exact A4 printable ratio (210mm width x 297mm height = 1 : 1.4142)
+  const targetA4HeightPx = Math.round(stageWidthPx * (297 / 210));
 
-  // Create an offscreen desktop-width stage (>= 1024px so Tailwind lg: breakpoints stay active inside SVG foreignObject)
+  // Create an offscreen desktop-width stage
   const stageWrapper = document.createElement('div');
   stageWrapper.className = 'pdf-export-stage light';
   stageWrapper.style.position = 'fixed';
@@ -81,14 +83,12 @@ async function prepareCloneForPdfCapture(
   clonedRoot.style.width = `${stageWidthPx}px`;
   clonedRoot.style.minWidth = `${stageWidthPx}px`;
   clonedRoot.style.maxWidth = `${stageWidthPx}px`;
-  clonedRoot.style.minHeight = enforceFullA4Height ? `${targetA4HeightPx}px` : 'auto';
-  clonedRoot.style.height = 'auto';
+  // Enforce A4 height to ensure full page fill
+  clonedRoot.style.minHeight = `${targetA4HeightPx}px`;
+  clonedRoot.style.height = enforceFullA4Height ? `${targetA4HeightPx}px` : 'auto';
   clonedRoot.style.maxHeight = 'none';
-  clonedRoot.style.display = 'flex';
-  clonedRoot.style.flexDirection = 'column';
-  clonedRoot.style.justifyContent = 'flex-start'; // Force override to prevent overlap
-  clonedRoot.style.alignItems = 'stretch';
-  clonedRoot.style.padding = '16px 20px';
+  clonedRoot.style.display = 'block'; 
+  clonedRoot.style.padding = '48px'; // Increased padding for better breathing room in PDF/JPEG output
   clonedRoot.style.border = 'none';
   clonedRoot.style.borderRadius = '0px';
   clonedRoot.style.position = 'relative';
@@ -100,11 +100,35 @@ async function prepareCloneForPdfCapture(
   clonedRoot.style.transform = 'none';
   clonedRoot.style.zoom = '100%';
 
-  // Force all descendants to be visible to avoid clipping in html2canvas
-  const allElements = clonedRoot.querySelectorAll('*');
-  allElements.forEach((el) => {
-    (el as HTMLElement).style.overflow = 'visible';
-  });
+  // Inject crisp font and line layout styles for html2canvas rasterization
+  const styleEl = document.createElement('style');
+  styleEl.textContent = `
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap');
+    
+    .pdf-export-stage {
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif !important;
+    }
+    .pdf-export-stage * {
+      -webkit-font-smoothing: antialiased !important;
+      -moz-osx-font-smoothing: grayscale !important;
+      text-rendering: optimizeLegibility !important;
+      letter-spacing: normal !important;
+      word-spacing: normal !important;
+      font-kerning: normal !important;
+      font-variant-ligatures: none !important;
+    }
+    .pdf-export-stage .truncate {
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+    }
+    .pdf-export-stage [class*="line-clamp"] {
+      overflow: hidden !important;
+      display: -webkit-box !important;
+      -webkit-box-orient: vertical !important;
+    }
+  `;
+  stageWrapper.appendChild(styleEl);
 
   // Remove elements that should be hidden in print/PDF
   const ignoredNodes = clonedRoot.querySelectorAll(
@@ -115,8 +139,16 @@ async function prepareCloneForPdfCapture(
   stageWrapper.appendChild(clonedRoot);
   document.body.appendChild(stageWrapper);
 
-  // Wait one frame for browser layout of the stage
+  // Wait for fonts to be ready and layout to settle
+  try {
+    await (document as any).fonts.ready;
+  } catch (e) {
+    console.warn('[PDF Export] Font loading detection failed, proceeding anyway.');
+  }
+
+  // Wait two frames for browser layout of the stage to stabilize
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  await new Promise((r) => setTimeout(r, 100)); // Extra safety for layout settling
 
   // Inline all images cleanly without corrupting data: URLs
   const sourceImages = Array.from(sourceEl.querySelectorAll('img'));
@@ -221,8 +253,9 @@ async function prepareCloneForPdfCapture(
   // Wait one more frame after locking SVG dimensions
   await new Promise((r) => requestAnimationFrame(r));
   
-  // Explicitly force height to full scrollHeight to ensure capture captures everything
-  clonedRoot.style.height = `${clonedRoot.scrollHeight}px`;
+  // Explicitly force height to full scrollHeight (capped by A4 if needed, but here we want to capture at least one full A4)
+  const finalHeight = Math.max(targetA4HeightPx, clonedRoot.scrollHeight);
+  clonedRoot.style.height = `${finalHeight}px`;
   await new Promise((r) => requestAnimationFrame(r));
 
   const rect = clonedRoot.getBoundingClientRect();
@@ -242,7 +275,7 @@ async function prepareCloneForPdfCapture(
 /**
  * Renders a prepared DOM element to a high-DPI HTMLCanvasElement with multi-tier fallback.
  */
-async function captureElementToCleanCanvas(
+export async function captureElementToCleanCanvas(
   sourceEl: HTMLElement,
   stageWidthPx: number = 1040,
   enforceFullA4Height: boolean = false
@@ -251,7 +284,7 @@ async function captureElementToCleanCanvas(
     await prepareCloneForPdfCapture(sourceEl, stageWidthPx, enforceFullA4Height);
 
   try {
-    const pixelRatio = 2;
+    const pixelRatio = 3; // Increase to 3 for sharper text, charts and better rendering
     const rootTop = clonedRoot.getBoundingClientRect().top;
     const candidateBreakNodes = Array.from(
       clonedRoot.querySelectorAll(
@@ -270,31 +303,55 @@ async function captureElementToCleanCanvas(
 
     let canvas: HTMLCanvasElement | null = null;
 
-    // Strategy 1: High-fidelity html2canvas rasterization directly on clonedRoot with desktop viewport
+    // Strategy 1: html-to-image (SVG foreignObject) - High fidelity for modern CSS (Flex, Grid, Gap, Shifting fix)
     try {
-      const html2canvasModule = await import('html2canvas');
-      const html2canvas = (html2canvasModule.default || html2canvasModule) as (
-        el: HTMLElement,
-        opts?: any
-      ) => Promise<HTMLCanvasElement>;
-
-      canvas = await html2canvas(clonedRoot, {
-        scale: pixelRatio,
+      canvas = await toCanvas(clonedRoot, {
         width: captureWidth,
         height: captureHeight,
+        canvasWidth: captureWidth * pixelRatio,
+        canvasHeight: captureHeight * pixelRatio,
+        pixelRatio,
         backgroundColor: '#ffffff',
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        imageTimeout: 12000,
-        windowWidth: stageWidthPx,
-        windowHeight: captureHeight,
+        cacheBust: true,
+        skipFonts: false, // Ensure fonts are embedded to avoid text shifting
+        style: {
+          width: `${captureWidth}px`,
+          height: `${captureHeight}px`,
+          margin: '0',
+          transform: 'none',
+        },
       });
-    } catch (h2cErr) {
-      console.warn('[PDF Export] Strategy 1 (html2canvas on clone) failed, falling back to source element:', h2cErr);
+    } catch (toCanvasErr) {
+      console.warn('[PDF Export] Strategy 1 (html-to-image) failed, falling back to html2canvas:', toCanvasErr);
     }
 
-    // Strategy 2: html2canvas on live source element directly if visible
+    // Strategy 2: html2canvas as fallback (parses styles manually)
+    if (!canvas) {
+      try {
+        const html2canvasModule = await import('html2canvas');
+        const html2canvas = (html2canvasModule.default || html2canvasModule) as (
+          el: HTMLElement,
+          opts?: any
+        ) => Promise<HTMLCanvasElement>;
+
+        canvas = await html2canvas(clonedRoot, {
+          scale: pixelRatio,
+          width: captureWidth,
+          height: captureHeight,
+          backgroundColor: '#ffffff',
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          imageTimeout: 15000,
+          windowWidth: stageWidthPx,
+          windowHeight: captureHeight,
+        });
+      } catch (h2cErr) {
+        console.warn('[PDF Export] Strategy 2 (html2canvas on clone) failed:', h2cErr);
+      }
+    }
+
+    // Strategy 3: html2canvas on live source as last resort
     if (!canvas && sourceEl && sourceEl.offsetHeight > 100) {
       try {
         const html2canvasModule = await import('html2canvas');
@@ -309,37 +366,12 @@ async function captureElementToCleanCanvas(
           useCORS: true,
           allowTaint: true,
           logging: false,
-          imageTimeout: 12000,
+          imageTimeout: 15000,
           windowWidth: stageWidthPx,
           windowHeight: captureHeight,
         });
       } catch (sourceH2cErr) {
-        console.warn('[PDF Export] Strategy 2 (html2canvas on source) failed, falling back to html-to-image:', sourceH2cErr);
-      }
-    }
-
-    // Strategy 3: html-to-image fallback as last resort
-    if (!canvas) {
-      try {
-        canvas = await toCanvas(clonedRoot, {
-          width: captureWidth,
-          height: captureHeight,
-          canvasWidth: captureWidth * pixelRatio,
-          canvasHeight: captureHeight * pixelRatio,
-          pixelRatio,
-          backgroundColor: '#ffffff',
-          cacheBust: false,
-          skipFonts: true,
-          fontEmbedCSS: '',
-          style: {
-            width: `${captureWidth}px`,
-            height: `${captureHeight}px`,
-            margin: '0',
-            transform: 'none',
-          },
-        });
-      } catch (toCanvasErr) {
-        console.error('[PDF Export] All rasterization strategies failed for element:', toCanvasErr);
+        console.error('[PDF Export] All rasterization strategies failed:', sourceH2cErr);
         throw new Error('Karne sayfası görselleştirilemedi. Lütfen sayfayı yenileyip tekrar deneyiniz.');
       }
     }
@@ -374,9 +406,9 @@ export async function exportReportPagesToA4Pdf(options: {
 
   const pdfWidth = pdf.internal.pageSize.getWidth(); // 210 mm
   const pdfHeight = pdf.internal.pageSize.getHeight(); // 297 mm
-  const marginMm = 5;
-  const availW = pdfWidth - marginMm * 2; // 200 mm
-  const availH = pdfHeight - marginMm * 2; // 287 mm
+  const marginMm = 0; // 0 for full-page fill
+  const availW = pdfWidth; 
+  const availH = pdfHeight;
 
   let addedPages = 0;
 
@@ -393,20 +425,32 @@ export async function exportReportPagesToA4Pdf(options: {
     }
 
     try {
-      // Capture at fixed 1040px desktop width (>=1024px lg breakpoint) with full A4 height ratio
       const { canvas } = await captureElementToCleanCanvas(pageEl, 1040, true);
 
       const imgData = canvas.toDataURL('image/jpeg', 0.96);
-      const scale = Math.min(availW / canvas.width, availH / canvas.height);
-      const renderW = +(canvas.width * scale).toFixed(2);
-      const renderH = +(canvas.height * scale).toFixed(2);
-      const offsetX = +(marginMm + (availW - renderW) / 2).toFixed(2);
-      const offsetY = +(marginMm + (availH - renderH) / 2).toFixed(2);
+      
+      const canvasW = canvas.width;
+      const canvasH = canvas.height;
+      const canvasRatio = canvasH / canvasW;
+      const a4Ratio = pdfHeight / pdfWidth; // ~1.4142
 
       if (addedPages > 0) {
         pdf.addPage();
       }
-      pdf.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH, undefined, 'FAST');
+
+      // If canvas aspect ratio is very close to A4 ratio (within 5%), fit full A4
+      // Otherwise, maintain aspect ratio so text and numbers never get distorted or squished
+      if (Math.abs(canvasRatio - a4Ratio) < 0.15) {
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+      } else if (canvasRatio > a4Ratio) {
+        // Taller than A4: scale to full width and natural height, or fit height
+        const scaledH = pdfWidth * canvasRatio;
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, Math.min(pdfHeight, scaledH), undefined, 'FAST');
+      } else {
+        // Shorter than A4: center vertically or top-align
+        const scaledH = pdfWidth * canvasRatio;
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, scaledH, undefined, 'FAST');
+      }
       addedPages++;
     } catch (pageErr) {
       console.error(`[PDF Export] Error rendering page "${pageId}":`, pageErr);
@@ -557,7 +601,7 @@ export class BatchA4PdfBuilder {
   private addedPages: number = 0;
   private readonly pdfWidth: number;
   private readonly pdfHeight: number;
-  private readonly marginMm: number = 5;
+  private readonly marginMm: number = 0; // Set margin to 0 for full-page fill
   private readonly availW: number;
   private readonly availH: number;
 
@@ -570,8 +614,8 @@ export class BatchA4PdfBuilder {
     });
     this.pdfWidth = this.pdf.internal.pageSize.getWidth();
     this.pdfHeight = this.pdf.internal.pageSize.getHeight();
-    this.availW = this.pdfWidth - this.marginMm * 2;
-    this.availH = this.pdfHeight - this.marginMm * 2;
+    this.availW = this.pdfWidth; // Use full page width
+    this.availH = this.pdfHeight; // Use full page height
   }
 
   async appendReportPages(
@@ -583,25 +627,26 @@ export class BatchA4PdfBuilder {
         onPageProgress(i + 1, pageIds.length);
       }
 
-      const pageEl = document.getElementById(pageIds[i]);
-      if (!pageEl) continue;
+      const pageId = pageIds[i];
+      const pageEl = document.getElementById(pageId);
+      if (!pageEl) {
+        console.warn(`[Batch PDF] Element with id "${pageId}" not found, skipping.`);
+        continue;
+      }
 
       try {
-        const { canvas } = await captureElementToCleanCanvas(pageEl, 1040, false);
+        // Enforce A4 aspect ratio for capture
+        const { canvas } = await captureElementToCleanCanvas(pageEl, 1040, true);
         const imgData = canvas.toDataURL('image/jpeg', 0.95);
-        const scale = Math.min(this.availW / canvas.width, this.availH / canvas.height);
-        const renderW = +(canvas.width * scale).toFixed(2);
-        const renderH = +(canvas.height * scale).toFixed(2);
-        const offsetX = +(this.marginMm + (this.availW - renderW) / 2).toFixed(2);
-        const offsetY = +(this.marginMm + (this.availH - renderH) / 2).toFixed(2);
-
+        
         if (this.addedPages > 0) {
           this.pdf.addPage();
         }
-        this.pdf.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH, undefined, 'FAST');
+        // Fill full page dimensions (margins are 0)
+        this.pdf.addImage(imgData, 'JPEG', 0, 0, this.pdfWidth, this.pdfHeight, undefined, 'FAST');
         this.addedPages++;
       } catch (pageErr) {
-        console.error(`[Batch PDF] Error capturing page "${pageIds[i]}":`, pageErr);
+        console.error(`[Batch PDF] Error capturing page "${pageId}":`, pageErr);
       }
     }
   }
@@ -612,4 +657,101 @@ export class BatchA4PdfBuilder {
     }
   }
 }
+
+/**
+ * Triggers a native browser download for a Blob.
+ */
+export function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 400);
+}
+
+/**
+ * Captures a single DOM element into a clean, high-resolution JPEG Blob.
+ */
+export async function exportPageElementToJpegBlob(
+  element: HTMLElement,
+  quality: number = 0.95
+): Promise<Blob> {
+  const { canvas } = await captureElementToCleanCanvas(element, 1040, true);
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error('JPEG görseli oluşturulamadı'));
+      },
+      'image/jpeg',
+      quality
+    );
+  });
+}
+
+/**
+ * Downloads a single report card page directly as a high-resolution JPEG file.
+ */
+export async function downloadPageAsJpeg(
+  elementId: string,
+  fileName: string,
+  quality: number = 0.95
+): Promise<void> {
+  const el = document.getElementById(elementId);
+  if (!el) {
+    throw new Error(`Karne sayfası DOM üzerinde bulunamadı: ${elementId}`);
+  }
+  const blob = await exportPageElementToJpegBlob(el, quality);
+  downloadBlob(blob, fileName);
+}
+
+/**
+ * Downloads multiple selected report card pages bundled inside a clean ZIP archive of high-res JPEGs.
+ */
+export async function downloadPagesAsJpegZip(options: {
+  pages: { elementId: string; fileName: string; title?: string }[];
+  zipFileName: string;
+  onProgress?: (current: number, total: number, pageTitle: string) => void;
+  quality?: number;
+}): Promise<void> {
+  const { pages, zipFileName, onProgress, quality = 0.95 } = options;
+  const zip = new JSZip();
+  let capturedCount = 0;
+
+  for (let i = 0; i < pages.length; i++) {
+    const p = pages[i];
+    if (onProgress) {
+      onProgress(i + 1, pages.length, p.title || p.fileName);
+    }
+    const el = document.getElementById(p.elementId);
+    if (!el) {
+      console.warn(`[JPEG Export] Element "${p.elementId}" not found in DOM, skipping.`);
+      continue;
+    }
+    try {
+      const blob = await exportPageElementToJpegBlob(el, quality);
+      zip.file(p.fileName, blob);
+      capturedCount++;
+    } catch (err) {
+      console.error(`[JPEG Export] Error capturing page "${p.elementId}":`, err);
+    }
+  }
+
+  if (capturedCount === 0) {
+    throw new Error('Hiçbir karne sayfası yakalanamadı. Lütfen sayfaların ekranda görüntülendiğinden emin olun.');
+  }
+
+  const zipBlob = await zip.generateAsync({
+    type: 'blob',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+  downloadBlob(zipBlob, zipFileName);
+}
+
 

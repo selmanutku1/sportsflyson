@@ -38,8 +38,21 @@ import {
   Eye,
   BarChart3,
   Dumbbell,
-  Info
+  Info,
+  Database,
+  RefreshCw,
+  Cloud
 } from 'lucide-react';
+import {
+  subscribeFirestoreLabReports,
+  subscribeFirestoreKarneler,
+  subscribeFirestoreSporcular,
+  mapLabReportToSporcuKarne,
+  saveKarneToFirestore,
+  fetchFirestoreLabReports,
+  fetchFirestoreKarneler,
+} from '../../services/karneFirestoreService';
+import { SportsFlyLabReport, calculateBranchReferenceScore, getStoredLabReports } from '../../data/sportsFlyLabData';
 import { SporcuKarnePerformanceCharts } from '../charts/KarnePerformansGrafikleri';
 import { SomatotypeRadarAndChart } from '../charts/SomatotypeRadarAndChart';
 import { SportsFlyIcon, SportsFlyVectorMark } from '../SportsFlyLogo';
@@ -84,13 +97,105 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
   const [searchQuery, setSearchQuery] = useState('');
   const [sporpuanRefreshKey, setSporpuanRefreshKey] = useState(0);
   const [isQuickPointModalOpen, setIsQuickPointModalOpen] = useState(false);
+  const [isFirestoreConnected, setIsFirestoreConnected] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [selectedKarneId, setSelectedKarneId] = useState<string>(() => {
     const list = getStoredKarneler();
     return list[0]?.id || INITIAL_KARNELER[0]?.id || '';
   });
 
-  // Keep state synced with localStorage & SporPuan updates
+  // Keep state synced with Firestore realtime database, localStorage & SporPuan updates
   React.useEffect(() => {
+    let unsubReports: (() => void) | undefined;
+    let unsubKarneler: (() => void) | undefined;
+    let unsubSporcular: (() => void) | undefined;
+
+    let latestFsReports: SportsFlyLabReport[] = [];
+    let latestFsKarneler: SporcuKarne[] = [];
+
+    const mergeAndSetKarneler = () => {
+      const stored = getStoredKarneler();
+      const map = new Map<string, SporcuKarne>();
+
+      // 1. Local stored karneler
+      stored.forEach((k) => map.set(k.id, k));
+
+      // 2. Mapped Lab Reports from Firestore
+      latestFsReports.forEach((rep) => {
+        const mapped = mapLabReportToSporcuKarne(rep);
+        const existing = map.get(mapped.id);
+        if (existing) {
+          map.set(mapped.id, {
+            ...mapped,
+            ...existing,
+            boy: mapped.boy || existing.boy,
+            kilo: mapped.kilo || existing.kilo,
+            somatotype: mapped.somatotype || existing.somatotype,
+            fiziksel: { ...existing.fiziksel, ...mapped.fiziksel },
+          });
+        } else {
+          map.set(mapped.id, mapped);
+        }
+      });
+
+      // 3. Explicit report cards from Firestore 'karneler' collection
+      latestFsKarneler.forEach((k) => {
+        map.set(k.id, k);
+      });
+
+      const merged = Array.from(map.values());
+      if (merged.length > 0) {
+        setKarneler(merged);
+        saveStoredKarneler(merged);
+      }
+    };
+
+    try {
+      unsubReports = subscribeFirestoreLabReports((reports) => {
+        latestFsReports = reports;
+        setIsFirestoreConnected(true);
+        mergeAndSetKarneler();
+      });
+
+      unsubKarneler = subscribeFirestoreKarneler((items) => {
+        latestFsKarneler = items;
+        setIsFirestoreConnected(true);
+        mergeAndSetKarneler();
+      });
+
+      unsubSporcular = subscribeFirestoreSporcular((fsDocs) => {
+        if (fsDocs && fsDocs.length > 0) {
+          const mappedItems: SporcuItem[] = fsDocs.map((doc) => ({
+            id: doc.id,
+            code: doc.code || '000000',
+            name: doc.name || 'Sporcu',
+            email: doc.email || '',
+            phone: doc.phone,
+            birthDate: doc.birthDate || '2012-01-01',
+            facility: doc.facility || 'SportsFly Ana Yerleşke',
+            branch: doc.branch || 'Basketbol',
+            teamGroup: doc.teamGroup || 'Performans Grubu',
+            date: doc.registrationDate || new Date().toISOString().split('T')[0],
+            isActive: doc.isActive !== false,
+            avatarUrl: doc.avatarUrl,
+          }));
+          setSporcular((prev) => {
+            const map = new Map<string, SporcuItem>();
+            prev.forEach((s) => map.set(s.id, s));
+            mappedItems.forEach((s) => map.set(s.id, s));
+            const updated = Array.from(map.values());
+            try {
+              localStorage.setItem('sportsfly_sporcular', JSON.stringify(updated));
+            } catch (e) {}
+            return updated;
+          });
+        }
+      });
+    } catch (err) {
+      console.warn('[SporcuKarnesiView] Firestore realtime sync warning:', err);
+      setIsFirestoreConnected(false);
+    }
+
     const handleSporcularSync = () => {
       try {
         const saved = localStorage.getItem('sportsfly_sporcular');
@@ -139,6 +244,9 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
     });
 
     return () => {
+      if (unsubReports) unsubReports();
+      if (unsubKarneler) unsubKarneler();
+      if (unsubSporcular) unsubSporcular();
       window.removeEventListener('sportsfly_karneler_updated', handleUpdate);
       window.removeEventListener('sportsfly_sporcular_updated', handleSporcularSync);
       window.removeEventListener('sportsfly_sporcu_profilleri_updated', handleProfillerSync);
@@ -147,10 +255,53 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
     };
   }, []);
 
+  const handleManualFirestoreSync = async () => {
+    setIsSyncing(true);
+    try {
+      const [reports, fsKarneler] = await Promise.all([
+        fetchFirestoreLabReports(),
+        fetchFirestoreKarneler(),
+      ]);
+      const stored = getStoredKarneler();
+      const map = new Map<string, SporcuKarne>();
+      stored.forEach((k) => map.set(k.id, k));
+      reports.forEach((rep) => {
+        const mapped = mapLabReportToSporcuKarne(rep);
+        const existing = map.get(mapped.id);
+        if (existing) {
+          map.set(mapped.id, { ...mapped, ...existing });
+        } else {
+          map.set(mapped.id, mapped);
+        }
+      });
+      fsKarneler.forEach((k) => map.set(k.id, k));
+
+      const merged = Array.from(map.values());
+      setKarneler(merged);
+      saveStoredKarneler(merged);
+      setIsFirestoreConnected(true);
+      showToast(`✓ Firestore veritabanı senkronize edildi (${reports.length} Lab Raporu, ${fsKarneler.length} Karne).`);
+    } catch (err) {
+      console.error('[SporcuKarnesiView] Manual sync error:', err);
+      showToast('Firestore senkronizasyonunda bir sorun oluştu.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const updateAndSaveKarneler = (updater: (prev: SporcuKarne[]) => SporcuKarne[]) => {
     setKarneler(prev => {
       const updated = updater(prev);
       saveStoredKarneler(updated);
+
+      // Async save modified karne to Firestore
+      const targetId = selectedKarneId;
+      const targetKarne = updated.find((k) => k.id === targetId);
+      if (targetKarne) {
+        saveKarneToFirestore(targetKarne).catch((err) => {
+          console.warn('[SporcuKarnesiView] Firestore save error:', err);
+        });
+      }
       return updated;
     });
   };
@@ -531,6 +682,9 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
         meso: karne.somatotype.meso,
         ecto: karne.somatotype.ecto,
         category: karne.somatotype.category,
+        m1: karne.somatotype.m1,
+        m2: karne.somatotype.m2,
+        m3: karne.somatotype.m3,
         eliteRef: karne.somatotype.eliteRef || { endo: 2.5, meso: 5.2, ecto: 3.5 },
       };
     }
@@ -625,7 +779,7 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
               RESMİ SPORCU GELİŞİM &amp; PERFORMANS KARNESİ · {schoolBranding.branchName || 'Merkez Kampüs'}
             </div>
             <div className="text-sm sm:text-base font-black text-slate-900 uppercase tracking-tight">
-              {schoolBranding.schoolName || 'ATAŞEHİR SPOR OKULLARI AKADEMİSİ'}
+              {schoolBranding.schoolName || 'İSTANBUL ANADOLU OLİMPİK SPOR KULÜBÜ'}
             </div>
           </div>
         </div>
@@ -662,6 +816,31 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
             <Award className="w-8 h-8 text-blue-600" />
             Sporcu Karnesi
           </h1>
+          <p className="text-xs text-slate-500 mt-1">
+            5 Sayfalık Biyomotorik, Somatotip &amp; Performans Karnesi (Firestore Otomatik Veri Senkronizasyonu)
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-2 shadow-2xs ${
+            isFirestoreConnected
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-amber-50 border-amber-200 text-amber-800'
+          }`}>
+            <Database className="w-4 h-4 text-emerald-600 animate-pulse" />
+            <span>{isFirestoreConnected ? 'Firestore Canlı Veri: Aktif' : 'Yerel Mod'}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleManualFirestoreSync}
+            disabled={isSyncing}
+            className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+            title="Firestore verilerini yenile"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
+            <span>{isSyncing ? 'Yenileniyor...' : 'Verileri Yenile'}</span>
+          </button>
         </div>
       </div>
 
@@ -1272,8 +1451,8 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
                               somatotype={somato}
                               athleteName={activeKarne.adSoyad}
                               branch={activeKarne.brans}
-                              defaultView="table"
-                              onlyTable={true}
+                              defaultView="somatochart"
+                              onlyTable={false}
                             />
                           </div>
                         );
@@ -1555,8 +1734,8 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
                               athleteName={activeKarne.adSoyad}
                               branch={activeKarne.brans}
                               somatotype={somato}
-                              defaultView="table"
-                              onlyTable={true}
+                              defaultView="somatochart"
+                              onlyTable={false}
                             />
                           </div>
                         );
@@ -2052,6 +2231,90 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
                           </div>
                         </div>
                       )}
+
+                      {/* Branş Referans Puanı (Özel Büyük Punto ve Başlık) */}
+                      {(() => {
+                        let refData = null;
+                        try {
+                          const storedReports = getStoredLabReports();
+                          const matched = storedReports.find(
+                            (r) =>
+                              (r.athleteName && activeKarne.adSoyad && r.athleteName.toLowerCase().trim() === activeKarne.adSoyad.toLowerCase().trim()) ||
+                              (r.athleteCode && activeKarne.id && r.athleteCode.toLowerCase().trim() === activeKarne.id.toLowerCase().trim())
+                          );
+                          if (matched) {
+                            refData = calculateBranchReferenceScore(matched);
+                          }
+                        } catch {
+                          // Fallback to activeKarne properties
+                        }
+
+                        if (!refData) {
+                          const rawBrans = (activeKarne.brans || 'Genel Spor').split('/')[0].split('-')[0].trim();
+                          const primaryBranch = rawBrans || 'Genel Spor';
+                          const scorePct = Math.min(99, Math.max(65, Math.round(
+                            ((activeKarne.fiziksel?.ortalama || 8) * 10 * 0.5) +
+                            ((activeKarne.teknik?.ortalama || 8) * 10 * 0.3) +
+                            ((activeKarne.zihinsel?.ortalama || 8) * 10 * 0.2)
+                          )));
+                          let statusLabel = 'Yüksek Branş Potansiyeli';
+                          if (scorePct >= 92) statusLabel = 'Elit Seviye Branş Uyumlu';
+                          else if (scorePct >= 85) statusLabel = 'Yüksek Branş Potansiyeli';
+                          else if (scorePct >= 78) statusLabel = 'İyi Düzey Branş Uyumu';
+                          else statusLabel = 'Geliştirilebilir Branş Uyumu';
+
+                          refData = {
+                            branchTitle: `${primaryBranch} Referans Puanı`,
+                            scorePercentage: scorePct,
+                            statusLabel,
+                            breakdown: [
+                              { label: 'Biyomotorik Kapasite', percent: Math.round((activeKarne.fiziksel?.ortalama || 8.2) * 10) },
+                              { label: 'Teknik / Taktik Yapı', percent: Math.round((activeKarne.teknik?.ortalama || 8.0) * 10) },
+                              { label: 'Zihinsel & Performans Uyum', percent: Math.round((activeKarne.zihinsel?.ortalama || 8.5) * 10) },
+                            ],
+                          };
+                        }
+
+                        return (
+                          <div className="bg-slate-50/80 border border-slate-200/90 rounded-2xl p-4 shadow-2xs space-y-3 font-sans">
+                            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/70 pb-2.5">
+                              <div>
+                                <div className="text-[9.5px] font-extrabold text-slate-500 uppercase tracking-widest">
+                                  BİLİMSEL BRANŞ UYUMU &amp; POTANSİYEL KATSAYISI
+                                </div>
+                                <h3 className="text-base sm:text-lg font-extrabold text-slate-800 tracking-tight mt-0.5">
+                                  {refData.branchTitle}
+                                </h3>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 leading-none">
+                                  %{refData.scorePercentage}
+                                </div>
+                                <div className="text-[9.5px] font-bold text-sky-800 mt-1 uppercase tracking-wider bg-sky-50 px-2.5 py-0.5 rounded-md border border-sky-200/80 inline-block shadow-2xs">
+                                  {refData.statusLabel}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              {refData.breakdown.map((item, bIdx) => (
+                                <div key={bIdx} className="bg-white border border-slate-200/80 rounded-xl p-2 shadow-2xs">
+                                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-700 mb-1">
+                                    <span>{item.label}</span>
+                                    <span className="text-sky-700 font-extrabold">%{item.percent}</span>
+                                  </div>
+                                  <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                    <div
+                                      className="bg-sky-600 h-1.5 rounded-full"
+                                      style={{ width: `${item.percent}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Uzman Görüşü Bölümü */}
                       <div className="bg-slate-50/70 border border-slate-200/90 rounded-2xl p-4 shadow-2xs space-y-2">

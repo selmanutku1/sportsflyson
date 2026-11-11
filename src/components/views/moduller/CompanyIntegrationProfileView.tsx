@@ -946,7 +946,7 @@ export const CompanyIntegrationProfileView: React.FC<CompanyIntegrationProfileVi
               </h2>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Analiz firmanız tarafından ilgili spor kulüpleri için üretilmiş 7 sayfalık atletik performans karneleri.
+              Analiz firmanız tarafından ilgili spor kulüpleri için üretilmiş 5 sayfalık atletik performans karneleri.
             </p>
           </div>
 

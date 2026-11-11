@@ -35,6 +35,7 @@ import {
   QrCode,
   Camera,
   ShieldCheck,
+  Activity,
 } from 'lucide-react';
 import { QrYoklamaScannerModal } from './modals/QrYoklamaScannerModal';
 import { SportsFlyIcon } from './SportsFlyLogo';
@@ -655,6 +656,17 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
           )}
+
+          {/* SportsFly Lab & Toplu Karne Quick Access Button */}
+          <button
+            onClick={() => onNavigate?.('sportsfly-lab')}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl sm:rounded-2xl border border-violet-200 dark:border-violet-800 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer whitespace-nowrap"
+            title="SportsFly Lab & Toplu Karne Paneline Git"
+          >
+            <Activity className="w-3.5 h-3.5 text-white shrink-0" />
+            <span className="hidden md:inline">SportsFly Lab & Toplu Karne</span>
+            <span className="md:hidden">Lab</span>
+          </button>
 
           {/* THEME TOGGLE (Açık / Koyu / Sistem Modu) */}
           <div className="relative" ref={themeMenuRef}>

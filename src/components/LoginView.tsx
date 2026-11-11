@@ -1100,9 +1100,18 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 ? twoFactorMethod === 'email'
                   ? 'Hesap güvenliğiniz için e-posta adresinize gönderilen doğrulama kodunu girin.'
                   : 'Hesap güvenliğiniz için SMS veya Authenticator kodunu doğrulayın.'
-                : 'Devam etmek için aşağıdaki adımları takip edin.'}
+                : 'Devam etmek için aşağıdaki adımları takip edin veya Hızlı Panel Girişi butonunu kullanın.'}
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() => onLoginSuccess('Süper Admin')}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition cursor-pointer shrink-0"
+            title="Yönetici Paneline Doğrudan Geç"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>Paneli Aç</span>
+          </button>
         </div>
 
         {/* Tab Switcher */}

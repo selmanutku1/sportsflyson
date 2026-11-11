@@ -43,6 +43,7 @@ export type NavPage =
   | 'kulup-web-sitesi'
   | 'sportsfly-intelligence'
   | 'sportsfly-lab'
+  | 'batch-manager'
   | 'eposta-servis-yapilandirmasi';
 
 export interface EntegrasyonItem {
