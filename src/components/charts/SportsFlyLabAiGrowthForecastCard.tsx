@@ -59,15 +59,20 @@ export const SportsFlyLabAiGrowthForecastCard: React.FC<SportsFlyLabAiGrowthFore
 
   const getRow = (id: string) => report.bodyComposition.find((r) => r.id === id);
 
-  const heightVal = getRow('height')?.m3 ?? 149.5;
-  const weightVal = getRow('weight')?.m3 ?? 43.2;
-  const bmiVal = getRow('bmi')?.m3 ?? 18.2;
-  const fatVal = getRow('bodyFat')?.m3 ?? 14.2;
+  const hRow = getRow('height');
+  const wRow = getRow('weight');
+  const bRow = getRow('bmi');
+  const fRow = getRow('body_fat') || getRow('bodyFat');
 
-  const m1H = getRow('height')?.m1 ?? 145.0;
-  const m2H = getRow('height')?.m2 ?? 147.2;
-  const m1W = getRow('weight')?.m1 ?? 41.4;
-  const m2W = getRow('weight')?.m2 ?? 42.1;
+  const heightVal = hRow ? (hRow.m3 > 0 ? hRow.m3 : hRow.m2 > 0 ? hRow.m2 : hRow.m1) : 0;
+  const weightVal = wRow ? (wRow.m3 > 0 ? wRow.m3 : wRow.m2 > 0 ? wRow.m2 : wRow.m1) : 0;
+  const bmiVal = bRow ? (bRow.m3 > 0 ? bRow.m3 : bRow.m2 > 0 ? bRow.m2 : bRow.m1) : 0;
+  const fatVal = fRow ? (fRow.m3 > 0 ? fRow.m3 : fRow.m2 > 0 ? fRow.m2 : fRow.m1) : 0;
+
+  const m1H = hRow?.m1 ?? 0;
+  const m2H = hRow?.m2 ?? 0;
+  const m1W = wRow?.m1 ?? 0;
+  const m2W = wRow?.m2 ?? 0;
 
   const fetchAiGrowthPrediction = async () => {
     setLoading(true);

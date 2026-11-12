@@ -73,37 +73,31 @@ export const RotaSportsFlyHeaderBadge: React.FC<RotaSportsFlyHeaderBadgeProps> =
       )}
 
       {!hideSportsFly && (
-        /* 2. Powered by SportsFly LAB (Directs to https://sportsfly.com.tr) */
+        /* 2. Official SportsFly LAB Badge (Top-Right of all Report Pages) */
         <a
           href="https://sportsfly.com.tr"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1.5 hover:opacity-80 transition-opacity cursor-pointer"
+          className="flex items-center gap-2 hover:opacity-90 transition-opacity cursor-pointer group"
           title="SportsFly LAB"
         >
-          <div className="w-6 h-6 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0 shadow-2xs">
-            <img src="/sportsfly-logo.svg" alt="SportsFly" className="w-4 h-4 object-contain" />
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white border border-slate-200/90 flex items-center justify-center shrink-0 shadow-2xs overflow-hidden">
+            <img
+              src="/sportsfly-logo.png"
+              alt="SportsFly LAB"
+              className="w-full h-full object-contain scale-135"
+            />
           </div>
-          <div className="text-left">
-            <div
-              className={`text-[9.5px] font-sans font-extrabold uppercase tracking-wider leading-none ${
-                isDark ? 'text-white/70' : 'text-slate-500'
-              }`}
-            >
-              Powered by
-            </div>
-            <div className="flex items-center gap-1 leading-tight mt-0.5">
+          <div className="text-left flex items-center">
+            <div className="flex items-center gap-1.5 leading-none">
               <span
-                className={`text-[12px] font-black tracking-tight ${
+                className={`text-[13px] sm:text-[13.5px] font-black tracking-tight ${
                   isDark ? 'text-white' : 'text-slate-900'
                 }`}
               >
                 SportsFly
               </span>
-              <span
-                className="text-[11px] font-black tracking-wider uppercase"
-                style={{ color: isDark ? (effectiveSecondaryHex || '#38bdf8') : '#0284c7' }}
-              >
+              <span className="px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase tracking-wider bg-sky-600 text-white shadow-3xs">
                 LAB
               </span>
             </div>
@@ -178,22 +172,23 @@ export const RotaSportsFlyFooterBadge: React.FC<RotaSportsFlyFooterBadgeProps> =
         {!hideRota && !hideSportsFly && <span className="text-slate-300 hidden sm:inline print:inline">|</span>}
 
         {!hideSportsFly && (
-          /* Powered by SportsFly LAB -> Redirects to sportsfly.com.tr */
+          /* Official SportsFly LAB Attribution */
           <a
             href="https://sportsfly.com.tr"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 hover:opacity-80 transition-opacity cursor-pointer"
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer"
             title="SportsFly LAB"
           >
-            <div className="w-6 h-6 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0 shadow-2xs">
-              <img src="/sportsfly-logo.svg" alt="SportsFly" className="w-4 h-4 object-contain" />
+            <div className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0 shadow-2xs overflow-hidden">
+              <img
+                src="/sportsfly-logo.png"
+                alt="SportsFly LAB"
+                className="w-full h-full object-contain scale-135"
+              />
             </div>
             <div>
               <div className="flex items-center gap-1.5 leading-tight">
-                <span className="text-[9.5px] font-sans font-bold text-slate-500 uppercase">
-                  Powered by
-                </span>
                 <span className="text-[12px] font-black tracking-tight text-slate-900">
                   SportsFly <span style={{ color: primaryHex }}>LAB</span>
                 </span>

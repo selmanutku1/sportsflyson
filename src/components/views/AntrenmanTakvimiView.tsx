@@ -90,37 +90,19 @@ export const AntrenmanTakvimiView: React.FC = () => {
   // Dynamic filter options extracted from dataset + standard options
   const trainerOptions = useMemo(() => {
     const list = Array.from(new Set(antrenmanlar.map((a) => a.trainerName).filter(Boolean)));
-    const defaults = ['Can Aksoy', 'Deniz Erdem', 'Selin Kara', 'Mert Koçak', 'Tolga Arıkan', 'Emre Yılmaz'];
+    const defaults: string[] = [];
     return ['Tümü', ...Array.from(new Set([...defaults, ...list]))];
   }, [antrenmanlar]);
 
   const groupOptions = useMemo(() => {
     const list = Array.from(new Set(antrenmanlar.map((a) => a.groupName).filter(Boolean) as string[]));
-    const defaults = [
-      'U14 Basketbol Akademi',
-      'Minikler Basketbol Okulu (8-10 Yaş)',
-      'Basketbol U16 Lig Takımı',
-      'Yetişkin Yüzme Grubu',
-      'Gençler Yüzme Grubu',
-      'Reformer Pilates Grubu',
-      'CrossFit & Kuvvet Grubu',
-      'Altyapı Futbol Grubu',
-      'Yetişkin Tenis Turnuva Grubu',
-      'Tenis Orta Seviye Grubu',
-      'HIIT & Fonksiyonel Kardiyo',
-    ];
+    const defaults: string[] = [];
     return ['Tümü', ...Array.from(new Set([...defaults, ...list]))];
   }, [antrenmanlar]);
 
   const subeOptions = useMemo(() => {
     const list = Array.from(new Set(antrenmanlar.map((a) => a.sube).filter(Boolean) as string[]));
-    const defaults = [
-      'Kadıköy Merkez Şube',
-      'Özlüce Yüzme Şubesi',
-      'Ataşehir Şubesi',
-      'Beşiktaş Şubesi',
-      'Nilüfer Şube / Saraçgym',
-    ];
+    const defaults: string[] = [];
     return ['Tümü', ...Array.from(new Set([...defaults, ...list]))];
   }, [antrenmanlar]);
 

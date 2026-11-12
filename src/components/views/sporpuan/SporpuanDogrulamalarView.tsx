@@ -23,78 +23,7 @@ import { getStoredUserProfile } from '../../../data/userProfile';
 
 export const SporpuanDogrulamalarView: React.FC = () => {
   const isSuperAdmin = isSuperAdminUser(getStoredUserProfile()?.role);
-  const [verifications, setVerifications] = useState<SporpuanVerification[]>([
-    {
-      id: 'v-1',
-      entityType: 'Tesis',
-      title: 'Spor Tesisi & Kulüp Resmi Lisansı',
-      facilityName: 'Saraçgym Nilüfer',
-      verificationBadge: 'Doğrulanmış Spor Tesisi (Gold Rozet)',
-      submittedDate: '01.09.2024',
-      status: 'Onaylandı',
-      trustScore: 98,
-      documentsCount: 4,
-      verifiedBy: 'Sporpuan Denetim Kurulu',
-    },
-    {
-      id: 'v-2',
-      entityType: 'Eğitmen',
-      title: '3. Kademe Kıdemli Vücut Geliştirme & Fitness Antrenörlük Belgesi',
-      facilityName: 'Berkan Saraç (Saraçgym)',
-      verificationBadge: 'Tescilli Başantrenör',
-      submittedDate: '03.09.2024',
-      status: 'Onaylandı',
-      trustScore: 100,
-      documentsCount: 3,
-      verifiedBy: 'Sporpuan Denetim Kurulu',
-    },
-    {
-      id: 'v-3',
-      entityType: 'Tesis',
-      title: 'Belediye İşletme İzni & Hijyen Sertifikası',
-      facilityName: 'DigiMondi Levent Stüdyosu',
-      verificationBadge: 'Doğrulanmış Hijyenik Tesis',
-      submittedDate: '05.09.2024',
-      status: 'Onaylandı',
-      trustScore: 95,
-      documentsCount: 2,
-      verifiedBy: 'Sporpuan Denetim Kurulu',
-    },
-    {
-      id: 'v-4',
-      entityType: 'Eğitmen',
-      title: 'Reformer Pilates Eğitmenlik Sertifikası',
-      facilityName: 'Ezgi Yılmaz (DigiMondi)',
-      verificationBadge: 'Sertifikalı Pilates Eğitmeni',
-      submittedDate: '07.09.2024',
-      status: 'İncelemede',
-      trustScore: 84,
-      documentsCount: 2,
-    },
-    {
-      id: 'v-5',
-      entityType: 'Kullanıcı Check-in',
-      title: 'Turnike QR Geçiş Doğrulamalı Üyelik',
-      facilityName: 'aicosports Koşuyolu - Barış Koçak',
-      verificationBadge: 'Aktif Sporcu Check-in Onayı',
-      submittedDate: '08.09.2024',
-      status: 'Onaylandı',
-      trustScore: 100,
-      documentsCount: 1,
-      verifiedBy: 'Sporsepeti Akıllı Turnike API',
-    },
-    {
-      id: 'v-6',
-      entityType: 'Tesis',
-      title: 'Yüzme Havuzu Kimyasal Ölçüm & Cankurtaran Belgesi',
-      facilityName: 'aicosports Koşuyolu',
-      verificationBadge: 'Güvenli Havuz Akreditasyonu',
-      submittedDate: '09.09.2024',
-      status: 'Belge Bekleniyor',
-      trustScore: 70,
-      documentsCount: 1,
-    },
-  ]);
+  const [verifications, setVerifications] = useState<SporpuanVerification[]>([]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState('Tümü');

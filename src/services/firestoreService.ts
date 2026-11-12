@@ -631,9 +631,9 @@ export async function populateDatabase(options?: {
 
   // 4. Yazılan şemayı ve çapraz referansları oku & doğrula
   const [verifiedSporcu, verifiedEgitmen, verifiedGrup] = await Promise.all([
-    sporcularService.getById(INITIAL_SPORCULAR[0].id),
-    egitmenlerService.getById(INITIAL_EGITMENLER[0].id),
-    gruplarService.getById(INITIAL_GRUPLAR[0].id),
+    INITIAL_SPORCULAR[0]?.id ? sporcularService.getById(INITIAL_SPORCULAR[0].id) : Promise.resolve(null),
+    INITIAL_EGITMENLER[0]?.id ? egitmenlerService.getById(INITIAL_EGITMENLER[0].id) : Promise.resolve(null),
+    INITIAL_GRUPLAR[0]?.id ? gruplarService.getById(INITIAL_GRUPLAR[0].id) : Promise.resolve(null),
   ]);
 
   const isSchemaVerified = Boolean(

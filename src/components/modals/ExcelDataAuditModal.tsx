@@ -15,7 +15,7 @@ import {
   Info,
   Sparkles,
 } from 'lucide-react';
-import { SportsFlyLabReport, sanitizeAndEnforceNumber } from '../../data/sportsFlyLabData';
+import { SportsFlyLabReport, sanitizeAndEnforceNumber, isLabRowMeasured } from '../../data/sportsFlyLabData';
 
 export type AuditSeverity = 'error' | 'warning' | 'info';
 
@@ -200,10 +200,10 @@ export function auditImportedAthletes(
         fieldId: 'sprint',
         fieldName: '20 Metre Sprint',
         category: 'Motor Performans',
-        rawVal: 'Boş / 0',
-        cleanedVal: 0,
+        rawVal: 'Ölçülmedi',
+        cleanedVal: '—',
         severity: 'info',
-        message: '20m sprint ölçümü girilmemiş (0 kabul edildi).',
+        message: '20m sprint ölçümü Excelde yer almıyor (karnede boş bırakılacak).',
       });
     }
 
@@ -221,19 +221,16 @@ export function auditImportedAthletes(
       }
     }
 
-    if (balanceRow) {
-      if (balanceRow.m1 === 0) {
-        // Did user have text failure?
-        issues.push({
-          fieldId: 'balance',
-          fieldName: 'Flamingo Denge Testi',
-          category: 'Motor Performans',
-          rawVal: 'Başarısız / 0',
-          cleanedVal: 0,
-          severity: 'info',
-          message: 'Flamingo denge testi 0 (başarısız veya test edilmedi) olarak işlendi.',
-        });
-      }
+    if (balanceRow && isLabRowMeasured(balanceRow) && balanceRow.m1 === 0) {
+      issues.push({
+        fieldId: 'balance',
+        fieldName: 'Flamingo Denge Testi',
+        category: 'Motor Performans',
+        rawVal: 'Başarısız / 0 hata',
+        cleanedVal: 0,
+        severity: 'info',
+        message: 'Flamingo denge testi 0 (başarısız veya hatasız) olarak işlendi.',
+      });
     }
 
     // 4. Raw Row Inspection (detect Turkish commas, text strings, units)

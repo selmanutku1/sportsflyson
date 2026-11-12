@@ -1436,6 +1436,17 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
                       {/* Somatotip Analiz (Somato-Grafik 2D Plane & 3-Axis Radar Chart) - Page 1 Direct View */}
                       {(() => {
                         const somato = getSomatotypeProfile(activeKarne);
+                        const hasAnySomato =
+                          (somato.endo ?? 0) > 0 ||
+                          (somato.meso ?? 0) > 0 ||
+                          (somato.ecto ?? 0) > 0 ||
+                          (somato.m1 && ((somato.m1.endo ?? 0) > 0 || (somato.m1.meso ?? 0) > 0 || (somato.m1.ecto ?? 0) > 0)) ||
+                          (somato.m2 && ((somato.m2.endo ?? 0) > 0 || (somato.m2.meso ?? 0) > 0 || (somato.m2.ecto ?? 0) > 0));
+                        if (!hasAnySomato) return null;
+                        const hasSomatoM3 = Boolean(
+                          somato.m3 &&
+                            ((somato.m3.endo ?? 0) > 0 || (somato.m3.meso ?? 0) > 0 || (somato.m3.ecto ?? 0) > 0)
+                        );
                         return (
                           <div className="mt-4 pt-4 border-t border-slate-200/80">
                             <div className="mb-2 flex items-center justify-between">
@@ -1451,6 +1462,7 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
                               somatotype={somato}
                               athleteName={activeKarne.adSoyad}
                               branch={activeKarne.brans}
+                              hasThirdMeasurement={hasSomatoM3}
                               defaultView="somatochart"
                               onlyTable={false}
                             />
@@ -1613,6 +1625,108 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
                       {/* HEATH-CARTER SOMATOTİP (BEDEN YAPISI) ANALİZİ KARTI */}
                       {(() => {
                         const somato = getSomatotypeProfile(activeKarne);
+                        const hasEndo = (somato.endo ?? 0) > 0;
+                        const hasMeso = (somato.meso ?? 0) > 0;
+                        const hasEcto = (somato.ecto ?? 0) > 0;
+                        const hasSomatoM3 = Boolean(
+                          somato.m3 &&
+                            ((somato.m3.endo ?? 0) > 0 || (somato.m3.meso ?? 0) > 0 || (somato.m3.ecto ?? 0) > 0)
+                        );
+                        if (!hasEndo && !hasMeso && !hasEcto && !somato.m1 && !somato.m2) return null;
+
+                        const somatoCards = [
+                          hasEndo && (
+                            <div key="endo" className="bg-white border border-slate-200/80 rounded-xl p-3.5 shadow-2xs space-y-2">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                                  Endomorfi
+                                </span>
+                                <span className="font-black text-amber-700 tabular-nums">{somato.endo} / 10</span>
+                              </div>
+                              <div className="text-[10px] text-slate-500 leading-snug">
+                                Yağ dokusu ve göreceli beden hacmi bileşeni
+                              </div>
+                              <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                <div
+                                  className="bg-gradient-to-r from-amber-400 to-amber-600 h-full rounded-full transition-all duration-500"
+                                  style={{ width: `${Math.min(100, Math.max(5, ((somato.endo ?? 0) / 8) * 100))}%` }}
+                                />
+                              </div>
+                              <div className="text-[9.5px] font-semibold text-slate-400 flex justify-between pt-0.5">
+                                <span>İnce</span>
+                                <span>Elit: {somato.eliteRef.endo}</span>
+                                <span>Hacimli</span>
+                              </div>
+                            </div>
+                          ),
+                          hasMeso && (
+                            <div key="meso" className="bg-white border border-slate-200/80 rounded-xl p-3.5 shadow-2xs space-y-2">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-cyan-900 flex items-center gap-1.5">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-600 shrink-0" />
+                                  Mezomorfi
+                                </span>
+                                <span className="font-black text-cyan-700 tabular-nums">{somato.meso} / 10</span>
+                              </div>
+                              <div className="text-[10px] text-slate-500 leading-snug">
+                                Kas-iskelet yoğunluğu ve atletik kuvvet bileşeni
+                              </div>
+                              <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                <div
+                                  className="bg-gradient-to-r from-cyan-500 to-blue-600 h-full rounded-full transition-all duration-500"
+                                  style={{ width: `${Math.min(100, Math.max(5, ((somato.meso ?? 0) / 8) * 100))}%` }}
+                                />
+                              </div>
+                              <div className="text-[9.5px] font-semibold text-slate-400 flex justify-between pt-0.5">
+                                <span>Hafif</span>
+                                <span>Elit: {somato.eliteRef.meso}</span>
+                                <span>Atletik</span>
+                              </div>
+                            </div>
+                          ),
+                          hasEcto && (
+                            <div key="ecto" className="bg-white border border-slate-200/80 rounded-xl p-3.5 shadow-2xs space-y-2">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-indigo-900 flex items-center gap-1.5">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 shrink-0" />
+                                  Ektomorfi
+                                </span>
+                                <span className="font-black text-indigo-700 tabular-nums">{somato.ecto} / 10</span>
+                              </div>
+                              <div className="text-[10px] text-slate-500 leading-snug">
+                                Lineer boy, uzunluk ve kemik inceliği bileşeni
+                              </div>
+                              <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                <div
+                                  className="bg-gradient-to-r from-indigo-500 to-purple-600 h-full rounded-full transition-all duration-500"
+                                  style={{ width: `${Math.min(100, Math.max(5, ((somato.ecto ?? 0) / 8) * 100))}%` }}
+                                />
+                              </div>
+                              <div className="text-[9.5px] font-semibold text-slate-400 flex justify-between pt-0.5">
+                                <span>Kısa/Kalıp</span>
+                                <span>Elit: {somato.eliteRef.ecto}</span>
+                                <span>Uzun/İnce</span>
+                              </div>
+                            </div>
+                          ),
+                        ].filter(Boolean);
+
+                        const somatoGridCols =
+                          somatoCards.length === 1
+                            ? 'grid-cols-1'
+                            : somatoCards.length === 2
+                            ? 'grid-cols-1 sm:grid-cols-2'
+                            : 'grid-cols-1 sm:grid-cols-3';
+
+                        const measuredScoreStr = [
+                          hasEndo ? `Endo: ${somato.endo}` : null,
+                          hasMeso ? `Mezo: ${somato.meso}` : null,
+                          hasEcto ? `Ekto: ${somato.ecto}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ');
+
                         return (
                           <div className="bg-slate-50/90 border border-slate-200/90 rounded-2xl p-5 shadow-2xs space-y-4">
                             {/* Header */}
@@ -1626,7 +1740,7 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
                                     Heath-Carter Somatotip &amp; Beden Yapısı Analizi
                                   </h3>
                                   <p className="text-[10px] text-slate-500 font-medium">
-                                    Biyometrik yağlılık, kas-iskelet kuvveti ve lineer boy oranları
+                                    Ölçülen antropometrik verilere göre somatotip bileşenleri
                                   </p>
                                 </div>
                               </div>
@@ -1640,100 +1754,40 @@ export const SporcuKarnesiView: React.FC<SporcuKarnesiViewProps> = ({ onNavigate
                               </div>
                             </div>
 
-                            {/* 3 Metric Progress Columns */}
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                              {/* Endomorfi */}
-                              <div className="bg-white border border-slate-200/80 rounded-xl p-3.5 shadow-2xs space-y-2">
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="font-bold text-amber-900 flex items-center gap-1.5">
-                                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
-                                    Endomorfi
-                                  </span>
-                                  <span className="font-black text-amber-700 tabular-nums">{somato.endo} / 10</span>
-                                </div>
-                                <div className="text-[10px] text-slate-500 leading-snug">
-                                  Yağ dokusu ve göreceli beden hacmi bileşeni
-                                </div>
-                                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                                  <div
-                                    className="bg-gradient-to-r from-amber-400 to-amber-600 h-full rounded-full transition-all duration-500"
-                                    style={{ width: `${Math.min(100, Math.max(5, (somato.endo / 8) * 100))}%` }}
-                                  />
-                                </div>
-                                <div className="text-[9.5px] font-semibold text-slate-400 flex justify-between pt-0.5">
-                                  <span>İnce</span>
-                                  <span>Elit: {somato.eliteRef.endo}</span>
-                                  <span>Hacimli</span>
-                                </div>
-                              </div>
-
-                              {/* Mezomorfi */}
-                              <div className="bg-white border border-slate-200/80 rounded-xl p-3.5 shadow-2xs space-y-2">
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="font-bold text-cyan-900 flex items-center gap-1.5">
-                                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-600 shrink-0" />
-                                    Mezomorfi
-                                  </span>
-                                  <span className="font-black text-cyan-700 tabular-nums">{somato.meso} / 10</span>
-                                </div>
-                                <div className="text-[10px] text-slate-500 leading-snug">
-                                  Kas-iskelet yoğunluğu ve atletik kuvvet bileşeni
-                                </div>
-                                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                                  <div
-                                    className="bg-gradient-to-r from-cyan-500 to-blue-600 h-full rounded-full transition-all duration-500"
-                                    style={{ width: `${Math.min(100, Math.max(5, (somato.meso / 8) * 100))}%` }}
-                                  />
-                                </div>
-                                <div className="text-[9.5px] font-semibold text-slate-400 flex justify-between pt-0.5">
-                                  <span>Hafif</span>
-                                  <span>Elit: {somato.eliteRef.meso}</span>
-                                  <span>Atletik</span>
-                                </div>
-                              </div>
-
-                              {/* Ektomorfi */}
-                              <div className="bg-white border border-slate-200/80 rounded-xl p-3.5 shadow-2xs space-y-2">
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="font-bold text-indigo-900 flex items-center gap-1.5">
-                                    <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 shrink-0" />
-                                    Ektomorfi
-                                  </span>
-                                  <span className="font-black text-indigo-700 tabular-nums">{somato.ecto} / 10</span>
-                                </div>
-                                <div className="text-[10px] text-slate-500 leading-snug">
-                                  Lineer boy, uzunluk ve kemik inceliği bileşeni
-                                </div>
-                                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                                  <div
-                                    className="bg-gradient-to-r from-indigo-500 to-purple-600 h-full rounded-full transition-all duration-500"
-                                    style={{ width: `${Math.min(100, Math.max(5, (somato.ecto / 8) * 100))}%` }}
-                                  />
-                                </div>
-                                <div className="text-[9.5px] font-semibold text-slate-400 flex justify-between pt-0.5">
-                                  <span>Kısa/Kalıp</span>
-                                  <span>Elit: {somato.eliteRef.ecto}</span>
-                                  <span>Uzun/İnce</span>
-                                </div>
-                              </div>
-                            </div>
+                            {/* Measured Metric Progress Columns */}
+                            {somatoCards.length > 0 && (
+                              <div className={`grid ${somatoGridCols} gap-3`}>{somatoCards}</div>
+                            )}
 
                             {/* Branch Benchmark Advice Box */}
-                            <div className="bg-indigo-50/70 border border-indigo-100 rounded-xl p-3 flex items-start gap-2.5">
-                              <Info className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
-                              <div className="text-[11px] text-slate-700 leading-relaxed">
-                                <strong className="text-indigo-950 font-bold uppercase mr-1">
-                                  {activeKarne.brans} Branş Biyomotor Analizi:
-                                </strong>
-                                Sporcumuz <strong className="text-slate-900 font-bold">{activeKarne.adSoyad}</strong>, <strong className="text-indigo-700 font-bold">{somato.category}</strong> somatotip yapısına sahiptir ({somato.endo}-{somato.meso}-{somato.ecto}). Bu yapı {activeKarne.brans} elit atlet referans ortalamalarına ({somato.eliteRef.endo}-{somato.eliteRef.meso}-{somato.eliteRef.ecto}) yüksek uyum göstermekte olup patlayıcı sıçrama, ivmelenme ve çabuk yön değiştirme potansiyelini desteklemektedir.
+                            {hasEndo && hasMeso && hasEcto ? (
+                              <div className="bg-indigo-50/70 border border-indigo-100 rounded-xl p-3 flex items-start gap-2.5">
+                                <Info className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                                <div className="text-[11px] text-slate-700 leading-relaxed">
+                                  <strong className="text-indigo-950 font-bold uppercase mr-1">
+                                    {activeKarne.brans} Branş Biyomotor Analizi:
+                                  </strong>
+                                  Sporcumuz <strong className="text-slate-900 font-bold">{activeKarne.adSoyad}</strong>, <strong className="text-indigo-700 font-bold">{somato.category}</strong> somatotip yapısına sahiptir ({somato.endo}-{somato.meso}-{somato.ecto}). Bu yapı {activeKarne.brans} elit atlet referans ortalamalarına ({somato.eliteRef.endo}-{somato.eliteRef.meso}-{somato.eliteRef.ecto}) uyum göstermektedir.
+                                </div>
                               </div>
-                            </div>
+                            ) : measuredScoreStr ? (
+                              <div className="bg-indigo-50/70 border border-indigo-100 rounded-xl p-3 flex items-start gap-2.5">
+                                <Info className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                                <div className="text-[11px] text-slate-700 leading-relaxed">
+                                  <strong className="text-indigo-950 font-bold uppercase mr-1">
+                                    {activeKarne.brans} Ölçülen Bileşen Özeti:
+                                  </strong>
+                                  Sporcumuz <strong className="text-slate-900 font-bold">{activeKarne.adSoyad}</strong> için ölçülen somatotip değerleri: <strong className="text-indigo-700 font-bold">{measuredScoreStr}</strong> ({somato.category}).
+                                </div>
+                              </div>
+                            ) : null}
 
                             {/* Somatotype Radar & 2D Somatochart Progression Interactive Component */}
                             <SomatotypeRadarAndChart
                               athleteName={activeKarne.adSoyad}
                               branch={activeKarne.brans}
                               somatotype={somato}
+                              hasThirdMeasurement={hasSomatoM3}
                               defaultView="somatochart"
                               onlyTable={false}
                             />

@@ -113,9 +113,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isIntegrationUser = userProfile.role === 'Entegrasyon Kullanıcısı' || userProfile.role === 'LAB Kullanıcısı';
 
   const isRestricted = (page: NavPage) => {
-    // If it's an integration user, they can only access 'entegrasyonlar'
+    // 1. Super Admin always has full access
+    if (isSuperAdmin) return false;
+
+    // 2. Integration / LAB User Restrictions (Relaxed to allow seeing the panel)
     if (isIntegrationUser) {
-        return page !== 'entegrasyonlar';
+      return false;
     }
 
     if (isGoogleRestricted) {
@@ -204,20 +207,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <>
-      {/* Mobile backdrop */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="fixed inset-0 bg-slate-900/60 dark:bg-black/80 backdrop-blur-xs z-40 lg:hidden"
-            onClick={onCloseMobile}
-          />
-        )}
-      </AnimatePresence>
-
       {/* Desktop Compact Icon Rail when sidebar is collapsed (matches screenshot) */}
       {!isOpen && (
         <aside
@@ -232,10 +221,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {/* Manager Avatar Icon */}
             <div
-              className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-colors shadow-2xs"
+              className="w-9 h-9 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 flex items-center justify-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/70 transition-colors shadow-2xs"
               title="SportsFly Manager"
             >
-              <SportsFlyIcon className="w-4 h-4" />
+              <SportsFlyIcon className="w-6 h-6" />
             </div>
 
             <div className="w-8 h-px bg-slate-100 dark:bg-slate-800 my-0.5" />
@@ -602,8 +591,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Manager / Account status badge */}
         <div className="p-3 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50/80 dark:bg-[#162238]/70 border border-slate-200/60 dark:border-slate-700 transition-colors">
-            <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
-              {isGoogleRestricted ? <Lock className="w-3.5 h-3.5 text-amber-600" /> : <SportsFlyIcon className="w-4 h-4" />}
+            <div className="w-8 h-8 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0 shadow-2xs">
+              {isGoogleRestricted ? <Lock className="w-4 h-4 text-amber-600" /> : <SportsFlyIcon className="w-6 h-6" />}
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">

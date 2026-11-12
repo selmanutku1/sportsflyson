@@ -1,5 +1,9 @@
 import { jsPDF } from 'jspdf';
-import { SportsFlyLabReport } from '../data/sportsFlyLabData';
+import {
+  SportsFlyLabReport,
+  getDisplayedMotorPerformance,
+  getDisplayedBodyComposition,
+} from '../data/sportsFlyLabData';
 
 /**
  * Downloads critical performance data from the SportsFly Lab report as a UTF-8 BOM encoded CSV file.
@@ -24,7 +28,7 @@ export function downloadCriticalPerformanceCSV(report: SportsFlyLabReport): void
     'Test Adi;Birim;1. Test;2. Test;3. Test (Mevcut);Mevcut Yuzdelik (%);Grup Ortalamasi (%);Hedef Deger (%);Grup Farki (Δ %);Hedefe Kalan (Δ %);Performans Durumu;Oneri & Egzersiz Odagi',
   ];
 
-  const motorRows = report.motorPerformance.map((row) => {
+  const motorRows = getDisplayedMotorPerformance(report).map((row) => {
     const p3Val = row.percentile || Math.round(row.m3);
     const grpVal = Math.max(35, Math.min(88, Math.round(p3Val * 0.82 + grpAvg * 0.18 - 4)));
     const targetVal = Math.min(100, Math.max(p3Val + 8, 85));
@@ -64,7 +68,7 @@ export function downloadCriticalPerformanceCSV(report: SportsFlyLabReport): void
     'Parametre;Birim;1. Olcum;2. Olcum;3. Olcum (Mevcut);Yuzdelik (%);Referans Aralik;Durum',
   ];
 
-  const bodyCompRows = (report.bodyComposition || []).map((b) => [
+  const bodyCompRows = getDisplayedBodyComposition(report).map((b) => [
     b.name,
     b.unit,
     b.m1,
@@ -269,7 +273,7 @@ export async function downloadCriticalPerformancePDF(
   let curY = tableStartY + 7;
   const rowHeight = 7.5;
 
-  report.motorPerformance.slice(0, 10).forEach((row, idx) => {
+  getDisplayedMotorPerformance(report).slice(0, 10).forEach((row, idx) => {
     const isEven = idx % 2 === 0;
     doc.setFillColor(isEven ? 255 : 248, isEven ? 255 : 250, isEven ? 255 : 252);
     doc.rect(12, curY, 186, rowHeight, 'F');

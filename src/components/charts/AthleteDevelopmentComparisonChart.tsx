@@ -10,6 +10,7 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  LabelList,
 } from 'recharts';
 import {
   TrendingUp,
@@ -18,10 +19,15 @@ import {
   Users,
   Filter,
 } from 'lucide-react';
-import { SportsFlyLabReport } from '../../data/sportsFlyLabData';
+import {
+  SportsFlyLabReport,
+  getStoredLabReports,
+  getDisplayedMotorPerformance,
+} from '../../data/sportsFlyLabData';
 
 export interface AthleteDevelopmentComparisonChartProps {
   report: SportsFlyLabReport;
+  allReports?: SportsFlyLabReport[];
   className?: string;
   height?: number;
   onToast?: (message: string) => void;
@@ -77,8 +83,21 @@ const isCriticalMetric = (name: string): boolean => {
   );
 };
 
+const getReportActiveScore = (r: SportsFlyLabReport): number => {
+  if (r.scoreHistory?.p3Score && r.scoreHistory.p3Score > 0) return r.scoreHistory.p3Score;
+  if (r.scoreHistory?.p2Score && r.scoreHistory.p2Score > 0) return r.scoreHistory.p2Score;
+  if (r.scoreHistory?.p1Score && r.scoreHistory.p1Score > 0) return r.scoreHistory.p1Score;
+  const displayedMotors = getDisplayedMotorPerformance(r);
+  if (displayedMotors.length > 0) {
+    const sum = displayedMotors.reduce((acc, m) => acc + (m.percentile || 65), 0);
+    return Math.round(sum / displayedMotors.length);
+  }
+  return 72;
+};
+
 export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentComparisonChartProps> = ({
   report,
+  allReports,
   className = '',
   height = 320,
   onToast,
@@ -88,22 +107,74 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
   const [chartType, setChartType] = useState<'bar' | 'line'>(defaultChartType);
   const [filterMode, setFilterMode] = useState<'critical' | 'all'>(initialFilterMode);
 
-  const grpAvgScore = report.groupInfo?.groupAverageScore ?? 72;
-  const athleticScore = report.scoreHistory?.p3Score || 88;
-  const targetScore = Math.min(100, Math.max(athleticScore + 6, 85));
+  // SportsFly Lab içindeki aynı spor okulu veya aynı grup sporcularını bul
+  const peerReports = useMemo(() => {
+    const pool = allReports && allReports.length > 0 ? allReports : getStoredLabReports();
+    if (!pool || pool.length === 0) return [report];
+
+    const normClub = (report.clubName || '').trim().toLocaleLowerCase('tr-TR');
+    const normAge = (report.groupInfo?.ageRange || '').trim().toLocaleLowerCase('tr-TR');
+    const grpNo = report.groupInfo?.groupNo;
+
+    // 1. Aynı spor okulu + aynı grup
+    const sameClubAndGroup = pool.filter((r) => {
+      const rClub = (r.clubName || '').trim().toLocaleLowerCase('tr-TR');
+      const rAge = (r.groupInfo?.ageRange || '').trim().toLocaleLowerCase('tr-TR');
+      return rClub === normClub && (rAge === normAge || r.groupInfo?.groupNo === grpNo);
+    });
+    if (sameClubAndGroup.length > 1) return sameClubAndGroup;
+
+    // 2. Aynı spor okulu
+    const sameClub = pool.filter(
+      (r) => (r.clubName || '').trim().toLocaleLowerCase('tr-TR') === normClub
+    );
+    if (sameClub.length > 1) return sameClub;
+
+    // 3. Tüm SportsFly Lab sporcuları
+    return pool;
+  }, [report, allReports]);
+
+  const athleticScore = getReportActiveScore(report);
+
+  const grpAvgScore = useMemo(() => {
+    if (peerReports.length > 0) {
+      const sum = peerReports.reduce((acc, r) => acc + getReportActiveScore(r), 0);
+      return Math.round(sum / peerReports.length);
+    }
+    return report.groupInfo?.groupAverageScore ?? 72;
+  }, [peerReports, report]);
+
+  const targetScore = Math.min(96, Math.max(athleticScore + 6, 85));
   const groupDifference = athleticScore - grpAvgScore;
   const targetRemaining = targetScore - athleticScore;
 
-  // Process and filter chart data with guaranteed distinct categories
+  // Process and filter chart data with real group averages from peer athletes
   const chartData = useMemo(() => {
-    if (!report.motorPerformance || report.motorPerformance.length === 0) return [];
+    const displayedMotor = getDisplayedMotorPerformance(report);
+    if (displayedMotor.length === 0) return [];
 
-    const rows = report.motorPerformance.map((row) => {
+    const rows = displayedMotor.map((row) => {
       const activeVal = row.m3 > 0 ? row.m3 : (row.m2 > 0 ? row.m2 : row.m1);
-      const pVal = row.percentile || Math.round(activeVal);
-      const grpVal = Math.max(35, Math.min(88, Math.round(pVal * 0.82 + grpAvgScore * 0.18 - 4)));
-      const targetVal = Math.min(100, Math.max(pVal + 8, 85));
+      const pVal = Math.max(35, Math.min(96, row.percentile || Math.round(activeVal)));
       const label = cleanSubjectName(row.name);
+
+      // Aynı grup / spor okulundaki tüm sporcuların bu testteki gerçek yüzdelik ortalaması
+      const peerPercentiles: number[] = [];
+      peerReports.forEach((pr) => {
+        const matchedRow = getDisplayedMotorPerformance(pr).find(
+          (m) => m.id === row.id || cleanSubjectName(m.name) === label
+        );
+        if (matchedRow && matchedRow.percentile > 0) {
+          peerPercentiles.push(Math.max(35, Math.min(96, matchedRow.percentile)));
+        }
+      });
+
+      const grpVal =
+        peerPercentiles.length > 0
+          ? Math.round(peerPercentiles.reduce((a, b) => a + b, 0) / peerPercentiles.length)
+          : Math.max(40, Math.min(88, grpAvgScore));
+
+      const targetVal = Math.min(96, Math.max(pVal + 7, grpVal + 8, 85));
       const isCritical = isCriticalMetric(row.name);
 
       return {
@@ -133,7 +204,7 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
     }
 
     return rows.slice(0, 10);
-  }, [report, grpAvgScore, filterMode]);
+  }, [report, peerReports, grpAvgScore, filterMode]);
 
   return (
     <div
@@ -175,7 +246,9 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
           <div className="text-2xl font-black text-slate-800 my-1 font-sans tabular-nums leading-none">
             %{grpAvgScore}
           </div>
-          <p className="text-[10px] text-slate-500 font-medium leading-tight">Yaş &amp; Cinsiyet Akran Normu</p>
+          <p className="text-[10px] text-slate-500 font-medium leading-tight">
+            Grup Normu ({peerReports.length} Sporcu Ortalaması)
+          </p>
         </div>
 
         <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200 flex flex-col justify-between">
@@ -219,7 +292,7 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
         <div style={{ width: '100%', height }}>
           <ResponsiveContainer width="100%" height="100%">
             {chartType === 'line' ? (
-              <LineChart data={chartData} margin={{ top: 10, right: 20, left: -10, bottom: 25 }}>
+              <LineChart data={chartData} margin={{ top: 20, right: 20, left: -10, bottom: 25 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis
                   dataKey="subject"
@@ -228,7 +301,8 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
                   textAnchor="middle"
                 />
                 <YAxis
-                  domain={[0, 100]}
+                  domain={[0, 108]}
+                  ticks={[0, 25, 50, 75, 100]}
                   tick={{ fill: '#64748b', fontSize: 10 }}
                   tickFormatter={(val) => `%${val}`}
                 />
@@ -306,7 +380,7 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
                 />
               </LineChart>
             ) : (
-              <BarChart data={chartData} margin={{ top: 10, right: 20, left: -10, bottom: 25 }}>
+              <BarChart data={chartData} margin={{ top: 24, right: 20, left: -10, bottom: 25 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis
                   dataKey="subject"
@@ -315,7 +389,8 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
                   textAnchor="middle"
                 />
                 <YAxis
-                  domain={[0, 100]}
+                  domain={[0, 108]}
+                  ticks={[0, 25, 50, 75, 100]}
                   tick={{ fill: '#64748b', fontSize: 10 }}
                   tickFormatter={(val) => `%${val}`}
                 />
@@ -369,19 +444,40 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
                   dataKey="Grup Ortalaması"
                   fill="#94a3b8"
                   radius={[3, 3, 0, 0]}
-                />
+                >
+                  <LabelList
+                    dataKey="Grup Ortalaması"
+                    position="top"
+                    formatter={(val: any) => `%${val}`}
+                    style={{ fill: '#475569', fontSize: 10.5, fontWeight: 800 }}
+                  />
+                </Bar>
                 <Bar
                   name="Hedef Değer"
                   dataKey="Hedef Değer"
                   fill="#3b82f6"
                   radius={[3, 3, 0, 0]}
-                />
+                >
+                  <LabelList
+                    dataKey="Hedef Değer"
+                    position="top"
+                    formatter={(val: any) => `%${val}`}
+                    style={{ fill: '#1d4ed8', fontSize: 10.5, fontWeight: 800 }}
+                  />
+                </Bar>
                 <Bar
                   name="Mevcut Değer"
                   dataKey="Mevcut Değer"
                   fill="#059669"
                   radius={[3, 3, 0, 0]}
-                />
+                >
+                  <LabelList
+                    dataKey="Mevcut Değer"
+                    position="top"
+                    formatter={(val: any) => `%${val}`}
+                    style={{ fill: '#047857', fontSize: 10.5, fontWeight: 900 }}
+                  />
+                </Bar>
               </BarChart>
             )}
           </ResponsiveContainer>

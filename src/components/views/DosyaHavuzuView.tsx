@@ -252,14 +252,33 @@ export const DosyaHavuzuView: React.FC<DosyaHavuzuViewProps> = ({ onNavigate, on
                 fileName: file.name,
               }),
             });
+            
+            if (!res.ok) {
+              const errorText = await res.text();
+              let errorMsg = 'Sunucu hatası oluştu.';
+              try {
+                const errorJson = JSON.parse(errorText);
+                errorMsg = errorJson.error || errorMsg;
+              } catch {
+                errorMsg = `Hata: ${res.status} ${res.statusText}`;
+              }
+              showToast(`⚠️ OCR Hatası: ${errorMsg}`);
+              setIsOcrProcessing(false);
+              setIsProcessing(false);
+              return;
+            }
+
             const data = await res.json();
             if (data.success && Array.isArray(data.athletes) && data.athletes.length > 0) {
               brandedReports = data.athletes.map((ocrItem: any) =>
                 applyBrandingToReport(buildLabReportFromOcrAthlete(ocrItem, branding), branding)
               );
+            } else {
+              showToast('⚠️ Yapay zeka bu görselden sporcu verisi okuyamadı. Lütfen daha net bir görsel yükleyin.');
             }
           } catch (ocrErr) {
-            console.error('OCR API error:', ocrErr);
+            console.error('OCR API fetch error:', ocrErr);
+            showToast('⚠️ Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin.');
           } finally {
             setIsOcrProcessing(false);
           }
@@ -575,7 +594,19 @@ export const DosyaHavuzuView: React.FC<DosyaHavuzuViewProps> = ({ onNavigate, on
   // CREATE OR UPDATE REPORT CARD FOR AN APPROVED ATHLETE (Saved to SportsFly LAB reports)
   const handleCreateKarne = async (athlete: PoolAthleteItem) => {
     const branding = getStoredLabSchoolBranding();
-    const labReport = applyBrandingToReport(athlete, branding);
+    
+    // Ensure we start from a full template if the athlete item is incomplete
+    const template = createNewLabReportWithBranding({
+        athleteName: athlete.athleteName || 'Yeni Sporcu',
+        sportBranch: athlete.sportBranch || 'Genel Spor Gelişimi',
+        gender: athlete.gender || 'Erkek',
+        ageYears: athlete.ageYears || 12,
+    });
+    
+    // Merge existing athlete data over template to ensure all fields are present
+    const fullAthlete = { ...template, ...athlete };
+    const labReport = applyBrandingToReport(fullAthlete, branding);
+    
     const existingLabReports = getStoredLabReports();
     
     const normalizeName = (s: string) => (s || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('tr-TR');

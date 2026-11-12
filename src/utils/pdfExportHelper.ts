@@ -51,17 +51,18 @@ async function inlineImageAsDataUrl(img: HTMLImageElement): Promise<void> {
  */
 async function prepareCloneForPdfCapture(
   sourceEl: HTMLElement,
-  stageWidthPx: number = 1040,
+  stageWidthPx: number = 1120,
   enforceFullA4Height: boolean = false
 ): Promise<{
   stageWrapper: HTMLDivElement;
   clonedRoot: HTMLElement;
   captureWidth: number;
   captureHeight: number;
+  effectiveStageWidthPx: number;
 }> {
-  // Exact A4 printable ratio (200mm width x 287mm height = 1 : 1.435)
-  // Exact A4 printable ratio (210mm width x 297mm height = 1 : 1.4142)
-  const targetA4HeightPx = Math.round(stageWidthPx * (297 / 210));
+  const A4_RATIO = 297 / 210;
+  let activeWidthPx = stageWidthPx;
+  let targetA4HeightPx = Math.round(activeWidthPx * A4_RATIO);
 
   // Create an offscreen desktop-width stage
   const stageWrapper = document.createElement('div');
@@ -69,9 +70,9 @@ async function prepareCloneForPdfCapture(
   stageWrapper.style.position = 'fixed';
   stageWrapper.style.left = '0';
   stageWrapper.style.top = '0';
-  stageWrapper.style.width = `${stageWidthPx}px`;
-  stageWrapper.style.minWidth = `${stageWidthPx}px`;
-  stageWrapper.style.maxWidth = `${stageWidthPx}px`;
+  stageWrapper.style.width = `${activeWidthPx}px`;
+  stageWrapper.style.minWidth = `${activeWidthPx}px`;
+  stageWrapper.style.maxWidth = `${activeWidthPx}px`;
   stageWrapper.style.backgroundColor = '#ffffff';
   stageWrapper.style.color = '#0f172a';
   stageWrapper.style.zIndex = '-99999';
@@ -80,15 +81,21 @@ async function prepareCloneForPdfCapture(
   stageWrapper.style.overflow = 'visible';
 
   const clonedRoot = sourceEl.cloneNode(true) as HTMLElement;
-  clonedRoot.style.width = `${stageWidthPx}px`;
-  clonedRoot.style.minWidth = `${stageWidthPx}px`;
-  clonedRoot.style.maxWidth = `${stageWidthPx}px`;
-  // Enforce A4 height to ensure full page fill
-  clonedRoot.style.minHeight = `${targetA4HeightPx}px`;
-  clonedRoot.style.height = enforceFullA4Height ? `${targetA4HeightPx}px` : 'auto';
+  clonedRoot.style.width = `${activeWidthPx}px`;
+  clonedRoot.style.minWidth = `${activeWidthPx}px`;
+  clonedRoot.style.maxWidth = `${activeWidthPx}px`;
+  clonedRoot.style.minHeight = enforceFullA4Height ? `${targetA4HeightPx}px` : '0px';
+  clonedRoot.style.height = 'auto';
   clonedRoot.style.maxHeight = 'none';
-  clonedRoot.style.display = 'block'; 
-  clonedRoot.style.padding = '48px'; // Increased padding for better breathing room in PDF/JPEG output
+  if (enforceFullA4Height) {
+    clonedRoot.style.display = 'flex';
+    clonedRoot.style.flexDirection = 'column';
+    clonedRoot.style.justifyContent = 'space-between';
+    clonedRoot.style.padding = '30px 34px';
+  } else {
+    clonedRoot.style.display = 'block';
+    clonedRoot.style.padding = '32px';
+  }
   clonedRoot.style.border = 'none';
   clonedRoot.style.borderRadius = '0px';
   clonedRoot.style.position = 'relative';
@@ -100,11 +107,9 @@ async function prepareCloneForPdfCapture(
   clonedRoot.style.transform = 'none';
   clonedRoot.style.zoom = '100%';
 
-  // Inject crisp font and line layout styles for html2canvas rasterization
+  // Inject crisp font rendering helpers without altering letter-spacing/tracking
   const styleEl = document.createElement('style');
   styleEl.textContent = `
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap');
-    
     .pdf-export-stage {
       font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif !important;
     }
@@ -112,10 +117,6 @@ async function prepareCloneForPdfCapture(
       -webkit-font-smoothing: antialiased !important;
       -moz-osx-font-smoothing: grayscale !important;
       text-rendering: optimizeLegibility !important;
-      letter-spacing: normal !important;
-      word-spacing: normal !important;
-      font-kerning: normal !important;
-      font-variant-ligatures: none !important;
     }
     .pdf-export-stage .truncate {
       white-space: nowrap !important;
@@ -142,13 +143,32 @@ async function prepareCloneForPdfCapture(
   // Wait for fonts to be ready and layout to settle
   try {
     await (document as any).fonts.ready;
-  } catch (e) {
-    console.warn('[PDF Export] Font loading detection failed, proceeding anyway.');
+  } catch {
+    // Proceed even if font readiness detection fails
   }
 
   // Wait two frames for browser layout of the stage to stabilize
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-  await new Promise((r) => setTimeout(r, 100)); // Extra safety for layout settling
+  await new Promise((r) => setTimeout(r, 80));
+
+  // If a single A4 page's content is taller than 1120 * 1.414, smoothly widen the stage (up to 1360px)
+  // so tables/cards breathe horizontally and fit closer to exact 210:297 A4 proportions without shrinking!
+  if (enforceFullA4Height && clonedRoot.scrollHeight > targetA4HeightPx * 1.03) {
+    const neededWidth = Math.min(1360, Math.round(clonedRoot.scrollHeight / A4_RATIO));
+    if (neededWidth > activeWidthPx + 24) {
+      activeWidthPx = neededWidth;
+      targetA4HeightPx = Math.round(activeWidthPx * A4_RATIO);
+      stageWrapper.style.width = `${activeWidthPx}px`;
+      stageWrapper.style.minWidth = `${activeWidthPx}px`;
+      stageWrapper.style.maxWidth = `${activeWidthPx}px`;
+      clonedRoot.style.width = `${activeWidthPx}px`;
+      clonedRoot.style.minWidth = `${activeWidthPx}px`;
+      clonedRoot.style.maxWidth = `${activeWidthPx}px`;
+      clonedRoot.style.minHeight = `${targetA4HeightPx}px`;
+      clonedRoot.style.padding = '26px 30px';
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    }
+  }
 
   // Inline all images cleanly without corrupting data: URLs
   const sourceImages = Array.from(sourceEl.querySelectorAll('img'));
@@ -189,7 +209,7 @@ async function prepareCloneForPdfCapture(
     }
   }
 
-  // Lock explicit pixel dimensions and namespace on all SVG elements so SVG-inside-SVG foreignObject never distorts aspect ratios
+  // Lock explicit pixel dimensions and namespace on all SVG elements AFTER final stage width is chosen
   const svgs = Array.from(clonedRoot.querySelectorAll('svg'));
   svgs.forEach((svg) => {
     if (!svg.getAttribute('xmlns')) {
@@ -233,7 +253,6 @@ async function prepareCloneForPdfCapture(
         // Ignore style access issues
       }
     }
-    // Universal safeguard: if fill is still missing or transparent, default to #ffffff or inherit
     if (!cText.getAttribute('fill')) {
       const cls = cText.getAttribute('class') || '';
       if (cls.includes('fill-white') || cls.includes('text-white')) {
@@ -250,16 +269,15 @@ async function prepareCloneForPdfCapture(
     }
   }
 
-  // Wait one more frame after locking SVG dimensions
   await new Promise((r) => requestAnimationFrame(r));
-  
-  // Explicitly force height to full scrollHeight (capped by A4 if needed, but here we want to capture at least one full A4)
-  const finalHeight = Math.max(targetA4HeightPx, clonedRoot.scrollHeight);
+
+  const naturalHeight = clonedRoot.scrollHeight;
+  const finalHeight = enforceFullA4Height ? Math.max(targetA4HeightPx, naturalHeight) : naturalHeight;
   clonedRoot.style.height = `${finalHeight}px`;
   await new Promise((r) => requestAnimationFrame(r));
 
   const rect = clonedRoot.getBoundingClientRect();
-  const captureWidth = Math.ceil(rect.width || stageWidthPx);
+  const captureWidth = Math.ceil(rect.width || activeWidthPx);
   const captureHeight = Math.ceil(
     Math.max(clonedRoot.scrollHeight, clonedRoot.offsetHeight, rect.height)
   );
@@ -269,6 +287,7 @@ async function prepareCloneForPdfCapture(
     clonedRoot,
     captureWidth,
     captureHeight,
+    effectiveStageWidthPx: activeWidthPx,
   };
 }
 
@@ -277,14 +296,14 @@ async function prepareCloneForPdfCapture(
  */
 export async function captureElementToCleanCanvas(
   sourceEl: HTMLElement,
-  stageWidthPx: number = 1040,
-  enforceFullA4Height: boolean = false
+  stageWidthPx: number = 1120,
+  enforceFullA4Height: boolean = false,
+  pixelRatio: number = 2.5
 ): Promise<{ canvas: HTMLCanvasElement; clonedRootHeight: number; blockBreakYsPx: number[] }> {
-  const { stageWrapper, clonedRoot, captureWidth, captureHeight } =
+  const { stageWrapper, clonedRoot, captureWidth, captureHeight, effectiveStageWidthPx } =
     await prepareCloneForPdfCapture(sourceEl, stageWidthPx, enforceFullA4Height);
 
   try {
-    const pixelRatio = 3; // Increase to 3 for sharper text, charts and better rendering
     const rootTop = clonedRoot.getBoundingClientRect().top;
     const candidateBreakNodes = Array.from(
       clonedRoot.querySelectorAll(
@@ -303,17 +322,17 @@ export async function captureElementToCleanCanvas(
 
     let canvas: HTMLCanvasElement | null = null;
 
-    // Strategy 1: html-to-image (SVG foreignObject) - High fidelity for modern CSS (Flex, Grid, Gap, Shifting fix)
+    // Strategy 1: html-to-image (SVG foreignObject) - High fidelity for modern CSS
     try {
       canvas = await toCanvas(clonedRoot, {
         width: captureWidth,
         height: captureHeight,
-        canvasWidth: captureWidth * pixelRatio,
-        canvasHeight: captureHeight * pixelRatio,
+        canvasWidth: Math.round(captureWidth * pixelRatio),
+        canvasHeight: Math.round(captureHeight * pixelRatio),
         pixelRatio,
         backgroundColor: '#ffffff',
         cacheBust: true,
-        skipFonts: false, // Ensure fonts are embedded to avoid text shifting
+        skipFonts: false,
         style: {
           width: `${captureWidth}px`,
           height: `${captureHeight}px`,
@@ -325,7 +344,7 @@ export async function captureElementToCleanCanvas(
       console.warn('[PDF Export] Strategy 1 (html-to-image) failed, falling back to html2canvas:', toCanvasErr);
     }
 
-    // Strategy 2: html2canvas as fallback (parses styles manually)
+    // Strategy 2: html2canvas as fallback
     if (!canvas) {
       try {
         const html2canvasModule = await import('html2canvas');
@@ -343,7 +362,7 @@ export async function captureElementToCleanCanvas(
           allowTaint: true,
           logging: false,
           imageTimeout: 15000,
-          windowWidth: stageWidthPx,
+          windowWidth: effectiveStageWidthPx,
           windowHeight: captureHeight,
         });
       } catch (h2cErr) {
@@ -367,7 +386,7 @@ export async function captureElementToCleanCanvas(
           allowTaint: true,
           logging: false,
           imageTimeout: 15000,
-          windowWidth: stageWidthPx,
+          windowWidth: effectiveStageWidthPx,
           windowHeight: captureHeight,
         });
       } catch (sourceH2cErr) {
@@ -389,82 +408,6 @@ export async function captureElementToCleanCanvas(
 }
 
 /**
- * Exports an array of A4 page elements into a crisp, distortion-free A4 portrait PDF.
- */
-export async function exportReportPagesToA4Pdf(options: {
-  pageIds: string[];
-  fileName: string;
-  onPageProgress?: (pageIndex: number, totalPages: number) => void;
-}): Promise<void> {
-  const { pageIds, fileName, onPageProgress } = options;
-  const pdf = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4',
-    compress: true,
-  });
-
-  const pdfWidth = pdf.internal.pageSize.getWidth(); // 210 mm
-  const pdfHeight = pdf.internal.pageSize.getHeight(); // 297 mm
-  const marginMm = 0; // 0 for full-page fill
-  const availW = pdfWidth; 
-  const availH = pdfHeight;
-
-  let addedPages = 0;
-
-  for (let i = 0; i < pageIds.length; i++) {
-    if (onPageProgress) {
-      onPageProgress(i + 1, pageIds.length);
-    }
-
-    const pageId = pageIds[i];
-    const pageEl = document.getElementById(pageId);
-    if (!pageEl) {
-      console.warn(`[PDF Export] Element with id "${pageId}" not found in DOM, skipping.`);
-      continue;
-    }
-
-    try {
-      const { canvas } = await captureElementToCleanCanvas(pageEl, 1040, true);
-
-      const imgData = canvas.toDataURL('image/jpeg', 0.96);
-      
-      const canvasW = canvas.width;
-      const canvasH = canvas.height;
-      const canvasRatio = canvasH / canvasW;
-      const a4Ratio = pdfHeight / pdfWidth; // ~1.4142
-
-      if (addedPages > 0) {
-        pdf.addPage();
-      }
-
-      // If canvas aspect ratio is very close to A4 ratio (within 5%), fit full A4
-      // Otherwise, maintain aspect ratio so text and numbers never get distorted or squished
-      if (Math.abs(canvasRatio - a4Ratio) < 0.15) {
-        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-      } else if (canvasRatio > a4Ratio) {
-        // Taller than A4: scale to full width and natural height, or fit height
-        const scaledH = pdfWidth * canvasRatio;
-        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, Math.min(pdfHeight, scaledH), undefined, 'FAST');
-      } else {
-        // Shorter than A4: center vertically or top-align
-        const scaledH = pdfWidth * canvasRatio;
-        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, scaledH, undefined, 'FAST');
-      }
-      addedPages++;
-    } catch (pageErr) {
-      console.error(`[PDF Export] Error rendering page "${pageId}":`, pageErr);
-    }
-  }
-
-  if (addedPages === 0) {
-    throw new Error('Karne sayfaları bulunamadı veya görselleştirilemedi. Lütfen karneyi ekranda açıp tekrar deneyiniz.');
-  }
-
-  pdf.save(fileName);
-}
-
-/**
  * Checks whether a horizontal pixel row in a canvas is predominantly white/light background,
  * allowing safe pagination without slicing through text or graphics.
  */
@@ -483,17 +426,14 @@ function findCleanHorizontalCutRow(
     const imgData = ctx.getImageData(0, startY, canvasWidth, heightToScan).data;
     const stride = canvasWidth * 4;
 
-    // Scan upwards from idealCutY to find a row where almost all pixels are white/near-white (#f8fafc..#ffffff)
     for (let offsetY = heightToScan - 1; offsetY >= 0; offsetY--) {
       const rowStart = offsetY * stride;
       let nonBgPixels = 0;
-      // Sample every 4th pixel horizontally for speed
       for (let x = 24; x < canvasWidth - 24; x += 4) {
         const idx = rowStart + x * 4;
         const r = imgData[idx];
         const g = imgData[idx + 1];
         const b = imgData[idx + 2];
-        // Consider pure white (#ffffff) or slate-50/100 (#f1f5f9 / #f8fafc) as safe background
         const isLightBg = r >= 240 && g >= 242 && b >= 245;
         if (!isLightBg) {
           nonBgPixels++;
@@ -512,47 +452,65 @@ function findCleanHorizontalCutRow(
 }
 
 /**
- * Exports a single tall report card container (e.g. SporcuKarnesiView #sporcu-karne-print-area)
- * into a multi-page A4 PDF using smart whitespace row detection so text and charts are never sliced mid-line.
+ * Appends a rendered canvas onto a jsPDF A4 portrait document with ZERO aspect-ratio distortion.
+ * - Pages within 20% of A4 height scale uniformly (1:1 aspect ratio) to fit cleanly on 1 A4 page.
+ * - Taller pages slice cleanly across multiple A4 pages using block boundaries and whitespace row detection.
  */
-export async function exportContainerToSmartA4Pdf(options: {
-  containerEl: HTMLElement;
-  fileName: string;
-}): Promise<void> {
-  const { containerEl, fileName } = options;
-
-  const { canvas } = await captureElementToCleanCanvas(containerEl, 1120);
-  const fullCtx = canvas.getContext('2d');
-
-  const pdf = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4',
-    compress: true,
-  });
-
+function appendCanvasToA4Pdf(
+  pdf: jsPDF,
+  canvas: HTMLCanvasElement,
+  blockBreakYsPx: number[],
+  hasExistingPages: boolean,
+  forceSinglePage: boolean = true
+): number {
   const pdfWidth = pdf.internal.pageSize.getWidth(); // 210 mm
   const pdfHeight = pdf.internal.pageSize.getHeight(); // 297 mm
-  const marginMm = 6;
-  const usableW = pdfWidth - marginMm * 2; // 198 mm
-  const usableH = pdfHeight - marginMm * 2; // 285 mm
 
+  // Exact 1-to-1 page mapping (5 report pages -> 5 PDF pages) with strict 1:1 aspect ratio
+  if (forceSinglePage) {
+    const scale = Math.min(pdfWidth / canvas.width, pdfHeight / canvas.height);
+    const renderW = canvas.width * scale;
+    const renderH = canvas.height * scale;
+    const offsetX = Math.max(0, (pdfWidth - renderW) / 2);
+    const offsetY = Math.max(0, (pdfHeight - renderH) / 2);
+
+    if (hasExistingPages) {
+      pdf.addPage();
+    }
+    const imgData = canvas.toDataURL('image/png');
+    pdf.addImage(imgData, 'PNG', offsetX, offsetY, renderW, renderH, undefined, 'FAST');
+    return 1;
+  }
+
+  // Tall page: slice across A4 pages at full usable width with 1:1 aspect ratio
+  const fullCtx = canvas.getContext('2d');
+  const marginMm = 4;
+  const usableW = pdfWidth - marginMm * 2; // 202 mm
+  const usableH = pdfHeight - marginMm * 2; // 289 mm
   const pxPerMm = canvas.width / usableW;
   const maxPageSlicePx = Math.floor(usableH * pxPerMm);
 
   let yOffsetPx = 0;
-  let pageIndex = 0;
+  let pagesAdded = 0;
 
-  while (yOffsetPx < canvas.height - 10) {
+  while (yOffsetPx < canvas.height - 20) {
     const remainingPx = canvas.height - yOffsetPx;
     let sliceHeightPx = remainingPx;
 
     if (remainingPx > maxPageSlicePx) {
       const idealCutY = yOffsetPx + maxPageSlicePx;
-      const minCutY = yOffsetPx + Math.floor(maxPageSlicePx * 0.72);
+      const minCutY = yOffsetPx + Math.floor(maxPageSlicePx * 0.65);
+
+      // Prefer a DOM block boundary inside [minCutY, idealCutY], refined with clean row scan
+      let targetCutY = idealCutY;
+      const matchingBlocks = blockBreakYsPx.filter((by) => by >= minCutY && by <= idealCutY);
+      if (matchingBlocks.length > 0) {
+        targetCutY = matchingBlocks[matchingBlocks.length - 1];
+      }
+
       const safeCutY = fullCtx
-        ? findCleanHorizontalCutRow(fullCtx, canvas.width, idealCutY, minCutY)
-        : idealCutY;
+        ? findCleanHorizontalCutRow(fullCtx, canvas.width, targetCutY, minCutY)
+        : targetCutY;
       sliceHeightPx = Math.max(200, safeCutY - yOffsetPx);
     }
 
@@ -576,34 +534,97 @@ export async function exportContainerToSmartA4Pdf(options: {
         sliceHeightPx
       );
 
-      const sliceImg = pageCanvas.toDataURL('image/jpeg', 0.96);
+      const sliceImg = pageCanvas.toDataURL('image/png');
       const sliceMmH = sliceHeightPx / pxPerMm;
 
-      if (pageIndex > 0) {
+      if (hasExistingPages || pagesAdded > 0) {
         pdf.addPage();
       }
-      pdf.addImage(sliceImg, 'JPEG', marginMm, marginMm, usableW, sliceMmH, undefined, 'FAST');
+      pdf.addImage(sliceImg, 'PNG', marginMm, marginMm, usableW, sliceMmH, undefined, 'FAST');
+      pagesAdded++;
     }
 
     yOffsetPx += sliceHeightPx;
-    pageIndex++;
+  }
+
+  return pagesAdded;
+}
+
+/**
+ * Exports an array of A4 page elements into a crisp, distortion-free A4 portrait PDF.
+ */
+export async function exportReportPagesToA4Pdf(options: {
+  pageIds: string[];
+  fileName: string;
+  onPageProgress?: (pageIndex: number, totalPages: number) => void;
+}): Promise<void> {
+  const { pageIds, fileName, onPageProgress } = options;
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+    compress: true,
+  });
+
+  let addedPages = 0;
+
+  for (let i = 0; i < pageIds.length; i++) {
+    if (onPageProgress) {
+      onPageProgress(i + 1, pageIds.length);
+    }
+
+    const pageId = pageIds[i];
+    const pageEl = document.getElementById(pageId);
+    if (!pageEl) {
+      console.warn(`[PDF Export] Element with id "${pageId}" not found in DOM, skipping.`);
+      continue;
+    }
+
+    try {
+      const { canvas, blockBreakYsPx } = await captureElementToCleanCanvas(pageEl, 1120, true, 2.5);
+      addedPages += appendCanvasToA4Pdf(pdf, canvas, blockBreakYsPx, addedPages > 0, true);
+    } catch (pageErr) {
+      console.error(`[PDF Export] Error rendering page "${pageId}":`, pageErr);
+    }
+  }
+
+  if (addedPages === 0) {
+    throw new Error('Karne sayfaları bulunamadı veya görselleştirilemedi. Lütfen karneyi ekranda açıp tekrar deneyiniz.');
   }
 
   pdf.save(fileName);
 }
 
 /**
+ * Exports a single tall report card container (e.g. SporcuKarnesiView #sporcu-karne-print-area)
+ * into a multi-page A4 PDF using smart whitespace row detection so text and charts are never sliced mid-line.
+ */
+export async function exportContainerToSmartA4Pdf(options: {
+  containerEl: HTMLElement;
+  fileName: string;
+}): Promise<void> {
+  const { containerEl, fileName } = options;
+
+  const { canvas, blockBreakYsPx } = await captureElementToCleanCanvas(containerEl, 1120, false, 2.5);
+
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+    compress: true,
+  });
+
+  appendCanvasToA4Pdf(pdf, canvas, blockBreakYsPx, false, false);
+  pdf.save(fileName);
+}
+
+/**
  * Builder class for generating a single combined multi-athlete A4 PDF
- * where each athlete's 7-page report card is captured and appended sequentially.
+ * where each athlete's report pages are captured and appended sequentially.
  */
 export class BatchA4PdfBuilder {
   private pdf: jsPDF;
   private addedPages: number = 0;
-  private readonly pdfWidth: number;
-  private readonly pdfHeight: number;
-  private readonly marginMm: number = 0; // Set margin to 0 for full-page fill
-  private readonly availW: number;
-  private readonly availH: number;
 
   constructor() {
     this.pdf = new jsPDF({
@@ -612,10 +633,6 @@ export class BatchA4PdfBuilder {
       format: 'a4',
       compress: true,
     });
-    this.pdfWidth = this.pdf.internal.pageSize.getWidth();
-    this.pdfHeight = this.pdf.internal.pageSize.getHeight();
-    this.availW = this.pdfWidth; // Use full page width
-    this.availH = this.pdfHeight; // Use full page height
   }
 
   async appendReportPages(
@@ -635,16 +652,14 @@ export class BatchA4PdfBuilder {
       }
 
       try {
-        // Enforce A4 aspect ratio for capture
-        const { canvas } = await captureElementToCleanCanvas(pageEl, 1040, true);
-        const imgData = canvas.toDataURL('image/jpeg', 0.95);
-        
-        if (this.addedPages > 0) {
-          this.pdf.addPage();
-        }
-        // Fill full page dimensions (margins are 0)
-        this.pdf.addImage(imgData, 'JPEG', 0, 0, this.pdfWidth, this.pdfHeight, undefined, 'FAST');
-        this.addedPages++;
+        const { canvas, blockBreakYsPx } = await captureElementToCleanCanvas(pageEl, 1120, true, 2.0);
+        this.addedPages += appendCanvasToA4Pdf(
+          this.pdf,
+          canvas,
+          blockBreakYsPx,
+          this.addedPages > 0,
+          true
+        );
       } catch (pageErr) {
         console.error(`[Batch PDF] Error capturing page "${pageId}":`, pageErr);
       }
@@ -681,7 +696,7 @@ export async function exportPageElementToJpegBlob(
   element: HTMLElement,
   quality: number = 0.95
 ): Promise<Blob> {
-  const { canvas } = await captureElementToCleanCanvas(element, 1040, true);
+  const { canvas } = await captureElementToCleanCanvas(element, 1120, false, 2.5);
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (blob) => {
@@ -753,5 +768,92 @@ export async function downloadPagesAsJpegZip(options: {
   });
   downloadBlob(zipBlob, zipFileName);
 }
+
+/**
+ * Generates an A4 PDF Blob from a list of report page element IDs.
+ */
+export async function generateReportPagesToPdfBlob(options: {
+  pageIds: string[];
+  onPageProgress?: (pageIndex: number, totalPages: number) => void;
+}): Promise<Blob> {
+  const { pageIds, onPageProgress } = options;
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+    compress: true,
+  });
+
+  let addedPages = 0;
+  for (let i = 0; i < pageIds.length; i++) {
+    if (onPageProgress) {
+      onPageProgress(i + 1, pageIds.length);
+    }
+    const pageId = pageIds[i];
+    const pageEl = document.getElementById(pageId);
+    if (!pageEl) continue;
+    try {
+      const { canvas, blockBreakYsPx } = await captureElementToCleanCanvas(pageEl, 1120, true, 2.0);
+      addedPages += appendCanvasToA4Pdf(pdf, canvas, blockBreakYsPx, addedPages > 0, true);
+    } catch (err) {
+      console.error(`[PDF Blob] Error capturing page ${pageId}:`, err);
+    }
+  }
+  return pdf.output('blob');
+}
+
+/**
+ * Bundles multiple athlete PDF report cards into a single ZIP archive named after the sports school.
+ */
+export async function downloadReportsAsPdfZip(options: {
+  reports: { athleteName: string; pageIds: string[] }[];
+  zipFileName: string;
+  onProgress?: (current: number, total: number, athleteName: string, status: string) => void;
+}): Promise<void> {
+  const { reports, zipFileName, onProgress } = options;
+  const zip = new JSZip();
+  let addedCount = 0;
+
+  for (let i = 0; i < reports.length; i++) {
+    const rep = reports[i];
+    if (onProgress) {
+      onProgress(i + 1, reports.length, rep.athleteName, `Sporcu ${i + 1}/${reports.length}: ${rep.athleteName} PDF hazırlanıyor...`);
+    }
+
+    try {
+      const pdfBlob = await generateReportPagesToPdfBlob({
+        pageIds: rep.pageIds,
+        onPageProgress: (pIdx, total) => {
+          if (onProgress) {
+            onProgress(i + 1, reports.length, rep.athleteName, `${rep.athleteName} · Sayfa ${pIdx}/${total}`);
+          }
+        },
+      });
+
+      const safeName = rep.athleteName.replace(/[\/\\?%*:|"<>]/g, '_').trim();
+      const pdfFileName = `${safeName}.pdf`;
+      zip.file(pdfFileName, pdfBlob);
+      addedCount++;
+    } catch (err) {
+      console.error(`[PDF ZIP] Error generating PDF for ${rep.athleteName}:`, err);
+    }
+  }
+
+  if (addedCount === 0) {
+    throw new Error('Hiçbir sporcu PDF karnesi oluşturulamadı.');
+  }
+
+  if (onProgress) {
+    onProgress(reports.length, reports.length, 'Tamamlanıyor', 'ZIP arşivi oluşturuluyor...');
+  }
+
+  const zipBlob = await zip.generateAsync({
+    type: 'blob',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+  downloadBlob(zipBlob, zipFileName);
+}
+
 
 

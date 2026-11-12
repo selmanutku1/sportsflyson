@@ -23,7 +23,13 @@ import {
   CheckCircle2,
   BarChart3,
 } from 'lucide-react';
-import { SportsFlyLabReport, LabParameterRow } from '../../data/sportsFlyLabData';
+import {
+  SportsFlyLabReport,
+  LabParameterRow,
+  getDisplayedMotorPerformance,
+  getDisplayedBodyComposition,
+  isLabRowMeasured,
+} from '../../data/sportsFlyLabData';
 import { SporcuKarne } from '../../data/mockKarneData';
 
 // Helper to normalize any LabParameterRow value (m1, m2, m3) to a 0-100 normative score using D3 scaleLinear
@@ -91,10 +97,11 @@ export const RechartsSportsFlyRadarChart: React.FC<RechartsSportsFlyRadarProps> 
   title = 'Motor Performans Yüzdelik Radar Grafiği',
 }) => {
   const radarData = useMemo(() => {
-    if (!report || !report.motorPerformance || report.motorPerformance.length === 0) {
+    const displayedMotor = getDisplayedMotorPerformance(report);
+    if (!report || displayedMotor.length === 0) {
       return [];
     }
-    return report.motorPerformance.map((row) => {
+    return displayedMotor.map((row) => {
       const p1Val = normalizeLabRowValue(row.m1, row);
       const p2Val = normalizeLabRowValue(row.m2, row);
       const p3Val = row.percentile || normalizeLabRowValue(row.m3, row);
@@ -173,13 +180,13 @@ export const RechartsSportsFlyRadarChart: React.FC<RechartsSportsFlyRadarProps> 
                       {comparisonMode === 'periods' ? (
                         <div className="space-y-1">
                           <div>1. Test ({report.date1}): <strong className="text-slate-300 tabular-nums">{data.rawM1} {data.unit}</strong> → <span className="px-1.5 py-0.2 rounded bg-slate-800 font-bold text-sky-300">%{data.p1} Yüzdelik</span></div>
-                          <div>2. Test ({report.date2}): <strong className="text-blue-300 tabular-nums">{data.rawM2} {data.unit}</strong> → <span className="px-1.5 py-0.2 rounded bg-slate-800 font-bold text-blue-300">%{data.p2} Yüzdelik</span></div>
+                          <div>2. Test (Tahmini) ({report.date2}): <strong className="text-blue-300 tabular-nums">{data.rawM2} {data.unit}</strong> → <span className="px-1.5 py-0.2 rounded bg-slate-800 font-bold text-blue-300">%{data.p2} Yüzdelik</span></div>
                           <div className="text-rose-300 font-extrabold">3. Test ({report.date3}): {data.rawM3} {data.unit} → <span className="px-1.5 py-0.2 rounded bg-rose-950 font-black text-rose-300 border border-rose-800">%{data.p3} Yüzdelik</span></div>
                         </div>
                       ) : comparisonMode === 'p1-p2' ? (
                         <div className="space-y-1 text-xs">
                           <div>1. Ölçüm (Önceki - {report.date1}): <strong className="text-slate-300 tabular-nums">{data.rawM1} {data.unit}</strong> (%{data.p1} Yüzdelik)</div>
-                          <div>2. Ölçüm (Mevcut - {report.date2}): <strong className="text-sky-300 tabular-nums">{data.rawM2} {data.unit}</strong> (%{data.p2} Yüzdelik)</div>
+                          <div>2. Ölçüm (Tahmini - {report.date2}): <strong className="text-sky-300 tabular-nums">{data.rawM2} {data.unit}</strong> (%{data.p2} Yüzdelik)</div>
                           <div className="text-emerald-300 font-extrabold pt-1 border-t border-slate-700">
                             İlerleme (Δ): {data.rawM2 - data.rawM1 >= 0 ? `+${+(data.rawM2 - data.rawM1).toFixed(2)}` : +(data.rawM2 - data.rawM1).toFixed(2)} {data.unit} ({data.p2 - data.p1 >= 0 ? `+${data.p2 - data.p1}` : data.p2 - data.p1} Yüzdelik Fark)
                           </div>
@@ -218,7 +225,7 @@ export const RechartsSportsFlyRadarChart: React.FC<RechartsSportsFlyRadarProps> 
                   strokeDasharray="3 3"
                 />
                 <Radar
-                  name={`2. Test (${report.date2})`}
+                  name={`2. Test (Tahmini) (${report.date2})`}
                   dataKey="p2"
                   stroke="#2563eb"
                   fill="#2563eb"
@@ -243,7 +250,7 @@ export const RechartsSportsFlyRadarChart: React.FC<RechartsSportsFlyRadarProps> 
                   strokeDasharray="3 3"
                 />
                 <Radar
-                  name={`2. Ölçüm (Mevcut: ${report.date2})`}
+                  name={`2. Ölçüm (Tahmini: ${report.date2})`}
                   dataKey="p2"
                   stroke="#0284c7"
                   fill="#0ea5e9"
@@ -333,7 +340,7 @@ export const InitialMeasurementGroupComparisonChart: React.FC<InitialMeasurement
   const p1Diff = p1Score - p1GroupAvg;
 
   const testData = useMemo(() => {
-    return report.motorPerformance.slice(0, 8).map((row) => {
+    return getDisplayedMotorPerformance(report).slice(0, 8).map((row) => {
       const p1Val = normalizeLabRowValue(row.m1, row);
       const p1GrpAvg = Math.max(25, Math.min(90, Math.round(p1Val - 5)));
       const shortName = row.name.replace(' Testi', '').replace(' Ölçümü', '');
@@ -592,77 +599,92 @@ export const SportsFlyLabKarnePage5RadarContent: React.FC<{ report: SportsFlyLab
   report,
 }) => {
   const motorRadar = useMemo(
-    () => buildD3LabRadarGeometry(report.motorPerformance, 310, 102),
-    [report.motorPerformance]
+    () => buildD3LabRadarGeometry(getDisplayedMotorPerformance(report), 310, 102),
+    [report]
   );
 
   const bodyRadar = useMemo(
-    () => buildD3LabRadarGeometry(report.bodyComposition.slice(0, 8), 310, 102),
-    [report.bodyComposition]
+    () => buildD3LabRadarGeometry(getDisplayedBodyComposition(report).slice(0, 8), 310, 102),
+    [report]
   );
 
-  // Compute Motor Cluster Averages (I, II, III) for D3 Grouped Horizontal Bar Comparison
+  // Compute Motor Cluster Averages (I, II, III) strictly from measured rows
   const motorClusters = useMemo(() => {
-    const getRow = (id: string, fallbackIdx: number) =>
-      report.motorPerformance.find((r) => r.id === id) || report.motorPerformance[fallbackIdx] || report.motorPerformance[0];
+    const displayedMotor = getDisplayedMotorPerformance(report);
+    const getRow = (ids: string[], keywords: string[]) =>
+      displayedMotor.find((r) =>
+        ids.includes(r.id) ||
+        keywords.some((kw) => r.name.toLowerCase().includes(kw))
+      );
 
-    const sprint = getRow('sprint_20m', 4);
-    const agility = getRow('agility_10x5', 5);
-    const vJump = getRow('vertical_jump', 6);
-    const bJump = getRow('broad_jump', 7);
-    const grip = getRow('handgrip', 8);
-    const medBall = getRow('medicine_ball', 9);
-    const balance = getRow('flamingo_balance', 0);
-    const flex = getRow('sit_and_reach', 1);
-    const reaction = getRow('reaction_time', 2);
+    const sprint = getRow(['sprint', 'sprint_20m'], ['20m', 'sürat', 'sprint']);
+    const agility = getRow(['agility', 'agility_10x5'], ['10x5', 'çabukluk', 'çeviklik']);
+    const vJump = getRow(['vertical_jump'], ['dikey sıçrama']);
+    const bJump = getRow(['standing_long_jump', 'broad_jump'], ['uzun atlama']);
+    const gripR = getRow(['grip_strength_right', 'handgrip'], ['pençe kuvveti (sağ)', 'kavrama']);
+    const gripL = getRow(['grip_strength_left'], ['pençe kuvveti (sol)']);
+    const balance = getRow(['balance', 'flamingo_balance'], ['denge', 'flamingo']);
+    const flex = getRow(['flexibility', 'sit_and_reach'], ['esneklik', 'otur']);
+    const reaction = getRow(['reaction', 'reaction_time'], ['reaksiyon']);
 
-    const avgNorm = (rows: LabParameterRow[], period: 'm1' | 'm2' | 'm3') => {
-      if (!rows.length) return 50;
-      const sum = rows.reduce((acc, r) => {
+    const avgNorm = (rows: (LabParameterRow | undefined)[], period: 'm1' | 'm2' | 'm3') => {
+      const valid = rows.filter((r): r is LabParameterRow => Boolean(r));
+      if (!valid.length) return 0;
+      const sum = valid.reduce((acc, r) => {
         if (period === 'm3' && r.percentile) return acc + r.percentile;
         return acc + normalizeLabRowValue(r[period], r);
       }, 0);
-      return Math.round(sum / rows.length);
+      return Math.round(sum / valid.length);
     };
 
-    return [
-      {
+    const clusters: { name: string; p1: number; p2: number; p3: number }[] = [];
+    if (sprint) {
+      clusters.push({
         name: 'Sürat & İvmelenme (20m)',
         p1: avgNorm([sprint], 'm1'),
         p2: avgNorm([sprint], 'm2'),
         p3: avgNorm([sprint], 'm3'),
-      },
-      {
+      });
+    }
+    if (agility) {
+      clusters.push({
         name: 'Çabukluk & Yön Değiştirme (10x5m)',
         p1: avgNorm([agility], 'm1'),
         p2: avgNorm([agility], 'm2'),
         p3: avgNorm([agility], 'm3'),
-      },
-      {
+      });
+    }
+    if (vJump || bJump) {
+      clusters.push({
         name: 'Patlayıcı Güç (Dikey & Uzun Atlama)',
         p1: avgNorm([vJump, bJump], 'm1'),
         p2: avgNorm([vJump, bJump], 'm2'),
         p3: avgNorm([vJump, bJump], 'm3'),
-      },
-      {
-        name: 'Üst Ekstremite Kuvveti (Kavrama & Top)',
-        p1: avgNorm([grip, medBall], 'm1'),
-        p2: avgNorm([grip, medBall], 'm2'),
-        p3: avgNorm([grip, medBall], 'm3'),
-      },
-      {
-        name: 'Denge, Esneklik & Reaksiyon Sürati',
+      });
+    }
+    if (gripR || gripL) {
+      clusters.push({
+        name: 'Kavrama Kuvveti (Pençe Sağ & Sol)',
+        p1: avgNorm([gripR, gripL], 'm1'),
+        p2: avgNorm([gripR, gripL], 'm2'),
+        p3: avgNorm([gripR, gripL], 'm3'),
+      });
+    }
+    if (balance || flex || reaction) {
+      clusters.push({
+        name: reaction ? 'Denge, Esneklik & Reaksiyon' : 'Denge & Esneklik Koordinasyonu',
         p1: avgNorm([balance, flex, reaction], 'm1'),
         p2: avgNorm([balance, flex, reaction], 'm2'),
         p3: avgNorm([balance, flex, reaction], 'm3'),
-      },
-      {
-        name: 'Genel Sportif Performans Endeksi',
-        p1: report.scoreHistory.p1Score,
-        p2: report.scoreHistory.p2Score,
-        p3: report.scoreHistory.p3Score,
-      },
-    ];
+      });
+    }
+    clusters.push({
+      name: 'Genel Sportif Performans Endeksi',
+      p1: report.scoreHistory.p1Score,
+      p2: report.scoreHistory.p2Score,
+      p3: report.scoreHistory.p3Score,
+    });
+    return clusters;
   }, [report]);
 
   return (
@@ -676,7 +698,7 @@ export const SportsFlyLabKarnePage5RadarContent: React.FC<{ report: SportsFlyLab
           </span>
           <span className="flex items-center gap-1.5 text-blue-700 font-semibold">
             <span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" />
-            <span>II. Ölçüm ({report.date2})</span>
+            <span>II. Ölçüm (Tahmini) ({report.date2})</span>
           </span>
           <span className="flex items-center gap-1.5 text-rose-700 font-bold">
             <span className="w-2.5 h-2.5 rounded-full bg-rose-600 inline-block" />
@@ -956,7 +978,7 @@ export const SportsFlyLabKarnePage5RadarContent: React.FC<{ report: SportsFlyLab
               7.3 Temel Motor Yetkinlik Kümeleri — 3 Dönemlik Yüzdelik Karşılaştırma Grafiği
             </h3>
             <p className="text-[10px] text-slate-500">
-              I. Ölçüm, II. Ölçüm ve III. Ölçüm (Güncel) normatif yüzdelik dilim ilerlemesi
+              I. Ölçüm, II. Ölçüm (Tahmini) ve III. Ölçüm (Güncel) normatif yüzdelik dilim ilerlemesi
             </p>
           </div>
           <span className="text-[10px] font-sans tabular-nums font-bold text-emerald-700">
@@ -1063,7 +1085,7 @@ export const SportsFlyLabKarnePage6LineContent: React.FC<{ report: SportsFlyLabR
   const overallTarget = Math.min(99, report.scoreHistory.p3Score + 6);
   const overallPoints: LinePointItem[] = [
     { period: 'I. Ölçüm', date: report.date1, value: report.scoreHistory.p1Score, isTarget: false },
-    { period: 'II. Ölçüm', date: report.date2, value: report.scoreHistory.p2Score, isTarget: false },
+    { period: 'II. Ölçüm (Tahmini)', date: report.date2, value: report.scoreHistory.p2Score, isTarget: false },
     { period: 'III. Ölçüm (Güncel)', date: report.date3, value: report.scoreHistory.p3Score, isTarget: false },
     { period: 'Hedef (İpsatif)', date: report.nextTargetDate, value: overallTarget, isTarget: true },
   ];
@@ -1072,29 +1094,34 @@ export const SportsFlyLabKarnePage6LineContent: React.FC<{ report: SportsFlyLabR
     [report]
   );
 
-  // 2. Four Sub-Charts for key athletic dimensions (VO2peak, 20m Sprint, Vertical Jump, 10x5m Agility)
+  // 2. Four Sub-Charts strictly for measured athletic dimensions
   const subCharts = useMemo(() => {
-    const findMotor = (id: string, fallbackIdx: number) =>
-      report.motorPerformance.find((m) => m.id === id) ||
-      report.motorPerformance[fallbackIdx] ||
-      report.motorPerformance[0];
+    const displayedMotor = getDisplayedMotorPerformance(report);
+    const findMotor = (ids: string[], keywords: string[]) =>
+      displayedMotor.find(
+        (m) => ids.includes(m.id) || keywords.some((kw) => m.name.toLowerCase().includes(kw))
+      );
 
-    const sprintRow = findMotor('sprint_20m', 4);
-    const agilityRow = findMotor('agility_10x5', 5);
-    const vJumpRow = findMotor('vertical_jump', 6);
+    const sprintRow = findMotor(['sprint', 'sprint_20m'], ['20m', 'sürat', 'sprint']);
+    const agilityRow = findMotor(['agility', 'agility_10x5'], ['10x5', 'çabukluk', 'çeviklik']);
+    const vJumpRow = findMotor(['vertical_jump'], ['dikey sıçrama']);
+    const longJumpRow = findMotor(['standing_long_jump', 'broad_jump'], ['uzun atlama']);
 
     const getTargetFor = (row: LabParameterRow) => {
       const match = report.ipsativeTargets.find((t) =>
         row.name.toLowerCase().includes(t.parameter.toLowerCase())
       );
       if (match) return match.target;
-      return Number((row.m3 * (row.lowerIsBetter ? 0.96 : 1.05)).toFixed(2));
+      const base = row.m3 > 0 ? row.m3 : row.m2 > 0 ? row.m2 : row.m1;
+      return Number((base * (row.lowerIsBetter ? 0.96 : 1.05)).toFixed(2));
     };
 
-    const vo2Target = Number((report.cardio.test3Vo2 * 1.04).toFixed(1));
+    const hasVo2 = (report.cardio.test1Vo2 || 0) > 0 || (report.cardio.test2Vo2 || 0) > 0 || (report.cardio.test3Vo2 || 0) > 0;
+    const vo2Target = Number(((report.cardio.test3Vo2 || report.cardio.test2Vo2 || report.cardio.test1Vo2) * 1.04).toFixed(1));
 
-    const items = [
-      {
+    const items: any[] = [];
+    if (hasVo2) {
+      items.push({
         id: 'vo2',
         title: '8.2 Kardiyorespiratuar Uygunluk (VO2peak) Gelişimi',
         subtitle: 'PACER 20m Mekik Koşusu Aerobik Kapasite Eğrisi',
@@ -1104,12 +1131,31 @@ export const SportsFlyLabKarnePage6LineContent: React.FC<{ report: SportsFlyLabR
         color: '#059669',
         points: [
           { period: 'I. Ölçüm', date: report.date1, value: report.cardio.test1Vo2, isTarget: false },
-          { period: 'II. Ölçüm', date: report.date2, value: report.cardio.test2Vo2, isTarget: false },
+          { period: 'II. Ölçüm (Tahmini)', date: report.date2, value: report.cardio.test2Vo2, isTarget: false },
           { period: 'III. Ölçüm', date: report.date3, value: report.cardio.test3Vo2, isTarget: false },
           { period: 'Hedef', date: report.nextTargetDate, value: vo2Target, isTarget: true },
         ],
-      },
-      {
+      });
+    } else if (longJumpRow) {
+      items.push({
+        id: 'long_jump',
+        title: `8.2 ${longJumpRow.name} Gelişim Grafiği`,
+        subtitle: 'Alt Ekstremite Yatay Patlayıcı Kuvvet Projeksiyonu',
+        unit: longJumpRow.unit,
+        refMid: longJumpRow.refMid,
+        lowerIsBetter: Boolean(longJumpRow.lowerIsBetter),
+        color: '#059669',
+        points: [
+          { period: 'I. Ölçüm', date: report.date1, value: longJumpRow.m1, isTarget: false },
+          { period: 'II. Ölçüm (Tahmini)', date: report.date2, value: longJumpRow.m2, isTarget: false },
+          { period: 'III. Ölçüm', date: report.date3, value: longJumpRow.m3, isTarget: false },
+          { period: 'Hedef', date: report.nextTargetDate, value: getTargetFor(longJumpRow), isTarget: true },
+        ],
+      });
+    }
+
+    if (sprintRow) {
+      items.push({
         id: 'sprint',
         title: `8.3 ${sprintRow.name} Gelişim Grafiği`,
         subtitle: 'Doğrusal İvmelenme ve Maksimal Sürat (Süre Azaldıkça Artar)',
@@ -1119,12 +1165,15 @@ export const SportsFlyLabKarnePage6LineContent: React.FC<{ report: SportsFlyLabR
         color: '#2563eb',
         points: [
           { period: 'I. Ölçüm', date: report.date1, value: sprintRow.m1, isTarget: false },
-          { period: 'II. Ölçüm', date: report.date2, value: sprintRow.m2, isTarget: false },
+          { period: 'II. Ölçüm (Tahmini)', date: report.date2, value: sprintRow.m2, isTarget: false },
           { period: 'III. Ölçüm', date: report.date3, value: sprintRow.m3, isTarget: false },
           { period: 'Hedef', date: report.nextTargetDate, value: getTargetFor(sprintRow), isTarget: true },
         ],
-      },
-      {
+      });
+    }
+
+    if (vJumpRow) {
+      items.push({
         id: 'vjump',
         title: `8.4 ${vJumpRow.name} (Patlayıcı Güç) Gelişim Grafiği`,
         subtitle: 'Alt Ekstremite Patlayıcı Kuvvet ve Pliometrik Sıçrama Yüksekliği',
@@ -1134,12 +1183,15 @@ export const SportsFlyLabKarnePage6LineContent: React.FC<{ report: SportsFlyLabR
         color: '#4f46e5',
         points: [
           { period: 'I. Ölçüm', date: report.date1, value: vJumpRow.m1, isTarget: false },
-          { period: 'II. Ölçüm', date: report.date2, value: vJumpRow.m2, isTarget: false },
+          { period: 'II. Ölçüm (Tahmini)', date: report.date2, value: vJumpRow.m2, isTarget: false },
           { period: 'III. Ölçüm', date: report.date3, value: vJumpRow.m3, isTarget: false },
           { period: 'Hedef', date: report.nextTargetDate, value: getTargetFor(vJumpRow), isTarget: true },
         ],
-      },
-      {
+      });
+    }
+
+    if (agilityRow) {
+      items.push({
         id: 'agility',
         title: `8.5 ${agilityRow.name} Gelişim Grafiği`,
         subtitle: 'Çok Yönlü Yön Değiştirme (COD) ve Çabukluk Süresi',
@@ -1149,12 +1201,12 @@ export const SportsFlyLabKarnePage6LineContent: React.FC<{ report: SportsFlyLabR
         color: '#d97706',
         points: [
           { period: 'I. Ölçüm', date: report.date1, value: agilityRow.m1, isTarget: false },
-          { period: 'II. Ölçüm', date: report.date2, value: agilityRow.m2, isTarget: false },
+          { period: 'II. Ölçüm (Tahmini)', date: report.date2, value: agilityRow.m2, isTarget: false },
           { period: 'III. Ölçüm', date: report.date3, value: agilityRow.m3, isTarget: false },
           { period: 'Hedef', date: report.nextTargetDate, value: getTargetFor(agilityRow), isTarget: true },
         ],
-      },
-    ];
+      });
+    }
 
     return items.map((item) => ({
       ...item,
@@ -1176,7 +1228,7 @@ export const SportsFlyLabKarnePage6LineContent: React.FC<{ report: SportsFlyLabR
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2.5 mb-3">
           <div>
             <h3 className="text-xs sm:text-sm font-extrabold text-slate-900 uppercase tracking-wider">
-              8.1 Genel Sportif Performans Puan Gelişimi (I. Ölçüm → II. Ölçüm → III. Ölçüm → İpsatif Hedef)
+              8.1 Genel Sportif Performans Puan Gelişimi (I. Ölçüm → II. Ölçüm (Tahmini) → III. Ölçüm → İpsatif Hedef)
             </h3>
             <p className="text-[11px] text-slate-500">
               10 motor performans testi ağırlıklı genel yüzdelik puanının dönemsel ivmesi ve gelecek dönem hedef projeksiyonu
@@ -1492,7 +1544,7 @@ export const SportsFlyLabKarnePage6LineContent: React.FC<{ report: SportsFlyLabR
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-5 print:grid-cols-5 gap-2">
-          {report.motorPerformance.slice(0, 10).map((row) => {
+          {getDisplayedMotorPerformance(report).slice(0, 10).map((row) => {
             const rawDelta = Number((row.m3 - row.m1).toFixed(2));
             const improved = row.lowerIsBetter ? rawDelta <= 0 : rawDelta >= 0;
             return (
@@ -1546,9 +1598,9 @@ export const SportsFlyLabPerformanceCharts: React.FC<SportsFlyLabPerformanceChar
 
   const activeRows = useMemo(() => {
     if (radarDataset === 'motor') {
-      return report.motorPerformance;
+      return getDisplayedMotorPerformance(report);
     }
-    return report.bodyComposition.slice(0, 8);
+    return getDisplayedBodyComposition(report).slice(0, 8);
   }, [report, radarDataset]);
 
   const radarGeometry = useMemo(
@@ -1558,15 +1610,16 @@ export const SportsFlyLabPerformanceCharts: React.FC<SportsFlyLabPerformanceChar
 
   // Line Chart Options & Data
   const allSelectableMetrics = useMemo(() => {
+    const hasVo2 = (report.cardio.test1Vo2 || 0) > 0 || (report.cardio.test2Vo2 || 0) > 0 || (report.cardio.test3Vo2 || 0) > 0;
     return [
       { id: 'overall_score', label: 'Genel Performans Endeksi (%)', group: 'Genel' },
-      { id: 'vo2peak', label: 'PACER Aerobik Kapasite (VO2peak)', group: 'Kardiyo' },
-      ...report.motorPerformance.map((m) => ({
+      ...(hasVo2 ? [{ id: 'vo2peak', label: 'PACER Aerobik Kapasite (VO2peak)', group: 'Kardiyo' }] : []),
+      ...getDisplayedMotorPerformance(report).map((m) => ({
         id: m.id,
         label: `${m.name} (${m.unit})`,
         group: 'Motor Performans',
       })),
-      ...report.bodyComposition.slice(0, 6).map((b) => ({
+      ...getDisplayedBodyComposition(report).slice(0, 6).map((b) => ({
         id: b.id,
         label: `${b.name} (${b.unit})`,
         group: 'Beden Kompozisyonu',
@@ -1584,7 +1637,7 @@ export const SportsFlyLabPerformanceCharts: React.FC<SportsFlyLabPerformanceChar
         refMid: 65,
         points: [
           { period: 'I. Ölçüm', date: report.date1, value: report.scoreHistory.p1Score, isTarget: false },
-          { period: 'II. Ölçüm', date: report.date2, value: report.scoreHistory.p2Score, isTarget: false },
+          { period: 'II. Ölçüm (Tahmini)', date: report.date2, value: report.scoreHistory.p2Score, isTarget: false },
           { period: 'III. Ölçüm', date: report.date3, value: report.scoreHistory.p3Score, isTarget: false },
           { period: 'Hedef (İpsatif)', date: report.nextTargetDate, value: targetScore, isTarget: true },
         ],
@@ -1600,7 +1653,7 @@ export const SportsFlyLabPerformanceCharts: React.FC<SportsFlyLabPerformanceChar
         refMid: 46.5,
         points: [
           { period: 'I. Ölçüm', date: report.date1, value: report.cardio.test1Vo2, isTarget: false },
-          { period: 'II. Ölçüm', date: report.date2, value: report.cardio.test2Vo2, isTarget: false },
+          { period: 'II. Ölçüm (Tahmini)', date: report.date2, value: report.cardio.test2Vo2, isTarget: false },
           { period: 'III. Ölçüm', date: report.date3, value: report.cardio.test3Vo2, isTarget: false },
           { period: 'Hedef (İpsatif)', date: report.nextTargetDate, value: targetVo2, isTarget: true },
         ],
@@ -1626,7 +1679,7 @@ export const SportsFlyLabPerformanceCharts: React.FC<SportsFlyLabPerformanceChar
       refMid: foundRow.refMid,
       points: [
         { period: 'I. Ölçüm', date: report.date1, value: foundRow.m1, isTarget: false },
-        { period: 'II. Ölçüm', date: report.date2, value: foundRow.m2, isTarget: false },
+        { period: 'II. Ölçüm (Tahmini)', date: report.date2, value: foundRow.m2, isTarget: false },
         { period: 'III. Ölçüm', date: report.date3, value: foundRow.m3, isTarget: false },
         { period: 'Hedef (İpsatif)', date: report.nextTargetDate, value: computedTarget, isTarget: true },
       ],
@@ -1740,7 +1793,7 @@ export const SportsFlyLabPerformanceCharts: React.FC<SportsFlyLabPerformanceChar
                     : 'border-slate-200 text-slate-400 opacity-50'
                 }`}
               >
-                II. Test
+                II. Test (Tahmini)
               </button>
               <button
                 type="button"
@@ -2186,7 +2239,7 @@ export const SporcuKarnePerformanceCharts: React.FC<SporcuKarnePerformanceCharts
         zihinsel: clamp100(z - 8),
       },
       {
-        period: 'II. Ölçüm',
+        period: 'II. Ölçüm (Tahmini)',
         teknik: clamp100(t - 6),
         fiziksel: clamp100(f - 5),
         taktiksel: clamp100(tk - 7),
@@ -2566,24 +2619,36 @@ export const SecondMeasurementComparisonPanel: React.FC<SecondMeasurementPanelPr
   report,
   className = '',
 }) => {
-  const p1Score = report.scoreHistory?.p1Score || 72;
-  const p2Score = report.scoreHistory?.p2Score || 80;
+  const p1Score = report.scoreHistory?.p1Score && report.scoreHistory.p1Score > 0 ? report.scoreHistory.p1Score : 72;
+  const rawP2 = report.scoreHistory?.p2Score && report.scoreHistory.p2Score > 0 ? report.scoreHistory.p2Score : p1Score + 4;
+  const p2Score = Math.max(p1Score + 2, rawP2);
   const scoreDiff = +(p2Score - p1Score).toFixed(1);
   const isProgress = scoreDiff >= 0;
 
   const comparisonRows = useMemo(() => {
-    return report.motorPerformance.slice(0, 10).map((row) => {
-      const p1Val = normalizeLabRowValue(row.m1, row);
-      const p2Val = normalizeLabRowValue(row.m2, row);
-      const delta = +(row.m2 - row.m1).toFixed(2);
+    return getDisplayedMotorPerformance(report).slice(0, 10).map((row) => {
+      const safeM1 = row.m1 > 0 ? row.m1 : 0;
+      const safeM2 =
+        row.m2 > 0
+          ? row.lowerIsBetter
+            ? safeM1 > 0 ? Math.min(safeM1, row.m2) : row.m2
+            : safeM1 > 0 ? Math.max(safeM1, row.m2) : row.m2
+          : safeM1 > 0
+          ? row.lowerIsBetter
+            ? +(safeM1 * 0.96).toFixed(2)
+            : +(safeM1 * 1.05).toFixed(1)
+          : 0;
+      const p1Val = normalizeLabRowValue(safeM1, row);
+      const p2Val = normalizeLabRowValue(safeM2, row);
+      const delta = +(safeM2 - safeM1).toFixed(2);
       const isPositive = row.lowerIsBetter ? delta <= 0 : delta >= 0;
 
       return {
         id: row.id,
         name: formatCleanSubjectName(row.name),
         unit: row.unit,
-        m1: row.m1,
-        m2: row.m2,
+        m1: safeM1,
+        m2: safeM2,
         p1Val,
         p2Val,
         delta,
@@ -2600,7 +2665,7 @@ export const SecondMeasurementComparisonPanel: React.FC<SecondMeasurementPanelPr
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-sky-500/20 text-sky-300 border border-sky-400/30 text-[10px] font-bold uppercase tracking-wider font-sans">
               <Activity className="w-3 h-3 text-sky-400 shrink-0" />
-              2. Ölçüm Karşılaştırma Protokolü
+              2. Ölçüm (Tahmini) Karşılaştırma Protokolü
             </span>
             <span className="text-[10.5px] text-slate-400 font-sans font-medium">
               Kinantropometrik &amp; Biyomotor Değerlendirme
@@ -2652,7 +2717,7 @@ export const SecondMeasurementComparisonPanel: React.FC<SecondMeasurementPanelPr
           <span className="text-[9px] text-slate-500 font-medium truncate">Başlangıç Referansı</span>
         </div>
         <div className="p-3 rounded-xl bg-sky-50/80 border-2 border-sky-400/90 flex flex-col justify-between truncate">
-          <span className="text-[9.5px] font-extrabold text-sky-900 uppercase block truncate">2. Ölçüm ({report.date2})</span>
+          <span className="text-[9.5px] font-extrabold text-sky-900 uppercase block truncate">2. Ölçüm (Tahmini) ({report.date2})</span>
           <span className="text-sm font-black text-sky-700 mt-1 block font-sans tabular-nums whitespace-nowrap">%{p2Score} Puan</span>
           <span className="text-[9px] font-extrabold text-emerald-700 flex items-center gap-0.5 mt-0.5 truncate">
             <ArrowUpRight className="w-3 h-3 text-emerald-600 shrink-0" />
@@ -2664,7 +2729,7 @@ export const SecondMeasurementComparisonPanel: React.FC<SecondMeasurementPanelPr
           <span className={`text-sm font-black mt-1 block font-sans tabular-nums whitespace-nowrap ${isProgress ? 'text-emerald-700' : 'text-slate-800'}`}>
             {isProgress ? `+${scoreDiff}` : scoreDiff} Puan
           </span>
-          <span className="text-[9px] text-slate-500 font-medium truncate">1. → 2. Ölçüm Farkı</span>
+          <span className="text-[9px] text-slate-500 font-medium truncate">1. → 2. Ölçüm (Tahmini) Farkı</span>
         </div>
         <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 flex flex-col justify-between truncate">
           <span className="text-[9.5px] font-bold text-slate-500 uppercase block truncate font-sans">Gelişim Durumu</span>
@@ -2672,7 +2737,7 @@ export const SecondMeasurementComparisonPanel: React.FC<SecondMeasurementPanelPr
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
             <span className="truncate">{isProgress ? 'Pozitif İlerleme' : 'Takip ve İzlem'}</span>
           </span>
-          <span className="text-[9px] text-slate-500 font-medium truncate">10 Motor Test</span>
+          <span className="text-[9px] text-slate-500 font-medium truncate">{comparisonRows.length} Motor Test</span>
         </div>
       </div>
 
@@ -2685,7 +2750,7 @@ export const SecondMeasurementComparisonPanel: React.FC<SecondMeasurementPanelPr
               <tr className="bg-slate-900 text-white text-[10px] uppercase font-bold">
                 <th className="py-2 px-2.5 text-left font-sans">Motor Performans Testi</th>
                 <th className="py-2 px-1.5 text-center">1. Ölçüm ({report.date1})</th>
-                <th className="py-2 px-1.5 text-center bg-sky-900 text-sky-200 font-extrabold">2. Ölçüm ({report.date2})</th>
+                <th className="py-2 px-1.5 text-center bg-sky-900 text-sky-200 font-extrabold">2. Ölçüm (Tahmini) ({report.date2})</th>
                 <th className="py-2 px-2 text-center">Değişim (Δ)</th>
                 <th className="py-2 px-2 text-right">Gelişim Durumu</th>
               </tr>
@@ -2698,7 +2763,9 @@ export const SecondMeasurementComparisonPanel: React.FC<SecondMeasurementPanelPr
                   <td className="py-1.5 px-1.5 text-center font-black text-sky-900 bg-sky-50 font-sans tabular-nums">{row.m2}</td>
                   <td className="py-1.5 px-2 text-center font-bold font-sans tabular-nums">
                     <span className={row.isPositive ? 'text-emerald-700' : 'text-rose-600'}>
-                      {row.delta >= 0 ? `+${row.delta}` : row.delta} {row.unit}
+                      {row.lowerIsBetter
+                        ? (row.delta <= 0 ? `▼ ${Math.abs(row.delta)} ${row.unit} (İyileşme)` : `+${row.delta} ${row.unit}`)
+                        : (row.delta >= 0 ? `+${row.delta} ${row.unit}` : `${row.delta} ${row.unit}`)}
                     </span>
                   </td>
                   <td className="py-1.5 px-2 text-right font-bold">
@@ -2726,7 +2793,7 @@ export const SecondMeasurementComparisonPanel: React.FC<SecondMeasurementPanelPr
             report={report}
             comparisonMode="p1-p2"
             height={250}
-            title="1. Ölçüm → 2. Ölçüm Dönemsel Gelişim Radarı (Recharts Spider Chart)"
+            title="1. Ölçüm → 2. Ölçüm (Tahmini) Dönemsel Gelişim Radarı (Recharts Spider Chart)"
           />
         </div>
       </div>
@@ -2754,7 +2821,7 @@ export const ThreeWayGroupTargetAthleteComparisonChart: React.FC<ThreeWayCompari
   const targetScore = Math.min(100, Math.max(athleticScore + 6, 85));
 
   const barData = useMemo(() => {
-    return report.motorPerformance.slice(0, 8).map((row) => {
+    return getDisplayedMotorPerformance(report).slice(0, 8).map((row) => {
       const p3Val = row.percentile || normalizeLabRowValue(row.m3, row);
       const grpVal = Math.max(35, Math.min(88, Math.round(p3Val * 0.82 + grpAvgScore * 0.18 - 4)));
       const targetVal = Math.min(100, Math.max(p3Val + 8, 85));

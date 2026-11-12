@@ -25,6 +25,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { fetchAndMergeGoogleUsersFromFirestore } from './data/googleUsersAccess';
 import { syncGoogleProfileData } from './services/userService';
 import { fetchCompanyProfileFromFirestore } from './services/companyProfileService';
+import { clearSportsFlyLegacyData } from './data/sportsFlyLabData';
 
 // Lazy-loaded view modules for instant initial load & code splitting
 import { DashboardView } from './components/views/DashboardView';
@@ -169,7 +170,7 @@ const ViewLoadingSkeleton: React.FC = () => (
 );
 
 export default function App() {
-  // Version-checker hook to prevent stale browser caches on new deployments
+  // Safe version-checker hook to keep cache fresh without abrupt reload loops
   useEffect(() => {
     const checkVersion = async () => {
       try {
@@ -182,8 +183,14 @@ export default function App() {
             if (!lastStored) {
               localStorage.setItem(storedVersionKey, data.timestamp.toString());
             } else if (Number(lastStored) !== data.timestamp) {
+              // Update stored timestamp
               localStorage.setItem(storedVersionKey, data.timestamp.toString());
-              window.location.reload();
+              // Only trigger a reload if we haven't already reloaded in this session for this version
+              const sessionKey = `sportsfly_v_reload_${data.timestamp}`;
+              if (typeof window !== 'undefined' && !sessionStorage.getItem(sessionKey)) {
+                sessionStorage.setItem(sessionKey, 'true');
+                console.info('[SportsFly] Yeni uygulama sürümü algılandı:', data.version || data.timestamp);
+              }
             }
           }
         }
@@ -193,14 +200,27 @@ export default function App() {
     };
 
     checkVersion();
-    const interval = setInterval(checkVersion, 60000); // Check every minute
+    const interval = setInterval(checkVersion, 120000); // Check every 2 minutes
+    
+    // Clear legacy data safely once on first load
+    try {
+      clearSportsFlyLegacyData();
+    } catch (e) {
+      console.warn('[SportsFly] Legacy data cleanup notice:', e);
+    }
+
     return () => clearInterval(interval);
   }, []);
 
   // Authentication State: Force true to ensure immediate access for admin users
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
 
-  const [isIntegrationActive, setIsIntegrationActive] = useState(false);
+  const [isIntegrationActive, setIsIntegrationActive] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('sportsfly_integration_active') === 'true';
+    }
+    return false;
+  });
   const [selectedIntegrationId, setSelectedIntegrationId] = useState<string | null>(null);
 
   const handleLoginSuccess = async (
@@ -231,6 +251,11 @@ export default function App() {
     }
     try {
       sessionStorage.setItem('sportsfly_auth_active', 'true');
+      const isIntegration = userObj.role === 'Entegrasyon Kullanıcısı' || userObj.role === 'LAB Kullanıcısı';
+      if (isIntegration) {
+        setIsIntegrationActive(true);
+        sessionStorage.setItem('sportsfly_integration_active', 'true');
+      }
       if (typeof BroadcastChannel !== 'undefined') {
         const ch = new BroadcastChannel('sportsfly_auth_channel');
         ch.postMessage({ type: 'LOGIN', role: userObj.role || freshProfile?.role });
@@ -392,7 +417,12 @@ export default function App() {
     };
   }, []);
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1024;
+    }
+    return true;
+  });
 
   React.useEffect(() => {
     let prevWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
@@ -433,6 +463,13 @@ export default function App() {
       setIsSidebarOpen(false);
     }
   };
+
+  // Sync currentPage with isIntegrationActive to prevent render loops
+  useEffect(() => {
+    if (isIntegrationActive && currentPage !== 'entegrasyonlar') {
+      setCurrentPage('entegrasyonlar');
+    }
+  }, [isIntegrationActive, currentPage]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -590,12 +627,6 @@ export default function App() {
   }, [currentPage, isAuthenticated]);
 
   const renderActiveView = () => {
-    // Force integration page if integration active
-    if (isIntegrationActive && currentPage !== 'entegrasyonlar') {
-      setCurrentPage('entegrasyonlar');
-      return <EntegrasyonlarView onNavigate={handlePageSelect} onLogout={handleLogout} isReadOnly={!isAuthenticated} />;
-    }
-
     // 0. Users registered/logged in via Google (except Super Admin selmanutkumarmara@gmail.com) can see Packages + Admin-enabled areas
     if (
       isGoogleRestrictedUser(userProfile?.role, userProfile?.email) &&
@@ -727,22 +758,18 @@ export default function App() {
     }
   };
 
-  if (!isAuthenticated && !isIntegrationActive) {
+  if (!isAuthenticated) {
     return <LoginView onLoginSuccess={handleLoginSuccess} />;
-  }
-
-  if (isIntegrationActive) {
-    return <EntegrasyonlarView onNavigate={handlePageSelect} onLogout={handleLogout} isReadOnly={!isAuthenticated} />;
   }
 
   return (
     <div className="h-screen h-[100dvh] print:h-auto print:overflow-visible print:static bg-slate-50 dark:bg-[#0b1320] text-slate-800 dark:text-slate-100 flex flex-col antialiased relative transition-colors duration-200 overflow-hidden">
-      {/* Real Approved User Database Push Notification Toast */}
-      <RealUserApprovedPushToast onNavigate={handlePageSelect} />
-      {/* Mobile/Desktop Instant Point Award Push Notification Toast */}
-      <PointEarnedPushToast onNavigate={handlePageSelect} />
-      {/* Mobile/Desktop Automatic Yoklama Reminder Push Toast */}
-      <ReminderPushToast onNavigate={handlePageSelect} />
+      {/* Push Notification Toasts with Error Isolation */}
+      <AppErrorBoundary fallbackTitle="Bildirim Servisi">
+        <RealUserApprovedPushToast onNavigate={handlePageSelect} />
+        <PointEarnedPushToast onNavigate={handlePageSelect} />
+        <ReminderPushToast onNavigate={handlePageSelect} />
+      </AppErrorBoundary>
 
       <div className="flex flex-1 overflow-hidden h-full print:h-auto print:overflow-visible print:block">
         {/* Sidebar */}

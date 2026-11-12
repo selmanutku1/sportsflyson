@@ -1162,10 +1162,12 @@ Yanıt Kuralları:
         },
       });
 
-      if (response.text) {
+      const text = response.text;
+
+      if (text) {
         res.json({
           success: true,
-          analysis: response.text,
+          analysis: text,
           modelUsed: 'gemini-3.8-flash',
           timestamp: new Date().toISOString(),
         });
@@ -1245,8 +1247,8 @@ GÖREV:
 Görseldeki tablonun sütun başlıklarını ve sporcu satırlarını dikkatlice tara.
 
 KRİTİK DÖNÜŞTÜRME KURALLARI:
-1. "Adı Soyadı": Sporcu ad ve soyadını Türkçe karakterlerle tam oku (örn: "Aslıhan Cengiz").
-2. "Doğum Tarihi": "GG.AA.YYYY" formatında oku (örn: "02.07.2010").
+1. "Adı Soyadı": Sporcu ad ve soyadını Türkçe karakterlerle tam oku.
+2. "Doğum Tarihi": "GG.AA.YYYY" formatında oku.
 3. "Boy (cm)": Tablodaki boy değerini sayısal float/integer olarak oku. Örn: "165,0" veya "165" -> 165.0. Kesinlikle başka bir sayı üretme, tablodaki gerçek sayıyı al.
 4. "Ağırlık (kg)": Sayısal float olarak oku (örn: "85,4" -> 85.4).
 5. "Flamingo Denge Testi":
@@ -1270,11 +1272,11 @@ Yanıt YALNIZCA geçerli bir JSON nesnesi olmalıdır:
 {
   "athletes": [
     {
-      "athleteName": "Aslıhan Cengiz",
-      "birthDate": "02.07.2010",
-      "gender": "Kadın",
-      "sportBranch": "Voleybol / Atletik Gelişim",
-      "clubName": "İSTANBUL ANADOLU OLİMPİK SPOR KULÜBÜ",
+      "athleteName": "Ad Soyad",
+      "birthDate": "GG.AA.YYYY",
+      "gender": "Kadın/Erkek",
+      "sportBranch": "Branş",
+      "clubName": "Kulüp",
       "height": 165.0,
       "weight": 85.4,
       "gripRight": 36.1,
@@ -1314,7 +1316,7 @@ Yanıt YALNIZCA geçerli bir JSON nesnesi olmalıdır:
           text: `Bu Excel ekran görüntüsündeki (${fileName}) sporcuları ve tüm ölçüm değerlerini kurallara göre tam oku ve JSON formatında döndür.`,
         };
 
-        const geminiRes = await geminiClient.models.generateContent({
+        const response = await geminiClient.models.generateContent({
           model: 'gemini-3.8-flash',
           contents: { parts: [imagePart, textPart] },
           config: {
@@ -1323,7 +1325,7 @@ Yanıt YALNIZCA geçerli bir JSON nesnesi olmalıdır:
           },
         });
 
-        const rawText = geminiRes.text || '{}';
+        const rawText = response.text || '{}';
         let parsed: any = {};
         try {
           parsed = JSON.parse(rawText);
@@ -1349,51 +1351,23 @@ Yanıt YALNIZCA geçerli bir JSON nesnesi olmalıdır:
           });
           return;
         }
-      } catch (geminiErr: any) {
-        console.warn('[Gemini Vision OCR API Warning]:', geminiErr?.message || geminiErr);
+      } catch (err: any) {
+        console.error('[OCR API Error]:', err);
+        res.status(500).json({
+          success: false,
+          error: `Gemini Vision API hatası: ${err?.message || 'Bilinmeyen bir hata oluştu.'}`,
+          athletes: []
+        });
+        return;
       }
+    } else {
+      res.status(503).json({
+        success: false,
+        error: 'Gemini API anahtarı (GEMINI_API_KEY) yapılandırılmamış.',
+        athletes: []
+      });
+      return;
     }
-
-    // Intelligent Fallback for sample / known athlete Excel screenshot
-    const fallbackAthlete = {
-      athleteName: 'Aslıhan Cengiz',
-      birthDate: '02.07.2010',
-      gender: 'Kadın',
-      sportBranch: 'Voleybol / Atletik Gelişim',
-      clubName: 'İSTANBUL ANADOLU OLİMPİK SPOR KULÜBÜ',
-      height: 165.0,
-      weight: 85.4,
-      gripRight: 36.1,
-      gripLeft: 36.1,
-      flamingo: 0.0,
-      sprint20m: 4.1,
-      flexibility: 25.4,
-      armSpeedRight: 195.0,
-      armSpeedLeft: 170.0,
-      standingLongJump: 107.0,
-      agility: 7.0,
-      verticalJump: 19.7,
-      tricepsSkinfold: 40.0,
-      bicepsSkinfold: 22.0,
-      iliacSkinfold: 32.0,
-      calfSkinfold: 45.0,
-      anneBoy: 161.0,
-      anneKilo: 80.0,
-      anneSporGecmisi: 'yok',
-      babaBoy: 196.0,
-      babaKilo: 110.0,
-      babaSporGecmisi: 'yok',
-      notes: 'Excel ekran görüntüsünden başarıyla doğrulandı.',
-    };
-
-    res.json({
-      success: true,
-      source: 'smart-ocr-fallback',
-      modelUsed: 'sportsfly-vision-engine',
-      fileName,
-      totalDetected: 1,
-      athletes: [fallbackAthlete],
-    });
   } catch (err: any) {
     console.error('[OCR Endpoint Global Error]:', err);
     res.status(500).json({
@@ -2092,7 +2066,7 @@ ${(report.motorPerformance || [])
           hour: '2-digit',
           minute: '2-digit',
         }),
-        source: 'gemini-ai',
+        source: 'gemini-3.8-flash',
       });
     } catch (err: any) {
       console.error('[SportsFly Lab AI Error]:', err);
@@ -2615,7 +2589,7 @@ Lütfen bu verileri analiz ederek önümüzdeki 6 ay içinde (0, 1, 2, 3, 4, 5 v
           },
         });
 
-        const aiResponse = await geminiAi.models.generateContent({
+        const response = await geminiAi.models.generateContent({
           model: 'gemini-3.8-flash',
           contents: promptText,
           config: {
@@ -2669,8 +2643,8 @@ Lütfen bu verileri analiz ederek önümüzdeki 6 ay içinde (0, 1, 2, 3, 4, 5 v
           },
         });
 
-        if (aiResponse && aiResponse.text) {
-          predictionResult = JSON.parse(aiResponse.text.trim());
+        if (response && response.text) {
+          predictionResult = JSON.parse(response.text.trim());
         }
       } catch (geminiErr) {
         console.warn('[Gemini AI Growth Prediction] Warning during API call, fallback to physiological curve engine:', geminiErr);

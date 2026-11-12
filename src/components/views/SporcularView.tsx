@@ -97,10 +97,7 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
   const [formBirthDate, setFormBirthDate] = useState('2012-05-15');
 
   // Pre-registration list mock
-  const [preRegistrations, setPreRegistrations] = useState([
-    { id: 'pr-1', name: 'Barış Koçak', email: 'baris.k@gmail.com', phone: '+90 530 111 22 33', facility: 'Saraçgym', branch: 'Basketbol', date: '09.09.2024' },
-    { id: 'pr-2', name: 'Ezgi Yılmaz', email: 'ezgiyilmaz@gmail.com', phone: '+90 535 999 88 77', facility: 'DigiMondi', branch: 'Voleybol', date: '08.09.2024' },
-  ]);
+  const [preRegistrations, setPreRegistrations] = useState<{ id: string; name: string; email: string; phone: string; facility: string; branch: string; date: string }[]>([]);
 
   // Invite link
   const [copiedLink, setCopiedLink] = useState(false);
