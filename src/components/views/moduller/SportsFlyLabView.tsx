@@ -62,6 +62,7 @@ import {
   Database,
   Camera,
   BookOpen,
+  ArrowUpDown,
 } from 'lucide-react';
 import { SportsFlyVectorMark } from '../../SportsFlyLogo';
 import {
@@ -114,6 +115,7 @@ import {
   deleteLabArchiveItem,
   applyBrandingToReport,
   applyBrandingToReports,
+  recalculateGroupAveragesAndRanks,
   createNewLabReportWithBranding,
   downloadSportsFlyLabExcelTemplate,
   downloadBatchSportsFlyLabExcelTemplate,
@@ -123,6 +125,7 @@ import {
   fetchGeminiLabRecommendations,
   generateAiForecastForLabReport,
   ensureDataConsistency,
+  evaluateMotorRowTargetAndStatus,
   getDisplayedMotorPerformance,
   getDisplayedBodyComposition,
   isLabRowMeasured,
@@ -401,7 +404,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
           birthDate: cleanBirth,
         };
       }
-      if (isStaleExpertComment(nextR.expertComment)) {
+      if (isStaleExpertComment(nextR.expertComment, nextR)) {
         reportsChanged = true;
         nextR = {
           ...nextR,
@@ -413,7 +416,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
     let archivesChanged = false;
     const updatedArchives = archived.map((arch) => {
-      if (isStaleExpertComment(arch.reportSnapshot?.expertComment)) {
+      if (isStaleExpertComment(arch.reportSnapshot?.expertComment, arch.reportSnapshot)) {
         archivesChanged = true;
         return {
           ...arch,
@@ -550,6 +553,15 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     }
   });
 
+  const [isIntraGroupComparisonEnabled, setIsIntraGroupComparisonEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('sportsfly_lab_intra_group_compare_v1') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [batchRankSortOrder, setBatchRankSortOrder] = useState<'asc' | 'desc'>('asc');
+
   const handleToggleTrainingPlanFrequency = () => {
     setShowTrainingPlanFrequency((prev) => {
       const next = !prev;
@@ -569,6 +581,31 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         localStorage.setItem('sportsfly_lab_show_training_cards_v1', String(next));
       } catch {
         // ignore
+      }
+      return next;
+    });
+  };
+
+  const handleToggleIntraGroupComparison = () => {
+    setIsIntraGroupComparisonEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('sportsfly_lab_intra_group_compare_v1', String(next));
+      } catch {
+        // ignore
+      }
+      if (next) {
+        const cohortCount =
+          selectedBatchIds.length > 1
+            ? selectedBatchIds.length
+            : batchReports.length > 1
+            ? batchReports.length
+            : reports.length;
+        notify(
+          `Grup İçi Kıyaslama aktif edildi: Grup ortalaması yalnızca gruptaki ${cohortCount} sporcu arasından hesaplanacak (karnede sıralama yazılmaz).`
+        );
+      } else {
+        notify('Grup İçi Kıyaslama kapatıldı: Standart grup ortalaması kullanılıyor.');
       }
       return next;
     });
@@ -1542,6 +1579,135 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     [batchReports, selectedBatchIds]
   );
 
+  const getBatchRowActiveScore = React.useCallback((rep: SportsFlyLabReport): number => {
+    const validMotorPcts = getDisplayedMotorPerformance(rep).map((m) => m.percentile || 50);
+    const avgPct =
+      validMotorPcts.length > 0
+        ? Math.round(validMotorPcts.reduce((a, b) => a + b, 0) / validMotorPcts.length)
+        : 74;
+    return rep.scoreHistory.p3Score > 0
+      ? rep.scoreHistory.p3Score
+      : rep.scoreHistory.p1Score > 0
+      ? rep.scoreHistory.p1Score
+      : rep.scoreHistory.p2Score > 0
+      ? rep.scoreHistory.p2Score
+      : avgPct;
+  }, []);
+
+  const batchIntraGroupRanks = React.useMemo(() => {
+    const cohort = selectedBatchReports.length > 0 ? selectedBatchReports : batchReports;
+    const sorted = [...cohort].sort((a, b) => {
+      const scoreDiff = getBatchRowActiveScore(b) - getBatchRowActiveScore(a);
+      if (scoreDiff !== 0) return scoreDiff;
+      return (a.athleteName || '').localeCompare(b.athleteName || '', 'tr');
+    });
+    const map = new Map<string, { rank: number; total: number; score: number }>();
+    sorted.forEach((rep, idx) => {
+      map.set(rep.id, {
+        rank: idx + 1,
+        total: sorted.length,
+        score: getBatchRowActiveScore(rep),
+      });
+    });
+    return map;
+  }, [selectedBatchReports, batchReports, getBatchRowActiveScore]);
+
+  const displayedBatchReports = React.useMemo(() => {
+    if (!isIntraGroupComparisonEnabled) return filteredBatchReports;
+    return [...filteredBatchReports].sort((a, b) => {
+      const ra = batchIntraGroupRanks.get(a.id)?.rank;
+      const rb = batchIntraGroupRanks.get(b.id)?.rank;
+      if (ra !== undefined && rb !== undefined) {
+        return batchRankSortOrder === 'asc' ? ra - rb : rb - ra;
+      }
+      if (ra !== undefined) return -1;
+      if (rb !== undefined) return 1;
+      return 0;
+    });
+  }, [isIntraGroupComparisonEnabled, filteredBatchReports, batchIntraGroupRanks, batchRankSortOrder]);
+
+  const batchLiveAuditSummary = React.useMemo(() => {
+    if (batchReports.length === 0) return null;
+    const activeRawRows = rawExcelSheets[activeExcelSheetIndex]?.rows;
+    const alignedRawRows =
+      activeRawRows && activeRawRows.length === batchReports.length ? activeRawRows : undefined;
+    return auditImportedAthletes(
+      batchReports,
+      batchSourceFileName || 'Toplu Sporcu Listesi',
+      alignedRawRows
+    );
+  }, [batchReports, batchSourceFileName, rawExcelSheets, activeExcelSheetIndex]);
+
+  // Seçili / yüklü toplu karne grubu içi kıyaslama havuzu (yalnızca aynı grup ortalaması, sıralama olmadan)
+  const intraGroupComparisonPool = React.useMemo(() => {
+    const syncFromActive = (list: SportsFlyLabReport[]) =>
+      list.map((b) => reports.find((r) => r.id === b.id) || b);
+
+    if (!isIntraGroupComparisonEnabled) {
+      return reports;
+    }
+
+    if (
+      selectedBatchReports.length > 1 &&
+      (selectedBatchReports.some((r) => r.id === currentReport.id) || activeLabTab === 'batch')
+    ) {
+      return syncFromActive(selectedBatchReports);
+    }
+
+    if (
+      batchReports.length > 1 &&
+      (batchReports.some((r) => r.id === currentReport.id) || activeLabTab === 'batch')
+    ) {
+      return syncFromActive(batchReports);
+    }
+
+    if (selectedBatchReports.length > 1 && reports.length <= selectedBatchReports.length + 2) {
+      return syncFromActive(selectedBatchReports);
+    }
+
+    const normClub = (currentReport.clubName || '').trim().toLocaleLowerCase('tr-TR');
+    const normBranch = (currentReport.sportBranch || '').trim().toLocaleLowerCase('tr-TR');
+    const sameClubAndBranch = reports.filter(
+      (r) =>
+        (r.clubName || '').trim().toLocaleLowerCase('tr-TR') === normClub &&
+        (r.sportBranch || '').trim().toLocaleLowerCase('tr-TR') === normBranch
+    );
+    if (sameClubAndBranch.length > 1) return sameClubAndBranch;
+
+    const sameClub = reports.filter(
+      (r) => (r.clubName || '').trim().toLocaleLowerCase('tr-TR') === normClub
+    );
+    if (sameClub.length > 1) return sameClub;
+
+    return reports.length > 0 ? reports : [currentReport];
+  }, [
+    isIntraGroupComparisonEnabled,
+    selectedBatchReports,
+    batchReports,
+    reports,
+    currentReport,
+    activeLabTab,
+  ]);
+
+  const intraGroupAvgScore = React.useMemo(() => {
+    const pool = intraGroupComparisonPool;
+    if (!pool || pool.length === 0) return currentReport.groupInfo?.groupAverageScore ?? 72;
+    const getScore = (r: SportsFlyLabReport): number => {
+      if (r.scoreHistory?.p3Score && r.scoreHistory.p3Score > 0) return r.scoreHistory.p3Score;
+      if (r.scoreHistory?.p2Score && r.scoreHistory.p2Score > 0) return r.scoreHistory.p2Score;
+      if (r.scoreHistory?.p1Score && r.scoreHistory.p1Score > 0) return r.scoreHistory.p1Score;
+      const motors = getDisplayedMotorPerformance(r);
+      if (motors.length > 0) {
+        return Math.round(
+          motors.reduce((acc, m) => acc + evaluateMotorRowTargetAndStatus(m).percentile, 0) /
+            motors.length
+        );
+      }
+      return 72;
+    };
+    return Math.round(pool.reduce((acc, r) => acc + getScore(r), 0) / pool.length);
+  }, [intraGroupComparisonPool, currentReport]);
+
   const handleToggleBatchSelectAll = () => {
     if (selectedBatchIds.length === batchReports.length) {
       setSelectedBatchIds([]);
@@ -1579,17 +1745,17 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       return branded;
     });
 
-    // Merge into main reports list without duplicates
+    // Grup içi kıyaslama aktifse grup ortalaması yalnızca bu toplu seçili sporcular içinde hesaplanır
+    const intraComputedBatch = recalculateGroupAveragesAndRanks(brandedBatch);
     const existingWithoutBatch = reports.filter(
       (r) => !brandedBatch.some((b) => b.id === r.id || b.athleteName === r.athleteName)
     );
-    const nextReports = applyBrandingToReports(
-      [...brandedBatch, ...existingWithoutBatch],
-      persistedBranding
-    );
+    const nextReports = isIntraGroupComparisonEnabled
+      ? [...intraComputedBatch, ...existingWithoutBatch]
+      : applyBrandingToReports([...brandedBatch, ...existingWithoutBatch], persistedBranding);
     setReports(nextReports);
     saveStoredLabReports(nextReports);
-    setSelectedReportId(brandedBatch[0].id);
+    setSelectedReportId(intraComputedBatch[0].id);
     setActiveLabTab('studio');
     setViewMode('all');
 
@@ -1661,9 +1827,12 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     }
 
     const persistedBranding = getStoredLabSchoolBranding();
-    const brandedBatch = selectedBatchReports.map((rep) =>
+    const rawBrandedBatch = selectedBatchReports.map((rep) =>
       applyBrandingToReport(rep, persistedBranding)
     );
+    const brandedBatch = isIntraGroupComparisonEnabled
+      ? recalculateGroupAveragesAndRanks(rawBrandedBatch)
+      : rawBrandedBatch;
 
     // Ensure all selected batch athletes are in `reports` so `currentReport` resolves each one as we loop
     const existingWithoutBatch = reports.filter(
@@ -2036,7 +2205,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       id: 'sportsfly-lab-page-5',
       pageNumber: pageNum++,
       title: 'İpsatif Hedefler & Uzman Değerlendirmesi',
-      subtitle: 'Bireysel Gelişim Hedefleri, Grup İçi Sıralama, AI ve Uzman Görüşü',
+      subtitle: 'Bireysel Gelişim Hedefleri, Normatif Değerlendirme ve Uzman Görüşü',
       fileName: `SportsFly_Lab_${safeName}_Sayfa_${pageNum - 1}_Uzman_Gorusu.jpg`,
     });
 
@@ -2219,24 +2388,78 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     }
   };
 
-  // Helper to compute position percentage (0..100%) on the reference scale bar
+  // Helper to compute position percentage (0..100%) on the reference scale bar for Motor Performance
+  // Aligned strictly to SVG zones: [red < refLow..refMid | amber/green around dashed line at 50% (refMid) | green >= refMid..refHigh]
   const computeScalePos = (val: number, row: LabParameterRow): number => {
     if (!Number.isFinite(val)) return 50;
-    const min = row.refLow * 0.75;
-    const max = row.refHigh * 1.15;
-    if (max === min) return 50;
-    let pct = ((val - min) / (max - min)) * 100;
-    if (!Number.isFinite(pct)) return 50;
+    const low = row.refLow;
+    const mid = row.refMid;
+    const high = row.refHigh;
+    if (high <= low) return 50;
+
     if (row.lowerIsBetter) {
-      pct = 100 - pct;
+      // Lower is better -> left=high (worst, 4..22%), middle=mid (Hedef at 50%), right=low (best, 82..96%)
+      if (val >= high) {
+        const overflow = Math.min(1, (val - high) / Math.max(0.5, (high - low) * 0.6));
+        return Math.max(4, Math.min(22, 22 - overflow * 18));
+      }
+      if (val >= mid) {
+        const ratio = (high - val) / Math.max(0.05, high - mid);
+        return 22 + ratio * 28; // 22% -> 50%
+      }
+      if (val >= low) {
+        const ratio = (mid - val) / Math.max(0.05, mid - low);
+        return 50 + ratio * 32; // 50% -> 82%
+      }
+      const underflow = Math.min(1, (low - val) / Math.max(0.5, (high - low) * 0.5));
+      return Math.max(82, Math.min(96, 82 + underflow * 14));
     }
-    return Math.max(4, Math.min(96, pct));
+
+    // Higher is better -> left=low (22%), middle=mid (Hedef at 50%), right=high (82%)
+    if (val <= low) {
+      const underflow = Math.min(1, (low - val) / Math.max(0.5, (high - low) * 0.6));
+      return Math.max(4, Math.min(22, 22 - underflow * 18));
+    }
+    if (val <= mid) {
+      const ratio = (val - low) / Math.max(0.05, mid - low);
+      return 22 + ratio * 28; // 22% -> 50%
+    }
+    if (val <= high) {
+      const ratio = (val - mid) / Math.max(0.05, high - mid);
+      return 50 + ratio * 32; // 50% -> 82%
+    }
+    const overflow = Math.min(1, (val - high) / Math.max(0.5, (high - low) * 0.5));
+    return Math.max(82, Math.min(96, 82 + overflow * 14));
+  };
+
+  // Helper to compute position percentage (0..100%) for Body Composition SVG (center green zone 22%..78%)
+  const computeBodyScalePos = (val: number, row: LabParameterRow): number => {
+    if (!Number.isFinite(val)) return 50;
+    const low = row.refLow;
+    const mid = row.refMid;
+    const high = row.refHigh;
+    if (high <= low) return 50;
+
+    if (val <= low) {
+      const underflow = Math.min(1, (low - val) / Math.max(1, (high - low) * 0.7));
+      return Math.max(4, Math.min(22, 22 - underflow * 18));
+    }
+    if (val <= mid) {
+      const ratio = (val - low) / Math.max(0.05, mid - low);
+      return 22 + ratio * 28; // 22% -> 50%
+    }
+    if (val <= high) {
+      const ratio = (val - mid) / Math.max(0.05, high - mid);
+      return 50 + ratio * 28; // 50% -> 78%
+    }
+    const overflow = Math.min(1, (val - high) / Math.max(1, (high - low) * 0.7));
+    return Math.max(78, Math.min(96, 78 + overflow * 18));
   };
 
   // Status text color & badge helper (clean clinical presentation with high contrast)
   const getStatusBadge = (status: string) => {
     const s = (status || '').toLowerCase();
-    if (s === 'mükemmel' || s === 'iyi' || s === 'yüksek') {
+    if (s === 'mükemmel' || s === 'iyi') {
       return 'bg-emerald-50 text-emerald-900 border border-emerald-300 font-extrabold px-2.5 py-0.5 rounded-full text-[10.5px] inline-block shadow-2xs';
     }
     if (s === 'normal' || s === 'uzun' || s === 'optimal') {
@@ -2638,7 +2861,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       const row = getMeasuredRow(id);
       const rawPct = row?.percentile;
       if (typeof rawPct === 'number' && Number.isFinite(rawPct) && rawPct > 0) {
-        return Math.max(68, Math.min(86, Math.round(rawPct)));
+        return Math.max(3, Math.min(99, Math.round(rawPct)));
       }
       return defaultPct;
     };
@@ -2791,7 +3014,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         subtitle: 'Üst Ekstremite İzometrik Kuvvet (Sağ / Sol)',
         m1: getMeasuredM1('rightGrip') ?? getMeasuredM1('leftGrip'),
         m2: getMeasuredM2('rightGrip') ?? getMeasuredM2('leftGrip'),
-        displayVal: `${rightGrip ?? '—'} / ${leftGrip ?? '—'}`,
+        displayVal: `Sağ ${rightGrip ?? '—'} / Sol ${leftGrip ?? '—'}`,
         unit: 'kg',
         pct: getIdealCalloutPct('rightGrip', 82),
         sd: getMeasuredSd('rightGrip'),
@@ -2802,11 +3025,13 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         code: '06',
         pinCode: '6',
         title: 'KOL SÜRAT TESTİ (TAP TEST)',
-        subtitle: 'Üst Ekstremite Motor Nöral Dokunma Hızı',
+        subtitle: getMeasuredRow('rightArmSpeed')?.lowerIsBetter
+          ? 'Üst Ekstremite Dokunma Süresi (Sağ / Sol)'
+          : '50 Sn Vuruş / Atım Sayısı (Sağ / Sol)',
         m1: getMeasuredM1('rightArmSpeed') ?? getMeasuredM1('leftArmSpeed'),
         m2: getMeasuredM2('rightArmSpeed') ?? getMeasuredM2('leftArmSpeed'),
-        displayVal: `${rightArmSpeed ?? '—'} / ${leftArmSpeed ?? '—'}`,
-        unit: 'dokunma',
+        displayVal: `Sağ ${rightArmSpeed ?? '—'} / Sol ${leftArmSpeed ?? '—'}`,
+        unit: getMeasuredRow('rightArmSpeed')?.unit || getMeasuredRow('leftArmSpeed')?.unit || 'atım',
         pct: getIdealCalloutPct('rightArmSpeed', 80),
         sd: getMeasuredSd('rightArmSpeed'),
         status: getMeasuredStatus('rightArmSpeed', 'Reaksiyon Hızı'),
@@ -3009,7 +3234,15 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       >
                         ANALİZ {item.code}
                       </span>
-                      <span className="text-[8px] font-sans tabular-nums font-bold text-emerald-700 shrink-0">
+                      <span
+                        className={`text-[8px] font-sans tabular-nums font-bold shrink-0 ${
+                          item.status === 'desteklenmeli' || item.status === 'düşük' || item.status === 'yüksek'
+                            ? 'text-rose-700'
+                            : item.status === 'normal'
+                            ? 'text-amber-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
                         {item.status} · %{item.pct}
                       </span>
                     </div>
@@ -3497,7 +3730,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       <polyline points="372,198 430,190 462,190" fill="none" stroke={effectivePrimaryHex} strokeWidth="1.5" />
                       <rect x="462" y="174" width="90" height="32" rx="6" fill={effectivePrimaryHex} stroke="#ffffff" strokeWidth="1.2" />
                       <text x="507" y="188" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="900" fontFamily="sans-serif" className="text-[7.5px] font-sans font-black fill-white/90">
-                        05 PENÇE KUVVETİ
+                        05 PENÇE (SĞ / SL)
                       </text>
                       <text x="507" y="201" textAnchor="middle" fill="#ffffff" fontSize="9.5" fontWeight="900" fontFamily="sans-serif" className="text-[9.5px] font-sans font-black fill-white">
                         {rightGrip ?? '—'} / {leftGrip ?? '—'} kg
@@ -3511,7 +3744,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       <polyline points="406,272 436,252 462,252" fill="none" stroke="#ea580c" strokeWidth="1.5" />
                       <rect x="462" y="236" width="90" height="32" rx="6" fill={effectivePrimaryHex} stroke="#ffffff" strokeWidth="1.2" />
                       <text x="507" y="250" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="900" fontFamily="sans-serif" className="text-[7.5px] font-sans font-black fill-white/90">
-                        06 KOL SÜRATİ
+                        06 KOL SÜRATİ (SĞ / SL)
                       </text>
                       <text x="507" y="263" textAnchor="middle" fill="#ffffff" fontSize="9.5" fontWeight="900" fontFamily="sans-serif" className="text-[9.5px] font-sans font-black fill-white">
                         {rightArmSpeed ?? '—'} / {leftArmSpeed ?? '—'}
@@ -3626,7 +3859,15 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       >
                         ANALİZ {item.code}
                       </span>
-                      <span className="text-[8px] font-sans tabular-nums font-bold text-emerald-700 shrink-0">
+                      <span
+                        className={`text-[8px] font-sans tabular-nums font-bold shrink-0 ${
+                          item.status === 'desteklenmeli' || item.status === 'düşük' || item.status === 'yüksek'
+                            ? 'text-rose-700'
+                            : item.status === 'normal'
+                            ? 'text-amber-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
                         {item.status} · %{item.pct}
                       </span>
                     </div>
@@ -3691,7 +3932,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               upperDetails.push(`Pençe Kuvveti (Sağ ${rightGrip ?? '—'} kg / Sol ${leftGrip ?? '—'} kg)`);
             }
             if (rightArmSpeed !== null || leftArmSpeed !== null) {
-              upperDetails.push(`Kol Sürat Testi (Sağ ${rightArmSpeed ?? '—'} / Sol ${leftArmSpeed ?? '—'} dokunma)`);
+              const armUnit = getMeasuredRow('rightArmSpeed')?.unit || getMeasuredRow('leftArmSpeed')?.unit || 'atım';
+              upperDetails.push(`Kol Sürat Testi (Sağ ${rightArmSpeed ?? '—'} / Sol ${leftArmSpeed ?? '—'} ${armUnit})`);
             }
 
             const skinParts: string[] = [];
@@ -3798,7 +4040,9 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     const p2Score = Math.max(p1Score + 2, currentReport.scoreHistory.p2Score || p1Score + 4);
     const p3Score = currentReport.scoreHistory.p3Score > 0 ? currentReport.scoreHistory.p3Score : p2Score;
     const nextGoalScore = Math.min(96, p3Score + 6);
-    const grpAvg = currentReport.groupInfo.groupAverageScore ?? 72;
+    const grpAvg = isIntraGroupComparisonEnabled
+      ? intraGroupAvgScore
+      : (currentReport.groupInfo.groupAverageScore ?? 72);
 
     return (
       <div
@@ -3903,12 +4147,18 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   {currentReport.date3 !== '—' ? '3. Ölçüm (Güncel)' : 'Mevcut Durum'}
                 </div>
                 <div className="text-xl font-black font-sans tabular-nums text-emerald-600 mt-0.5">%{p3Score}</div>
-                <div className="text-[9.5px] text-emerald-700 font-extrabold mt-0.5">İleri Düzey Gelişim</div>
+                <div className="text-[9.5px] text-emerald-700 font-extrabold mt-0.5">
+                  {p3Score >= 75 ? 'İleri Düzey Gelişim' : p3Score >= 50 ? 'Gelişim Sürecinde' : 'Temel Gelişim Odağı'}
+                </div>
               </div>
             </div>
 
             <p className="text-xs text-slate-700 leading-relaxed font-medium bg-white p-3 rounded-xl border border-emerald-200/60">
-              Gelişim yolculuğunda adım adım ilerliyorsun! Sporcumuz düzenli antrenman katılımı ve fiziki gayreti ile ilk dönemden bu yana fiziksel uygunluk ve motorik becerilerini istikrarlı bir şekilde yukarı taşımıştır.
+              {p3Score >= 75
+                ? 'Gelişim yolculuğunda güçlü bir performans sergiliyorsun! Sporcumuz düzenli antrenman katılımı ve fiziki gayreti ile yaş grubu normlarının üzerinde yer almaktadır.'
+                : p3Score >= 50
+                ? 'Gelişim yolculuğunda adım adım ilerliyorsun! Mevcut motorik profil yaş grubu standartlarına yakın seyretmekte olup hedeflenen drillerle üst seviyeye taşınacaktır.'
+                : 'Gelişim yolculuğumuzda temel kapasiteyi güçlendirme dönemindeyiz! Ölçümlerde belirlenen öncelikli alanlara odaklanan düzenli antrenman planı ile hızlı ilerleme hedeflenmektedir.'}
             </p>
 
             {/* Recharts Spider Chart for Parent Report */}
@@ -3926,11 +4176,17 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
           {/* Section 2 & 3: Measured Strengths & Development Focus */}
           {(() => {
             const measuredMotor = getDisplayedMotorPerformance(currentReport);
-            const sortedByPct = [...measuredMotor].sort((a, b) => (b.percentile || 0) - (a.percentile || 0));
-            const topStrengths = sortedByPct.slice(0, 3);
-            const devAreas = [...sortedByPct]
-              .filter((r) => !topStrengths.some((t) => t.id === r.id))
-              .sort((a, b) => (a.percentile || 0) - (b.percentile || 0))
+            const evaluatedMotor = measuredMotor.map((row) => ({
+              row,
+              evalRes: evaluateMotorRowTargetAndStatus(row),
+            }));
+            const topStrengths = evaluatedMotor
+              .filter((x) => x.evalRes.tier === 'reached')
+              .sort((a, b) => b.evalRes.percentile - a.evalRes.percentile)
+              .slice(0, 3);
+            const devAreas = evaluatedMotor
+              .filter((x) => x.evalRes.tier === 'needs_dev' || x.evalRes.tier === 'watch')
+              .sort((a, b) => a.evalRes.percentile - b.evalRes.percentile)
               .slice(0, 3);
 
             return (
@@ -3942,13 +4198,13 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       <span>Seni Öne Çıkaran Yönlerin</span>
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {topStrengths.map((row) => (
+                      {topStrengths.map(({ row, evalRes }) => (
                         <div key={row.id} className="p-3 rounded-xl bg-white border border-sky-200 shadow-2xs flex items-start gap-2.5">
                           <span className="w-2.5 h-2.5 rounded-full bg-sky-500 shrink-0 mt-1.5 inline-block" />
                           <div>
                             <div className="text-xs font-black text-slate-900">{row.name}</div>
                             <p className="text-[11px] text-slate-600 mt-1 leading-snug">
-                              Ölçüm sonucu ({row.m1} {row.unit}, %{row.percentile} yüzdelik) yaş grubunda güçlü seviyede yer alıyor.
+                              Ölçüm sonucu ({evalRes.activeVal} {row.unit}, %{evalRes.percentile} yüzdelik) yaş ve cinsiyet normlarına göre güçlü seviyede yer alıyor.
                             </p>
                           </div>
                         </div>
@@ -3964,13 +4220,17 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       <span>Birlikte Güçlendireceğimiz Alanlar</span>
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {devAreas.map((row) => (
+                      {devAreas.map(({ row, evalRes }) => (
                         <div key={row.id} className="p-3 rounded-xl bg-white border border-amber-200 shadow-2xs flex items-start gap-2.5">
                           <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0 mt-1.5 inline-block" />
                           <div>
                             <div className="text-xs font-black text-slate-900">{row.name}</div>
                             <p className="text-[11px] text-slate-600 mt-1 leading-snug">
-                              Bu alanda <strong className="text-slate-900 bg-amber-100/90 px-1.5 py-0.5 rounded font-black border border-amber-300 inline-block">gelişim potansiyelin var</strong>; hedef norm ({row.refMid} {row.unit}) için kademeli çalışmalarla yükselecek.
+                              Mevcut değer ({evalRes.activeVal} {row.unit}, %{evalRes.percentile}) için{' '}
+                              <strong className="text-slate-900 bg-amber-100/90 px-1.5 py-0.5 rounded font-black border border-amber-300 inline-block">
+                                {evalRes.tier === 'needs_dev' ? 'öncelikli gelişim odağı' : 'gelişim takibi'}
+                              </strong>{' '}
+                              gerekmektedir; hedef değer ({evalRes.targetValue} {row.unit}) için kademeli çalışmalarla yükselecektir.
                             </p>
                           </div>
                         </div>
@@ -4010,39 +4270,71 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
           </div>
 
           {/* Section 5: Yaş Grubuna Göre Konumun & Section 6: Branşınla Uyumun */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Section 5: Yaş Grubuna Göre Konumun */}
-            <div className="p-4 rounded-2xl border-2 border-slate-200 bg-slate-50 space-y-2">
-              <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight flex items-center gap-2 border-b border-slate-200 pb-2">
-                <span className="w-3 h-3 rounded-full bg-slate-800 inline-block" />
-                <span>Yaş Grubuna Göre Konumun (Üçlü Karşılaştırma)</span>
-              </h3>
-              <div className="p-3 rounded-xl bg-white border border-slate-200">
-                <div className="inline-block px-3 py-1 rounded-lg bg-emerald-100 text-emerald-950 font-bold text-xs mb-2">
-                  Grup Ortalamasının Üstünde
+          {(() => {
+            const branchRef = calculateBranchReferenceScore(currentReport);
+            const isAboveGroup = p3Score >= grpAvg + 4;
+            const isNearGroup = p3Score >= grpAvg - 5;
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Section 5: Yaş Grubuna Göre Konumun */}
+                <div className="p-4 rounded-2xl border-2 border-slate-200 bg-slate-50 space-y-2">
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight flex items-center gap-2 border-b border-slate-200 pb-2">
+                    <span className="w-3 h-3 rounded-full bg-slate-800 inline-block" />
+                    <span>Yaş Grubuna Göre Konumun (Üçlü Karşılaştırma)</span>
+                  </h3>
+                  <div className="p-3 rounded-xl bg-white border border-slate-200">
+                    <div
+                      className={`inline-block px-3 py-1 rounded-lg font-bold text-xs mb-2 ${
+                        isAboveGroup
+                          ? 'bg-emerald-100 text-emerald-950'
+                          : isNearGroup
+                          ? 'bg-amber-100 text-amber-950'
+                          : 'bg-rose-100 text-rose-950'
+                      }`}
+                    >
+                      {isAboveGroup
+                        ? 'Grup Ortalamasının Üstünde'
+                        : isNearGroup
+                        ? 'Grup Normuna Yakın / Takip'
+                        : 'Grup Normunun Altında (Desteklenmeli)'}
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      {isAboveGroup
+                        ? `Kendi yaş grubundaki referans değerlere göre genel performans seviyen grup ortalamasının (%${grpAvg}) belirgin şekilde üstünde (%${p3Score}) yer almaktadır.`
+                        : isNearGroup
+                        ? `Genel performans seviyen (%${p3Score}) yaş ve cinsiyet grup ortalamasına (%${grpAvg}) yakın seyretmektedir. Hedefli çalışmalarla üst dilime çıkış hedeflenmektedir.`
+                        : `Genel performans seviyen (%${p3Score}) yaş grubu referans ortalamasının (%${grpAvg}) altında yer almaktadır; bireysel gelişim alanlarına öncelik verilmesi önerilir.`}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Kendi yaş grubundaki arkadaşlarına göre genel performans seviyen grup ortalamasının (%{grpAvg}) belirgin şekilde üstünde yer almaktadır. Harika bir uyum ve çalışma disiplini sergiliyorsun!
-                </p>
-              </div>
-            </div>
 
-            {/* Section 6: Branşınla Uyumun */}
-            <div className="p-4 rounded-2xl border-2 border-slate-200 bg-slate-50 space-y-2">
-              <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight flex items-center gap-2 border-b border-slate-200 pb-2">
-                <span className="w-3 h-3 rounded-full bg-teal-600 inline-block" />
-                <span>Branşınla Uyumun</span>
-              </h3>
-              <div className="p-3 rounded-xl bg-white border border-slate-200">
-                <div className="text-xs font-extrabold text-slate-900 mb-1">
-                  Branş: <span className="text-emerald-700">{currentReport.sportBranch}</span>
+                {/* Section 6: Branşınla Uyumun */}
+                <div className="p-4 rounded-2xl border-2 border-slate-200 bg-slate-50 space-y-2">
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight flex items-center gap-2 border-b border-slate-200 pb-2">
+                    <span className="w-3 h-3 rounded-full bg-teal-600 inline-block" />
+                    <span>Branşınla Uyumun</span>
+                  </h3>
+                  <div className="p-3 rounded-xl bg-white border border-slate-200">
+                    <div className="text-xs font-extrabold text-slate-900 mb-1 flex items-center justify-between">
+                      <span>
+                        Branş: <span className="text-emerald-700">{currentReport.sportBranch}</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-900 font-bold text-[10.5px]">
+                        Uyum: %{branchRef.scorePercentage}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      {branchRef.scorePercentage >= 75
+                        ? `${currentReport.sportBranch} branşı için ölçülen antropometrik ve biyomotor profil (%${branchRef.scorePercentage} uyum) yüksek bir gelişim potansiyeli göstermektedir.`
+                        : branchRef.scorePercentage >= 55
+                        ? `${currentReport.sportBranch} branşı gereksinimlerine orta düzeyde uyum (%${branchRef.scorePercentage}) gözlenmektedir; temel kuvvet, çeviklik ve vücut kompozisyonu dengesi ile uyum artırılacaktır.`
+                        : `${currentReport.sportBranch} branşı için ölçülen değerler (%${branchRef.scorePercentage} uyum) öncelikle temel fiziksel uygunluk, vücut ağırlığı dengesi ve patlayıcı kuvvet kazanımının desteklenmesi gerektiğini göstermektedir.`}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Beden yapın ve hareket kapasiten bu branşın fiziksel gereksinimlerini harika bir şekilde destekliyor. Ölçülen biyomotor profilin bu branştaki gelişimini güçlü şekilde destekliyor.
-                </p>
               </div>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Section 7: Gelecek Ölçüme Kadar Yapacaklarımız */}
           <div className="p-4 rounded-2xl border-2 border-emerald-300 bg-emerald-50/40 space-y-3">
@@ -4101,7 +4393,9 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         : currentReport.scoreHistory.p2Score > 0
         ? currentReport.scoreHistory.p2Score
         : currentReport.scoreHistory.p1Score || 78;
-    const grpAvg = currentReport.groupInfo.groupAverageScore ?? 72;
+    const grpAvg = isIntraGroupComparisonEnabled
+      ? intraGroupAvgScore
+      : (currentReport.groupInfo.groupAverageScore ?? 72);
     const grpPos =
       currentReport.groupInfo.groupPositionPercentile ??
       Math.min(99, Math.max(10, Math.round(((grpCount - grpRank + 0.1) / Math.max(1, grpCount)) * 100)));
@@ -4227,6 +4521,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                         : safeM1 > 0
                         ? m.lowerIsBetter
                           ? +(safeM1 * 0.96).toFixed(2)
+                          : m.unit === 'atım' || m.unit === 'vuruş' || m.unit === 'dokunma'
+                          ? Math.round(safeM1 * 1.06)
                           : +(safeM1 * 1.05).toFixed(1)
                         : 0;
                     const activeM = m.m3 > 0 ? m.m3 : safeM2;
@@ -4307,6 +4603,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                     <div className="space-y-2 text-xs">
                       {topMeasured.map((row, rIdx) => {
                         const val = row.m3 > 0 ? row.m3 : row.m2 > 0 ? row.m2 : row.m1;
+                        const isBody = row.id === 'height' || row.id === 'weight' || row.id === 'bmi' || row.id === 'body_fat' || row.id === 'sitting_height' || row.id === 'arm_span';
+                        const isStrongMotor = !isBody && (row.percentile || 0) >= 70;
                         return (
                           <div key={row.id} className="p-2.5 rounded-xl bg-white border border-emerald-200 shadow-2xs">
                             <div className="flex justify-between font-bold">
@@ -4316,7 +4614,9 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                               </span>
                             </div>
                             <p className="text-[10.5px] text-slate-600 mt-1 leading-snug">
-                              Referans değere göre en yüksek {rIdx + 1}. ölçülen parametre. Yaş grubu standartlarına göre güçlü biyomotorik avantaj.
+                              {isStrongMotor
+                                ? `Ölçülen en güçlü ${rIdx + 1}. parametre; yaş ve cinsiyet normlarına göre belirgin biyomotorik avantaj.`
+                                : `Sporcunun kendi profilinde en yüksek % dilime sahip ${rIdx + 1}. parametre (${row.status} düzeyde).`}
                             </p>
                           </div>
                         );
@@ -4336,17 +4636,17 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
                     <div className="space-y-2 text-xs">
                       {devMeasured.map((row) => {
-                        const val = row.m3 > 0 ? row.m3 : row.m2 > 0 ? row.m2 : row.m1;
+                        const evalRes = evaluateMotorRowTargetAndStatus(row);
                         return (
                           <div key={row.id} className="p-2.5 rounded-xl bg-white border border-rose-200 shadow-2xs">
                             <div className="flex justify-between font-bold">
                               <span className="text-slate-900">{row.name}</span>
                               <span className="font-sans tabular-nums text-rose-700">
-                                {val} {row.unit} ({row.sd > 0 ? `+${row.sd}` : row.sd} SD · %{row.percentile} Yüzdelik)
+                                {evalRes.activeVal} {row.unit} ({evalRes.sd > 0 ? `+${evalRes.sd}` : evalRes.sd} SD · %{evalRes.percentile} Yüzdelik)
                               </span>
                             </div>
                             <p className="text-[10.5px] text-rose-900 mt-1 leading-snug font-medium">
-                              <strong>Gelişim Odağı:</strong> Ölçülen veriye göre hedef norm ({row.refMid} {row.unit}) doğrultusunda bireysel takip önerilmektedir.
+                              <strong>{evalRes.statusHeaderLabel}:</strong> Ölçülen veriye göre hedef değer ({evalRes.targetValue} {row.unit}) doğrultusunda bireysel takip önerilmektedir.
                             </p>
                           </div>
                         );
@@ -4381,14 +4681,14 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                         </thead>
                         <tbody className="divide-y divide-slate-200">
                           {targetRows.map((row) => {
-                            const cur = row.m3 > 0 ? row.m3 : row.m2 > 0 ? row.m2 : row.m1;
+                            const evalRes = evaluateMotorRowTargetAndStatus(row);
                             return (
                               <tr key={row.id} className="hover:bg-slate-50">
                                 <td className="py-2 px-2.5 font-sans font-bold text-slate-800">{row.name} ({row.unit})</td>
                                 <td className="py-2 px-1.5 text-center text-slate-600">{row.m1}</td>
-                                <td className="py-2 px-1.5 text-center font-bold text-slate-900">{cur}</td>
-                                <td className="py-2 px-1.5 text-center font-bold text-emerald-700">{row.refMid}</td>
-                                <td className="py-2 px-2 text-right font-bold text-blue-700">%{row.percentile}</td>
+                                <td className="py-2 px-1.5 text-center font-bold text-slate-900">{evalRes.activeVal}</td>
+                                <td className="py-2 px-1.5 text-center font-bold text-emerald-700">{evalRes.targetValue}</td>
+                                <td className="py-2 px-2 text-right font-bold text-blue-700">%{evalRes.percentile}</td>
                               </tr>
                             );
                           })}
@@ -4402,63 +4702,75 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
           })()}
 
           {/* Section 5: Referans Grup Karşılaştırması & Section 6: Branş Yatkınlık Analizi */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Section 5: Referans Grup Karşılaştırması */}
-            <div className="p-4 rounded-2xl border-2 border-slate-200 bg-slate-50 space-y-2">
-              <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight flex items-center justify-between border-b border-slate-200 pb-2">
-                <span className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-slate-900 inline-block" />
-                  <span>Referans Grup Karşılaştırması</span>
-                </span>
-                <span className="text-[10px] font-sans tabular-nums font-bold text-slate-600">{currentReport.groupInfo.groupNo}. Grup ({effectiveGroupAgeRange})</span>
-              </h3>
+          {(() => {
+            const motorListCoach = getDisplayedMotorPerformance(currentReport);
+            const avgSd =
+              motorListCoach.length > 0
+                ? +(motorListCoach.reduce((acc, r) => acc + (r.sd || 0), 0) / motorListCoach.length).toFixed(2)
+                : 0;
+            const branchRefCoach = calculateBranchReferenceScore(currentReport);
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Section 5: Referans Grup Karşılaştırması */}
+                <div className="p-4 rounded-2xl border-2 border-slate-200 bg-slate-50 space-y-2">
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight flex items-center justify-between border-b border-slate-200 pb-2">
+                    <span className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full bg-slate-900 inline-block" />
+                      <span>Referans Grup Karşılaştırması</span>
+                    </span>
+                    <span className="text-[10px] font-sans tabular-nums font-bold text-slate-600">{currentReport.groupInfo.groupNo}. Grup ({effectiveGroupAgeRange})</span>
+                  </h3>
 
-              <div className="grid grid-cols-3 gap-2 text-center font-sans tabular-nums text-xs">
-                <div className="p-2 rounded-xl bg-white border border-slate-200">
-                  <div className="text-[9px] font-sans text-slate-500 font-bold uppercase">Yüzdelik Dilim</div>
-                  <div className="text-base font-black text-slate-900 mt-0.5">%{grpPos}</div>
+                  <div className="grid grid-cols-3 gap-2 text-center font-sans tabular-nums text-xs">
+                    <div className="p-2 rounded-xl bg-white border border-slate-200">
+                      <div className="text-[9px] font-sans text-slate-500 font-bold uppercase">Yüzdelik Dilim</div>
+                      <div className="text-base font-black text-slate-900 mt-0.5">%{grpPos}</div>
+                    </div>
+                    <div className="p-2 rounded-xl bg-white border border-slate-200">
+                      <div className="text-[9px] font-sans text-slate-500 font-bold uppercase">Grup Ortalaması</div>
+                      <div className="text-base font-black text-slate-900 mt-0.5">%{grpAvg}</div>
+                    </div>
+                    <div className="p-2 rounded-xl bg-white border border-slate-200">
+                      <div className="text-[9px] font-sans text-slate-500 font-bold uppercase">Z-Skor Konum</div>
+                      <div className={`text-base font-black mt-0.5 ${avgSd >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {avgSd >= 0 ? `+${avgSd}` : avgSd} SD
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-600 leading-snug p-2.5 rounded-xl bg-white border border-slate-200">
+                    {`Yaş grubu referans ortalaması (%${grpAvg}) ile karşılaştırıldığında sporcunun genel motorik skoru (%${athScore}) ${athScore >= grpAvg ? 'referans ortalamasının üzerindedir.' : 'gelişim potansiyeli taşımakta olup öncelikli alanlarda bireysel destek planı uygulanmalıdır.'}`}
+                  </p>
                 </div>
-                <div className="p-2 rounded-xl bg-white border border-slate-200">
-                  <div className="text-[9px] font-sans text-slate-500 font-bold uppercase">Grup Ortalaması</div>
-                  <div className="text-base font-black text-slate-900 mt-0.5">%{grpAvg}</div>
-                </div>
-                <div className="p-2 rounded-xl bg-white border border-slate-200">
-                  <div className="text-[9px] font-sans text-slate-500 font-bold uppercase">Z-Skor Konum</div>
-                  <div className="text-base font-black text-emerald-700 mt-0.5">+1.83 SD</div>
+
+                {/* Section 6: Branş Yatkınlık Analizi */}
+                <div className="p-4 rounded-2xl border-2 border-slate-200 bg-slate-50 space-y-2">
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight flex items-center justify-between border-b border-slate-200 pb-2">
+                    <span className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full bg-emerald-600 inline-block" />
+                      <span>Branş Yatkınlık Analizi</span>
+                    </span>
+                    <span className="text-[10px] font-sans tabular-nums font-bold text-emerald-700">
+                      Uyum Skoru: %{branchRefCoach.scorePercentage}
+                    </span>
+                  </h3>
+
+                  <div className="space-y-1.5 text-xs font-sans tabular-nums">
+                    <div className="p-2 rounded-lg bg-white border border-emerald-200 flex justify-between items-center">
+                      <span>{currentReport.sportBranch}</span>
+                      <span className="font-extrabold text-emerald-700">%{branchRefCoach.scorePercentage} · {branchRefCoach.statusLabel}</span>
+                    </div>
+                    {branchRefCoach.breakdown.map((b, bi) => (
+                      <div key={bi} className="p-2 rounded-lg bg-white border border-slate-200 flex justify-between items-center">
+                        <span>{b.label}</span>
+                        <span className="font-bold text-slate-700">%{b.percent}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-
-              <p className="text-[11px] text-slate-600 leading-snug p-2.5 rounded-xl bg-white border border-slate-200">
-                Grubundaki {grpCount} sporcu arasında genel sıralamada {grpRank}. sırada yer almaktadır. Sporcunun motorik ve antropometrik profili norm grubunun belirgin üstündedir.
-              </p>
-            </div>
-
-            {/* Section 6: Branş Yatkınlık Analizi */}
-            <div className="p-4 rounded-2xl border-2 border-slate-200 bg-slate-50 space-y-2">
-              <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight flex items-center justify-between border-b border-slate-200 pb-2">
-                <span className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-emerald-600 inline-block" />
-                  <span>Branş Yatkınlık Analizi</span>
-                </span>
-                <span className="text-[10px] font-sans tabular-nums font-bold text-emerald-700">Uyum Skoru: %94</span>
-              </h3>
-
-              <div className="space-y-1.5 text-xs font-sans tabular-nums">
-                <div className="p-2 rounded-lg bg-white border border-emerald-200 flex justify-between items-center">
-                  <span>1. {currentReport.sportBranch}</span>
-                  <span className="font-extrabold text-emerald-700">%94 Morfolojik &amp; Motor Uyum</span>
-                </div>
-                <div className="p-2 rounded-lg bg-white border border-slate-200 flex justify-between items-center">
-                  <span>2. Basketbol</span>
-                  <span className="font-bold text-blue-700">%89 Sıçrama &amp; Uzanma Uyumu</span>
-                </div>
-                <div className="p-2 rounded-lg bg-white border border-slate-200 flex justify-between items-center">
-                  <span>3. Hentbol</span>
-                  <span className="font-bold text-slate-700">%84 Reaksiyon &amp; Üst Gövde Uyumu</span>
-                </div>
-              </div>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Section 7: Bireysel Antrenman Planı ve Ölçüm Takvimi */}
           <div className="p-4 rounded-2xl border-2 border-slate-900 bg-slate-900 text-white space-y-3">
@@ -4748,12 +5060,16 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                           ? +(safeM1 * 0.96).toFixed(1)
                           : +(safeM1 * 1.02).toFixed(1)
                         : 0;
-                    const p1 = computeScalePos(safeM1, row);
-                    const p2 = computeScalePos(safeM2, row);
-                    const p3 = computeScalePos(row.m3, row);
+                    const p1 = computeBodyScalePos(safeM1, row);
+                    const p2 = computeBodyScalePos(safeM2, row);
+                    const p3 = computeBodyScalePos(row.m3, row);
                     const isEven = idx % 2 === 0;
+                    const activeBodyVal = row.m3 > 0 ? row.m3 : safeM2 > 0 ? safeM2 : safeM1;
                     const isOptimalBody = row.status === 'normal' || row.status === 'mükemmel' || row.status === 'iyi' || row.status === 'uzun';
-                    const isWatchBody = row.status === 'yüksek' && Math.abs(row.sd) <= 1.2;
+                    const isWatchBody =
+                      !isOptimalBody &&
+                      ((row.status === 'yüksek' && activeBodyVal <= row.refHigh && row.sd <= 2.05) ||
+                        (row.status === 'düşük' && activeBodyVal >= row.refLow && row.sd >= -2.05));
                     const rowBorderClass = isOptimalBody
                       ? 'border-l-4 border-l-emerald-500'
                       : isWatchBody
@@ -4811,7 +5127,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       </td>
                       <td className="py-3 px-2 text-center border-r border-slate-200">
                         <div className="flex flex-col items-center gap-1.5">
-                          <span className={getStatusBadge(row.status)}>
+                          <span className={isWatchBody ? 'bg-amber-100 text-slate-900 border border-amber-400 font-black px-2.5 py-0.5 rounded-full text-[10.5px] inline-block shadow-2xs' : getStatusBadge(row.status)}>
                             {row.status}
                           </span>
                           {!isHeightRow && (
@@ -5078,136 +5394,198 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       .sort((a, b) => a.percentile - b.percentile)
       .slice(0, 3);
 
-    const getMotorFocusDetail = (id: string, name: string, percentile = 50) => {
-      const lower = `${id} ${name}`.toLowerCase();
+    const getMotorFocusDetail = (row: LabParameterRow) => {
+      const lower = `${row.id} ${row.name}`.toLowerCase();
+      const evalRes = evaluateMotorRowTargetAndStatus(row);
+      const tier = evalRes.tier;
+      const verdict = evalRes.verdict;
+      const verdictBadgeClass =
+        tier === 'reached'
+          ? 'bg-emerald-100 text-emerald-950 border-emerald-300'
+          : tier === 'watch'
+          ? 'bg-amber-100 text-amber-950 border-amber-300'
+          : 'bg-rose-100 text-rose-900 border-rose-300';
+      const verdictDotClass =
+        tier === 'reached' ? 'bg-emerald-600' : tier === 'watch' ? 'bg-amber-500' : 'bg-rose-600';
+
       if (lower.includes('balance') || lower.includes('denge')) {
         return {
           shortTitle: 'Denge',
-          verdict: 'Geliştirilmesi önerilir' as const,
-          verdictBadgeClass: 'bg-rose-100 text-rose-900 border-rose-300',
-          verdictDotClass: 'bg-rose-600',
-          whatIsLow: 'Dinamik ve statik tek ayak denge süresi yaş grubu referans ortalamasının altındadır.',
-          whatToDo: 'Haftada 3 gün tek ayak proprioseptif denge (Flamingo, Bosu) ve merkez gövde (core) stabilizasyon egzersizleri uygulanmalı.',
-          focusSummary: 'Tek ayak statik/dinamik denge ve merkez gövde (core) stabilizasyonu güçlendirilmeli.',
+          verdict,
+          verdictBadgeClass,
+          verdictDotClass,
+          whatIsLow:
+            tier === 'reached'
+              ? 'Tek ayak statik denge kontrolü yaş ve cinsiyet normlarına göre güçlü seviyededir.'
+              : 'Dinamik ve statik tek ayak denge kontrolü yaş grubu referans ortalamasının altındadır.',
+          whatToDo:
+            tier === 'reached'
+              ? 'Mevcut yüksek denge kontrolü korunmalı; dinamik branş içi sıçrama-iniş drilleriyle birleştirilmelidir.'
+              : 'Haftada 3 gün tek ayak proprioseptif denge (Flamingo, Bosu) ve merkez gövde (core) stabilizasyon egzersizleri uygulanmalı.',
+          focusSummary: 'Tek ayak statik/dinamik denge ve merkez gövde (core) stabilizasyonu.',
           drillTag: 'Haftada 3 Gün · Proprioseptif & Bosu Denge Drilleri',
         };
       }
       if (lower.includes('back') || lower.includes('sırt')) {
         return {
           shortTitle: 'Sırt kuvveti',
-          verdict: 'Geliştirilmesi önerilir' as const,
-          verdictBadgeClass: 'bg-rose-100 text-rose-900 border-rose-300',
-          verdictDotClass: 'bg-rose-600',
-          whatIsLow: 'Sırt ekstansör ve gövde izometrik kuvveti üst performans eşiğinin altındadır.',
+          verdict,
+          verdictBadgeClass,
+          verdictDotClass,
+          whatIsLow:
+            tier === 'reached'
+              ? 'Sırt ekstansör ve gövde izometrik kuvveti güçlü performans bölgesindedir.'
+              : 'Sırt ekstansör ve gövde izometrik kuvveti hedef norm değerinin altındadır.',
           whatToDo: 'Haftada 2 gün vücut ağırlığıyla sırt ekstansiyon, plank ve posterior zincir kuvvetlendirme drilleri yapılmalı.',
-          focusSummary: 'Posterior zincir, sırt ekstansör ve gövde izometrik kuvveti desteklenmeli.',
+          focusSummary: 'Posterior zincir, sırt ekstansör ve gövde izometrik kuvveti.',
           drillTag: 'Haftada 2 Gün · Core & Lomber Ekstansiyon Kuvveti',
         };
       }
       if (lower.includes('flexibility') || lower.includes('esneklik')) {
         return {
           shortTitle: 'Esneklik',
-          verdict: (percentile < 50 ? 'Geliştirilmesi önerilir' : 'Korunmalı') as 'Geliştirilmesi önerilir' | 'Korunmalı' | 'Güçlü yön',
-          verdictBadgeClass: percentile < 50 ? 'bg-rose-100 text-rose-900 border-rose-300' : 'bg-blue-100 text-blue-900 border-blue-300',
-          verdictDotClass: percentile < 50 ? 'bg-rose-600' : 'bg-blue-600',
-          whatIsLow: 'Hamstring ve lomber bölge eklem hareket açıklığı (ROM) sağlıklı uygunluk bölgesindedir.',
-          whatToDo: 'Mevcut esneklik seviyesini korumak ve sakatlıkları önlemek için her antrenman sonunda 10 dk dinamik mobilite ve germe rutini sürdürülmeli.',
-          focusSummary: 'Hamstring ve lomber bölge eklem hareket açıklığı (ROM) düzenli mobilite ile korunmalı.',
+          verdict,
+          verdictBadgeClass,
+          verdictDotClass,
+          whatIsLow:
+            tier === 'needs_dev'
+              ? 'Hamstring ve lomber bölge eklem hareket açıklığı (ROM) hedef normun altındadır.'
+              : 'Hamstring ve lomber bölge eklem hareket açıklığı (ROM) sağlıklı uygunluk bölgesindedir.',
+          whatToDo: 'Her antrenman sonunda 10 dk dinamik mobilite ve germe rutini sürdürülmeli.',
+          focusSummary: 'Hamstring ve lomber bölge eklem hareket açıklığı (ROM).',
           drillTag: 'Her Antrenman Sonu · PNF & Dinamik Mobilite Koruması',
         };
       }
       if (lower.includes('grip') || lower.includes('kavrama')) {
         return {
           shortTitle: 'Kavrama kuvveti',
-          verdict: (percentile >= 75 ? 'Güçlü yön' : percentile >= 50 ? 'Korunmalı' : 'Geliştirilmesi önerilir') as 'Geliştirilmesi önerilir' | 'Korunmalı' | 'Güçlü yön',
-          verdictBadgeClass: percentile >= 75 ? 'bg-emerald-100 text-emerald-950 border-emerald-300' : 'bg-blue-100 text-blue-900 border-blue-300',
-          verdictDotClass: percentile >= 75 ? 'bg-emerald-600' : 'bg-blue-600',
-          whatIsLow: 'El ve ön kol maksimum izometrik kavrama kuvveti yaş grubunun en üst yüzdelik dilimindedir.',
-          whatToDo: 'Bu güçlü yön korunmalı; branş içi top hakimiyeti, pas sertliği ve ikili mücadelelerde aktif avantaja dönüştürülmeli.',
-          focusSummary: 'Üst ekstremite ön kol ve izometrik el kavrama kuvveti üst düzeyde korunmalı.',
+          verdict,
+          verdictBadgeClass,
+          verdictDotClass,
+          whatIsLow:
+            tier === 'reached'
+              ? 'El ve ön kol maksimum izometrik kavrama kuvveti yaş grubunun en üst yüzdelik dilimindedir.'
+              : 'El ve ön kol kavrama kuvveti yaş grubu hedef normuna doğru desteklenmelidir.',
+          whatToDo:
+            tier === 'reached'
+              ? 'Bu güçlü yön korunmalı; branş içi top hakimiyeti ve ikili mücadelelerde aktif avantaja dönüştürülmeli.'
+              : 'Haftada 2 gün ön kol, el sıkma ve üst gövde çekiş kuvvetlendirme drilleri uygulanmalı.',
+          focusSummary: 'Üst ekstremite ön kol ve izometrik el kavrama kuvveti.',
           drillTag: 'Haftada 2 Gün · Fonksiyonel Üst Gövde & Kavrama Transferi',
         };
       }
       if (lower.includes('aerobic') || lower.includes('aerobik') || lower.includes('pacer')) {
         return {
           shortTitle: 'Aerobik kapasite',
-          verdict: (percentile < 65 ? 'Geliştirilmesi önerilir' : percentile < 85 ? 'Korunmalı' : 'Güçlü yön') as 'Geliştirilmesi önerilir' | 'Korunmalı' | 'Güçlü yön',
-          verdictBadgeClass: percentile < 65 ? 'bg-rose-100 text-rose-900 border-rose-300' : 'bg-blue-100 text-blue-900 border-blue-300',
-          verdictDotClass: percentile < 65 ? 'bg-rose-600' : 'bg-blue-600',
-          whatIsLow: 'Maksimal oksijen tüketimi (VO2peak) ve mekik koşusu devamlılığı hedef eşiğin altındadır.',
+          verdict,
+          verdictBadgeClass,
+          verdictDotClass,
+          whatIsLow: 'Maksimal oksijen tüketimi (VO2peak) ve mekik koşusu devamlılığı yaş grubu normuna göre analiz edilmektedir.',
           whatToDo: 'Haftada 2-3 gün Zone 3-4 interval koşular ve oyun içi aerobik dayanıklılık drilleri uygulanmalı.',
-          focusSummary: 'Kardiyorespiratuar dayanıklılık (VO2peak) ve mekik koşusu temposu artırılmalı.',
+          focusSummary: 'Kardiyorespiratuar dayanıklılık (VO2peak) ve mekik koşusu temposu.',
           drillTag: 'Haftada 2-3 Gün · Zone 3-4 İnterval Dayanıklılık',
         };
       }
       if (lower.includes('long_jump') || lower.includes('uzun atlama')) {
         return {
           shortTitle: 'Durarak uzun atlama',
-          verdict: (percentile < 60 ? 'Geliştirilmesi önerilir' : percentile < 85 ? 'Korunmalı' : 'Güçlü yön') as 'Geliştirilmesi önerilir' | 'Korunmalı' | 'Güçlü yön',
-          verdictBadgeClass: percentile < 60 ? 'bg-rose-100 text-rose-900 border-rose-300' : percentile < 85 ? 'bg-blue-100 text-blue-900 border-blue-300' : 'bg-emerald-100 text-emerald-950 border-emerald-300',
-          verdictDotClass: percentile < 60 ? 'bg-rose-600' : percentile < 85 ? 'bg-blue-600' : 'bg-emerald-600',
-          whatIsLow: 'Alt ekstremite yatay patlayıcı güç iyi seviyededir; üst limite taşınabilir.',
-          whatToDo: 'Mevcut patlayıcı bacak gücünü korumak ve artırmak için haftada 2 gün yatay pliometrik sıçrama drilleri yapılmalı.',
-          focusSummary: 'Alt ekstremite yatay patlayıcı güç ve kol-bacak sıçrama koordinasyonu geliştirilmeli.',
+          verdict,
+          verdictBadgeClass,
+          verdictDotClass,
+          whatIsLow:
+            tier === 'reached'
+              ? 'Alt ekstremite yatay patlayıcı güç yaş grubunun üst dilimindedir.'
+              : 'Alt ekstremite yatay patlayıcı güç yaş grubu hedef normunun gerisindedir ve güçlendirilmelidir.',
+          whatToDo: 'Haftada 2 gün yatay pliometrik sıçrama ve kalça ekstansör kuvvetlendirme drilleri yapılmalı.',
+          focusSummary: 'Alt ekstremite yatay patlayıcı güç ve kol-bacak sıçrama koordinasyonu.',
           drillTag: 'Haftada 2 Gün · Yatay Pliometrik & Çift Ayak Sıçrama',
         };
       }
       if (lower.includes('vertical') || lower.includes('dikey')) {
         return {
           shortTitle: 'Dikey sıçrama',
-          verdict: (percentile >= 80 ? 'Güçlü yön' : percentile >= 60 ? 'Korunmalı' : 'Geliştirilmesi önerilir') as 'Geliştirilmesi önerilir' | 'Korunmalı' | 'Güçlü yön',
-          verdictBadgeClass: percentile >= 80 ? 'bg-emerald-100 text-emerald-950 border-emerald-300' : 'bg-blue-100 text-blue-900 border-blue-300',
-          verdictDotClass: percentile >= 80 ? 'bg-emerald-600' : 'bg-blue-600',
-          whatIsLow: 'Alt beden dikey patlayıcı sıçrama yüksekliği yaş grubuna göre güçlü seviyededir.',
-          whatToDo: 'Sıçrama kuvvetini branş içi sıçrama ve iniş mekaniği drilleriyle koruyarak müsabakaya aktarın.',
-          focusSummary: 'Dikey patlayıcı sıçrama kuvveti ve ayak bileği reaktif sertliği artırılmalı.',
+          verdict,
+          verdictBadgeClass,
+          verdictDotClass,
+          whatIsLow:
+            tier === 'reached'
+              ? 'Alt beden dikey patlayıcı sıçrama yüksekliği yaş grubuna göre güçlü seviyededir.'
+              : 'Alt ekstremite dikey sıçrama yüksekliği yaş grubu hedef normunun altındadır; görece güç ve pliometrik destek gereklidir.',
+          whatToDo: 'Haftada 2 gün kutu sıçrama, derinlik sıçraması ve eksantrik iniş mekaniği çalışılmalı.',
+          focusSummary: 'Dikey patlayıcı sıçrama kuvveti ve ayak bileği reaktif sertliği.',
           drillTag: 'Haftada 2 Gün · Countermovement & Kutu Sıçrama',
         };
       }
-      if (lower.includes('sprint') || lower.includes('sürat')) {
+      if (lower.includes('arm_speed') || lower.includes('kol sürat')) {
+        return {
+          shortTitle: 'Kol sürati',
+          verdict,
+          verdictBadgeClass,
+          verdictDotClass,
+          whatIsLow:
+            tier === 'reached'
+              ? 'Üst ekstremite nöromüsküler koordinasyon ve 50 sn vuruş temposu güçlü seviyededir.'
+              : row.lowerIsBetter
+              ? 'Üst ekstremite hızlı tekrar ve reaksiyon temposu hedef norm süresinin gerisindedir.'
+              : '50 sn üst ekstremite vuruş (atım) sayısı yaş grubu hedef normunun altındadır.',
+          whatToDo: 'Haftada 2-3 gün yüksek frekanslı el-kol koordinasyon ve hız merdiveni üst ekstremite drilleri uygulanmalı.',
+          focusSummary: 'Üst ekstremite hızlı tekrar koordinasyonu ve nöromüsküler frekans.',
+          drillTag: 'Haftada 2-3 Gün · Üst Ekstremite Hız & Koordinasyon',
+        };
+      }
+      if (lower.includes('sprint') || lower.includes('20m')) {
         return {
           shortTitle: 'Sürat (20m)',
-          verdict: (percentile >= 80 ? 'Güçlü yön' : percentile >= 60 ? 'Korunmalı' : 'Geliştirilmesi önerilir') as 'Geliştirilmesi önerilir' | 'Korunmalı' | 'Güçlü yön',
-          verdictBadgeClass: percentile >= 80 ? 'bg-emerald-100 text-emerald-950 border-emerald-300' : 'bg-blue-100 text-blue-900 border-blue-300',
-          verdictDotClass: percentile >= 80 ? 'bg-emerald-600' : 'bg-blue-600',
-          whatIsLow: '20m doğrusal ivmelenme ve maksimal hız kapasitesi üst yüzdelik dilimdedir.',
-          whatToDo: 'İlk adım çabukluğu ve sprint tekniği haftalık kısa mesafe ivmelenme drilleriyle korunmalı.',
-          focusSummary: 'İlk adım çıkış ivmelenmesi ve maksimal sprint adım frekansı hızlandırılmalı.',
+          verdict,
+          verdictBadgeClass,
+          verdictDotClass,
+          whatIsLow:
+            tier === 'reached'
+              ? '20m doğrusal ivmelenme ve maksimal hız kapasitesi üst yüzdelik dilimdedir.'
+              : '20m doğrusal ivmelenme ve sprint hızı yaş grubu hedef norm süresine göre geliştirilmelidir.',
+          whatToDo: 'İlk adım çabukluğu ve sprint mekaniği haftalık kısa mesafe ivmelenme drilleriyle çalışılmalı.',
+          focusSummary: 'İlk adım çıkış ivmelenmesi ve maksimal sprint adım frekansı.',
           drillTag: 'Haftada 2 Gün · 10m-20m İvmelenme & Çıkış Drilleri',
         };
       }
       if (lower.includes('agility') || lower.includes('çabukluk')) {
         return {
-          shortTitle: 'Çabukluk (10x5m)',
-          verdict: (percentile >= 80 ? 'Güçlü yön' : percentile >= 60 ? 'Korunmalı' : 'Geliştirilmesi önerilir') as 'Geliştirilmesi önerilir' | 'Korunmalı' | 'Güçlü yön',
-          verdictBadgeClass: percentile >= 80 ? 'bg-emerald-100 text-emerald-950 border-emerald-300' : 'bg-blue-100 text-blue-900 border-blue-300',
-          verdictDotClass: percentile >= 80 ? 'bg-emerald-600' : 'bg-blue-600',
-          whatIsLow: 'Çok yönlü yön değiştirme (COD) ve çeviklik süresi elit referans bölgesindedir.',
-          whatToDo: 'Yüksek yön değiştirme becerisi branş özgü reaktif oyun drilleriyle desteklenerek sürdürülmeli.',
-          focusSummary: 'Çok yönlü yön değiştirme (COD) ve frenleme-hızlanma geçişleri iyileştirilmeli.',
-          drillTag: 'Haftada 2-3 Gün · 10x5m Reaktif Çeviklik & COD',
+          shortTitle: 'Çabukluk',
+          verdict,
+          verdictBadgeClass,
+          verdictDotClass,
+          whatIsLow:
+            tier === 'reached'
+              ? 'Çok yönlü yön değiştirme (COD) ve çeviklik süresi elit referans bölgesindedir.'
+              : 'Çok yönlü yön değiştirme (COD) ve frenleme-ivmelenme süresi hedef normun gerisindedir.',
+          whatToDo: 'Haftada 2-3 gün deselerasyon kontrolü ve reaktif yön değiştirme drilleri uygulanmalı.',
+          focusSummary: 'Çok yönlü yön değiştirme (COD) ve frenleme-hızlanma geçişleri.',
+          drillTag: 'Haftada 2-3 Gün · Reaktif Çeviklik & COD Drilleri',
         };
       }
       if (lower.includes('reaction') || lower.includes('reaksiyon')) {
         return {
           shortTitle: 'Reaksiyon sürati',
-          verdict: (percentile >= 80 ? 'Güçlü yön' : percentile >= 60 ? 'Korunmalı' : 'Geliştirilmesi önerilir') as 'Geliştirilmesi önerilir' | 'Korunmalı' | 'Güçlü yön',
-          verdictBadgeClass: percentile >= 80 ? 'bg-emerald-100 text-emerald-950 border-emerald-300' : 'bg-blue-100 text-blue-900 border-blue-300',
-          verdictDotClass: percentile >= 80 ? 'bg-emerald-600' : 'bg-blue-600',
-          whatIsLow: 'Görsel uyaran algılama ve el-göz koordinasyon tepki süresi üst düzeydedir.',
-          whatToDo: 'Antrenman ısınmalarında bilişsel-görsel reaksiyon oyunlarıyla bu avantaj aktif tutulmalı.',
-          focusSummary: 'Görsel uyaran algılama ve nöromüsküler el-göz tepki süresi kısaltılmalı.',
+          verdict,
+          verdictBadgeClass,
+          verdictDotClass,
+          whatIsLow:
+            tier === 'reached'
+              ? 'Görsel uyaran algılama ve el-göz koordinasyon tepki süresi üst düzeydedir.'
+              : 'Görsel uyaran algılama ve nöromüsküler tepki süresi yaş grubu hedefine göre hızlandırılmalıdır.',
+          whatToDo: 'Antrenman ısınmalarında 10 dk bilişsel-görsel reaksiyon oyunları uygulanmalı.',
+          focusSummary: 'Görsel uyaran algılama ve nöromüsküler el-göz tepki süresi.',
           drillTag: 'Her Antrenman Öncesi · 10 Dk Görsel Reaksiyon',
         };
       }
       return {
-        shortTitle: name,
-        verdict: (percentile < 65 ? 'Geliştirilmesi önerilir' : percentile < 85 ? 'Korunmalı' : 'Güçlü yön') as 'Geliştirilmesi önerilir' | 'Korunmalı' | 'Güçlü yön',
-        verdictBadgeClass: percentile < 65 ? 'bg-rose-100 text-rose-900 border-rose-300' : percentile < 85 ? 'bg-blue-100 text-blue-900 border-blue-300' : 'bg-emerald-100 text-emerald-950 border-emerald-300',
-        verdictDotClass: percentile < 65 ? 'bg-rose-600' : percentile < 85 ? 'bg-blue-600' : 'bg-emerald-600',
+        shortTitle: row.name,
+        verdict,
+        verdictBadgeClass,
+        verdictDotClass,
         whatIsLow: 'Yaş grubu normatif referans değerlerine göre bireysel gelişim takibi yapılmalıdır.',
         whatToDo: 'Haftada 2-3 gün hedef odaklı biyomotor yüklenme drilleri uygulanmalı.',
-        focusSummary: 'Yaş grubu normatif hedef değerine ulaşmak için spesifik biyomotor yüklenme uygulanmalı.',
+        focusSummary: 'Yaş grubu normatif hedef değerine ulaşmak için spesifik biyomotor yüklenme.',
         drillTag: 'Haftada 2-3 Gün · Bireysel Hedef Odaklı Drill',
       };
     };
@@ -5259,18 +5637,13 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
           {/* 15. TEST SONUÇLARI VE HEDEFLER — İLK BAKIŞTA 3 KATEGORİLİ GÖRSEL DURUM PANOSU */}
           {(() => {
-            const devList = displayedMotorList.filter((r) => {
-              const g = getMotorFocusDetail(r.id, r.name, r.percentile);
-              return g.verdict === 'Geliştirilmesi önerilir';
-            });
-            const watchList = displayedMotorList.filter((r) => {
-              const g = getMotorFocusDetail(r.id, r.name, r.percentile);
-              return g.verdict === 'Korunmalı';
-            });
-            const reachedList = displayedMotorList.filter((r) => {
-              const g = getMotorFocusDetail(r.id, r.name, r.percentile);
-              return g.verdict === 'Güçlü yön';
-            });
+            const evaluatedRows = displayedMotorList.map((r) => ({
+              row: r,
+              evalRes: evaluateMotorRowTargetAndStatus(r),
+            }));
+            const devList = evaluatedRows.filter((x) => x.evalRes.tier === 'needs_dev');
+            const watchList = evaluatedRows.filter((x) => x.evalRes.tier === 'watch');
+            const reachedList = evaluatedRows.filter((x) => x.evalRes.tier === 'reached');
 
             return (
               <div className="grid grid-cols-1 md:grid-cols-3 print:grid-cols-3 gap-2 mb-2.5">
@@ -5283,17 +5656,19 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                     <span className="text-[9px] font-extrabold text-rose-900">Öncelikli Hedef</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {devList.slice(0, 4).map((item) => {
-                      const curVal = getActiveParamVal(item);
-                      return (
-                        <span
-                          key={item.id}
-                          className="px-1.5 py-0.5 rounded bg-white border border-rose-300 text-rose-950 text-[9px] font-extrabold font-sans tabular-nums whitespace-nowrap"
-                        >
-                          • {item.name.replace(' Testi', '')}: {curVal}→{item.refMid} {item.unit}
-                        </span>
-                      );
-                    })}
+                    {devList.slice(0, 4).map(({ row, evalRes }) => (
+                      <span
+                        key={row.id}
+                        className="px-1.5 py-0.5 rounded bg-white border border-rose-300 text-rose-950 text-[9px] font-extrabold font-sans tabular-nums whitespace-nowrap"
+                      >
+                        • {row.name.replace(' Testi', '')}: {evalRes.activeVal}→{evalRes.targetValue} {row.unit}
+                      </span>
+                    ))}
+                    {devList.length > 4 && (
+                      <span className="px-1.5 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-[8.5px] font-bold">
+                        +{devList.length - 4} test daha
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -5306,17 +5681,14 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                     <span className="text-[9px] font-black text-slate-900 whitespace-nowrap">İzlem &amp; Koruma</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {watchList.slice(0, 4).map((item) => {
-                      const curVal = getActiveParamVal(item);
-                      return (
-                        <span
-                          key={item.id}
-                          className="px-1.5 py-0.5 rounded bg-white border border-amber-400 text-slate-900 text-[9px] font-black font-sans tabular-nums whitespace-nowrap"
-                        >
-                          • {item.name.replace(' Testi', '')}: {curVal}→{item.refHigh} {item.unit}
-                        </span>
-                      );
-                    })}
+                    {watchList.slice(0, 4).map(({ row, evalRes }) => (
+                      <span
+                        key={row.id}
+                        className="px-1.5 py-0.5 rounded bg-white border border-amber-400 text-slate-900 text-[9px] font-black font-sans tabular-nums whitespace-nowrap"
+                      >
+                        • {row.name.replace(' Testi', '')}: {evalRes.activeVal}→{evalRes.targetValue} {row.unit}
+                      </span>
+                    ))}
                   </div>
                 </div>
 
@@ -5329,17 +5701,14 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                     <span className="text-[9px] font-extrabold text-emerald-950 whitespace-nowrap">Üst Performans</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {reachedList.slice(0, 4).map((item) => {
-                      const curVal = getActiveParamVal(item);
-                      return (
-                        <span
-                          key={item.id}
-                          className="px-1.5 py-0.5 rounded bg-white border border-emerald-300 text-emerald-950 text-[9px] font-extrabold font-sans tabular-nums whitespace-nowrap"
-                        >
-                          {item.name.replace(' Testi', '')}: {curVal} {item.unit} (%{item.percentile})
-                        </span>
-                      );
-                    })}
+                    {reachedList.slice(0, 4).map(({ row, evalRes }) => (
+                      <span
+                        key={row.id}
+                        className="px-1.5 py-0.5 rounded bg-white border border-emerald-300 text-emerald-950 text-[9px] font-extrabold font-sans tabular-nums whitespace-nowrap"
+                      >
+                        {row.name.replace(' Testi', '')}: {evalRes.activeVal} {row.unit} (%{evalRes.percentile})
+                      </span>
+                    ))}
                     {reachedList.length > 4 && (
                       <span className="px-1.5 py-0.5 rounded bg-emerald-100 border border-emerald-300 text-emerald-900 text-[8.5px] font-bold">
                         +{reachedList.length - 4} test daha
@@ -5416,20 +5785,25 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   );
                   return displayedMotor.map((row) => {
                     const safeM1 = row.m1 > 0 ? row.m1 : 0;
-                    const safeM2 = row.m2 > 0 ? row.m2 : (row.m1 > 0 ? (row.lowerIsBetter ? +(safeM1 * 0.96).toFixed(2) : +(safeM1 * 1.05).toFixed(1)) : 0);
+                    const safeM2 =
+                      row.m2 > 0
+                        ? row.m2
+                        : row.m1 > 0
+                        ? row.lowerIsBetter
+                          ? +(safeM1 * 0.96).toFixed(2)
+                          : row.unit === 'atım' || row.unit === 'vuruş' || row.unit === 'dokunma'
+                          ? Math.round(safeM1 * 1.06)
+                          : +(safeM1 * 1.05).toFixed(1)
+                        : 0;
                     const p1 = computeScalePos(safeM1, row);
                     const p2 = computeScalePos(safeM2, row);
                     const p3 = computeScalePos(row.m3, row);
-                    const guidance = getMotorFocusDetail(row.id, row.name, row.percentile);
-                    const isNeedsDev = guidance.verdict === 'Geliştirilmesi önerilir';
-                    const isMaintain = guidance.verdict === 'Korunmalı';
+                    const evalRes = evaluateMotorRowTargetAndStatus(row);
+                    const guidance = getMotorFocusDetail(row);
+                    const isNeedsDev = evalRes.tier === 'needs_dev';
+                    const isMaintain = evalRes.tier === 'watch';
 
-                    const activeMotorVal = row.m3 > 0 ? row.m3 : safeM2;
-                    const targetValue = isNeedsDev
-                      ? row.refMid
-                      : row.lowerIsBetter
-                      ? +(Math.max(row.refHigh, activeMotorVal * 0.96)).toFixed(2)
-                      : +(Math.min(row.refHigh, +(activeMotorVal * 1.05).toFixed(1))).toFixed(1);
+                    const targetValue = evalRes.targetValue;
 
                     const rowVisualStyle = isNeedsDev
                       ? 'bg-rose-50/50 border-l-4 border-l-rose-600'
@@ -5437,11 +5811,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       ? 'bg-amber-50/40 border-l-4 border-l-amber-500'
                       : 'bg-emerald-50/40 border-l-4 border-l-emerald-600';
 
-                    const statusHeaderLabel = isNeedsDev
-                      ? 'GELİŞİM GÖSTERMELİ'
-                      : isMaintain
-                      ? 'TAKİP EDİLMELİ'
-                      : 'HEDEFE ULAŞTI';
+                    const statusHeaderLabel = evalRes.statusHeaderLabel;
 
                     const statusHeaderPill = isNeedsDev
                       ? 'bg-rose-600 text-white border-rose-700'
@@ -5499,7 +5869,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       </td>
                       <td className="py-1.5 px-1.5 text-center font-sans tabular-nums border-r border-slate-200">
                         <span className="font-sans tabular-nums font-black text-xs text-slate-900 bg-white border border-slate-300 px-1.5 py-0.5 rounded inline-block">
-                          %{row.percentile}
+                          %{evalRes.percentile}
                         </span>
                       </td>
                       <td className="py-1.5 px-2 text-center border-r border-slate-200">
@@ -5514,9 +5884,9 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       </td>
                       <td className="py-1.5 pl-2 pr-2.5">
                         <div className="flex items-center justify-between text-[8.5px] font-sans tabular-nums font-bold text-slate-700 mb-0.5">
-                          <span className="text-slate-500">Alt:{row.refLow}</span>
+                          <span className="text-slate-500">Alt:{row.lowerIsBetter ? row.refHigh : row.refLow}</span>
                           <span className="text-slate-900 font-black">Hedef:{row.refMid}</span>
-                          <span className="text-emerald-800 font-black">Üst:{row.refHigh}</span>
+                          <span className="text-emerald-800 font-black">Üst:{row.lowerIsBetter ? row.refLow : row.refHigh}</span>
                         </div>
                         <svg
                           viewBox="0 0 200 12"
@@ -5598,14 +5968,15 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     const sameClub = reports.filter(
       (r) => (r.clubName || '').trim().toLocaleLowerCase('tr-TR') === normClub
     );
-    const peerReports =
-      sameClubAndGroup.length > 1
-        ? sameClubAndGroup
-        : sameClub.length > 1
-        ? sameClub
-        : reports.length > 0
-        ? reports
-        : [currentReport];
+    const peerReports = isIntraGroupComparisonEnabled
+      ? intraGroupComparisonPool
+      : sameClubAndGroup.length > 1
+      ? sameClubAndGroup
+      : sameClub.length > 1
+      ? sameClub
+      : reports.length > 0
+      ? reports
+      : [currentReport];
 
     const gInfo = currentReport.groupInfo;
     const groupAthleteCount = peerReports.length > 1 ? peerReports.length : (gInfo?.groupAthleteCount || 1);
@@ -5656,8 +6027,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         const m = (pr.motorPerformance || []).find(
           (item) => item.id === targetRow.id || item.name === targetRow.name
         );
-        if (m && m.percentile > 0) {
-          vals.push(Math.max(35, Math.min(96, m.percentile)));
+        if (m && isLabRowMeasured(m)) {
+          vals.push(evaluateMotorRowTargetAndStatus(m).percentile);
         }
       });
       return vals.length > 0
@@ -5684,58 +6055,78 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     };
 
     const criticalMetrics = [
-      speedRow && {
-        id: 'speed',
-        category: 'Hız / İvmelenme',
-        title: 'Sürat Performansı',
-        subTitle: speedRow.name,
-        row: speedRow,
-        targetScore: Math.min(96, Math.max((speedRow.percentile || 75) + 7, getPeerMetricAvg(speedRow) + 8, 85)),
-        groupScore: getPeerMetricAvg(speedRow),
-        badgeClass: 'bg-blue-600 text-white',
-        borderClass: 'border-blue-200',
-        bgClass: 'bg-blue-50/30',
-        deltaText: getDeltaText(speedRow),
-      },
-      powerRow && {
-        id: 'power',
-        category: 'Patlayıcı Güç',
-        title: 'Dikey Sıçrama & Güç',
-        subTitle: powerRow.name,
-        row: powerRow,
-        targetScore: Math.min(96, Math.max((powerRow.percentile || 75) + 7, getPeerMetricAvg(powerRow) + 8, 85)),
-        groupScore: getPeerMetricAvg(powerRow),
-        badgeClass: 'bg-indigo-600 text-white',
-        borderClass: 'border-indigo-200',
-        bgClass: 'bg-indigo-50/30',
-        deltaText: getDeltaText(powerRow),
-      },
-      agilityRow && {
-        id: 'agility',
-        category: 'Yön Değiştirme',
-        title: 'Çeviklik & Koordinasyon',
-        subTitle: agilityRow.name,
-        row: agilityRow,
-        targetScore: Math.min(96, Math.max((agilityRow.percentile || 75) + 7, getPeerMetricAvg(agilityRow) + 8, 85)),
-        groupScore: getPeerMetricAvg(agilityRow),
-        badgeClass: 'bg-emerald-600 text-white',
-        borderClass: 'border-emerald-200',
-        bgClass: 'bg-emerald-50/30',
-        deltaText: getDeltaText(agilityRow),
-      },
-      fourthRow && {
-        id: 'fourth',
-        category: fourthRow.name.toLowerCase().includes('pençe') ? 'İzometrik Kuvvet' : 'Biyomotorik Kapasite',
-        title: fourthRow.name.toLowerCase().includes('pençe') ? 'El Pençe Kuvveti' : fourthRow.name,
-        subTitle: fourthRow.name,
-        row: fourthRow,
-        targetScore: Math.min(96, Math.max((fourthRow.percentile || 75) + 7, getPeerMetricAvg(fourthRow) + 8, 85)),
-        groupScore: getPeerMetricAvg(fourthRow),
-        badgeClass: 'bg-slate-700 text-white',
-        borderClass: 'border-slate-300',
-        bgClass: 'bg-slate-50',
-        deltaText: getDeltaText(fourthRow),
-      },
+      speedRow && (() => {
+        const evalRes = evaluateMotorRowTargetAndStatus(speedRow);
+        const grp = getPeerMetricAvg(speedRow);
+        return {
+          id: 'speed',
+          category: 'Hız / İvmelenme',
+          title: 'Sürat Performansı',
+          subTitle: speedRow.name,
+          row: speedRow,
+          currentPercentile: evalRes.percentile,
+          targetScore: Math.min(97, Math.max(evalRes.percentile + 6, grp + 5, 65)),
+          groupScore: grp,
+          badgeClass: 'bg-blue-600 text-white',
+          borderClass: 'border-blue-200',
+          bgClass: 'bg-blue-50/30',
+          deltaText: getDeltaText(speedRow),
+        };
+      })(),
+      powerRow && (() => {
+        const evalRes = evaluateMotorRowTargetAndStatus(powerRow);
+        const grp = getPeerMetricAvg(powerRow);
+        return {
+          id: 'power',
+          category: 'Patlayıcı Güç',
+          title: 'Dikey Sıçrama & Güç',
+          subTitle: powerRow.name,
+          row: powerRow,
+          currentPercentile: evalRes.percentile,
+          targetScore: Math.min(97, Math.max(evalRes.percentile + 6, grp + 5, 65)),
+          groupScore: grp,
+          badgeClass: 'bg-indigo-600 text-white',
+          borderClass: 'border-indigo-200',
+          bgClass: 'bg-indigo-50/30',
+          deltaText: getDeltaText(powerRow),
+        };
+      })(),
+      agilityRow && (() => {
+        const evalRes = evaluateMotorRowTargetAndStatus(agilityRow);
+        const grp = getPeerMetricAvg(agilityRow);
+        return {
+          id: 'agility',
+          category: 'Yön Değiştirme',
+          title: 'Çeviklik & Koordinasyon',
+          subTitle: agilityRow.name,
+          row: agilityRow,
+          currentPercentile: evalRes.percentile,
+          targetScore: Math.min(97, Math.max(evalRes.percentile + 6, grp + 5, 65)),
+          groupScore: grp,
+          badgeClass: 'bg-emerald-600 text-white',
+          borderClass: 'border-emerald-200',
+          bgClass: 'bg-emerald-50/30',
+          deltaText: getDeltaText(agilityRow),
+        };
+      })(),
+      fourthRow && (() => {
+        const evalRes = evaluateMotorRowTargetAndStatus(fourthRow);
+        const grp = getPeerMetricAvg(fourthRow);
+        return {
+          id: 'fourth',
+          category: fourthRow.name.toLowerCase().includes('pençe') ? 'İzometrik Kuvvet' : 'Biyomotorik Kapasite',
+          title: fourthRow.name.toLowerCase().includes('pençe') ? 'El Pençe Kuvveti' : fourthRow.name,
+          subTitle: fourthRow.name,
+          row: fourthRow,
+          currentPercentile: evalRes.percentile,
+          targetScore: Math.min(97, Math.max(evalRes.percentile + 6, grp + 5, 65)),
+          groupScore: grp,
+          badgeClass: 'bg-slate-700 text-white',
+          borderClass: 'border-slate-300',
+          bgClass: 'bg-slate-50',
+          deltaText: getDeltaText(fourthRow),
+        };
+      })(),
     ].filter((x): x is NonNullable<typeof x> => Boolean(x));
 
     return (
@@ -5769,7 +6160,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {criticalMetrics.map((item) => {
                 const activeVal = item.row ? (item.row.m3 > 0 ? item.row.m3 : (item.row.m2 > 0 ? item.row.m2 : item.row.m1)) : null;
-                const currentPercentile = Math.max(35, Math.min(96, item.row?.percentile || 78));
+                const currentPercentile = item.currentPercentile;
                 const isAheadOfGroup = currentPercentile >= item.groupScore;
                 const progressToTarget = Math.min(100, Math.round((currentPercentile / item.targetScore) * 100));
 
@@ -5849,7 +6240,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
           {/* 2. SECTION: BİRLEŞİK GELİŞİM VE KARŞILAŞTIRMA GRAFİĞİ BİLEŞENİ (SABİT KURUMSAL GÖRÜNÜM) */}
           <AthleteDevelopmentComparisonChart
             report={currentReport}
-            allReports={reports}
+            allReports={isIntraGroupComparisonEnabled ? intraGroupComparisonPool : reports}
+            intraGroupOnly={isIntraGroupComparisonEnabled}
             height={320}
             onToast={notify}
             defaultChartType="bar"
@@ -5864,17 +6256,17 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   Genel Performans Skalası (%{athleticScore})
                 </span>
                 <span className="text-xs text-slate-600 font-medium">
-                  {groupAthleteCount} Sporcu Arasında {groupRank}. Sırada (Grup Ortalaması: %{groupAvgScore} · Fark: {athleticScore - groupAvgScore >= 0 ? `+${athleticScore - groupAvgScore}` : athleticScore - groupAvgScore} Puan)
+                  {`Yaş ve Cinsiyet Norm Değerlendirmesi (Referans Ortalaması: %${groupAvgScore} · Fark: ${athleticScore - groupAvgScore >= 0 ? `+${athleticScore - groupAvgScore}` : athleticScore - groupAvgScore} Puan)`}
                 </span>
               </div>
               {(() => {
                 const p1BaseScore = currentReport.scoreHistory?.p1Score && currentReport.scoreHistory.p1Score > 0
                   ? currentReport.scoreHistory.p1Score
-                  : Math.max(45, athleticScore - 4);
-                const totalDelta = Math.max(2, athleticScore - p1BaseScore);
+                  : athleticScore;
+                const totalDelta = athleticScore - p1BaseScore;
                 return (
-                  <span className="text-xs text-emerald-800 font-bold tabular-nums">
-                    Toplam Gelişim: +{totalDelta} Puan
+                  <span className={`text-xs font-bold tabular-nums ${totalDelta >= 0 ? 'text-emerald-800' : 'text-rose-700'}`}>
+                    Dönemsel Fark: {totalDelta >= 0 ? `+${totalDelta}` : totalDelta} Puan
                   </span>
                 );
               })()}
@@ -5943,11 +6335,25 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
 
             {/* Executive Evaluator Guidance Note */}
-            <div className="mt-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700">
-              <p className="text-[11px] text-slate-600 leading-relaxed font-sans">
-                <span className="font-bold text-slate-900">Antrenör & Laboratuvar Notu:</span> Sporcumuz, incelenen kritik biyomotorik parametrelerde dönem boyunca istikrarlı bir ilerleme göstermiş ve genel performans düzeyini akran grubu ortalamasının üzerine taşımıştır.
-              </p>
-            </div>
+            {(() => {
+              const needsDevCount = motorRows.filter((m) => evaluateMotorRowTargetAndStatus(m).tier === 'needs_dev').length;
+              const reachedCount = motorRows.filter((m) => evaluateMotorRowTargetAndStatus(m).tier === 'reached').length;
+              const bmiRowPage3 = currentReport.bodyComposition?.find((b) => b.id === 'bmi');
+              const hasHighBmi = Boolean(bmiRowPage3 && isLabRowMeasured(bmiRowPage3) && (bmiRowPage3.sd > 1.0 || bmiRowPage3.status === 'yüksek'));
+              const execNoteText =
+                athleticScore >= groupAvgScore && needsDevCount <= 2 && !hasHighBmi
+                  ? `Sporcumuz, incelenen kritik biyomotorik parametrelerde yaş ve cinsiyet normlarının üzerinde (%${athleticScore}) performans sergilemiş ve mevcut avantajlarını koruma düzeyine taşımıştır.`
+                  : hasHighBmi
+                  ? `Sporcumuzda ${reachedCount > 0 ? `${reachedCount} güçlü parametre bulunmakla birlikte, ` : ''}vücut kütle indeksi referans üst sınırının üzerinde seyrettiğinden ve ${needsDevCount} motorik testte hedef altı değer saptandığından öncelikle vücut kompozisyonu dengesi ile patlayıcı kuvvet/çabukluk drillerine odaklanılmalıdır.`
+                  : `Sporcumuzun ölçülen ${motorRows.length} parametresinde ${reachedCount} test hedefe ulaşmış, ${needsDevCount} test ise gelişim öncelikli olarak belirlenmiştir; bireysel antrenman yüklemesi bu düşük yüzdelikli alanların norm düzeyine taşınmasına göre planlanmalıdır.`;
+              return (
+                <div className="mt-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700">
+                  <p className="text-[11px] text-slate-600 leading-relaxed font-sans">
+                    <span className="font-bold text-slate-900">Antrenör &amp; Laboratuvar Notu:</span> {execNoteText}
+                  </p>
+                </div>
+              );
+            })()}
           </div>
         </div>
 
@@ -5982,25 +6388,20 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       const safeM1 = matchedRow.m1 > 0 ? matchedRow.m1 : 0;
       const safeM2 =
         matchedRow.m2 > 0
-          ? matchedRow.lowerIsBetter
-            ? safeM1 > 0 ? Math.min(safeM1, matchedRow.m2) : matchedRow.m2
-            : safeM1 > 0 ? Math.max(safeM1, matchedRow.m2) : matchedRow.m2
+          ? matchedRow.m2
           : safeM1 > 0
           ? matchedRow.lowerIsBetter
             ? +(safeM1 * 0.96).toFixed(2)
             : +(safeM1 * 1.05).toFixed(1)
           : 0;
-      const activeVal = matchedRow.m3 > 0 ? matchedRow.m3 : safeM1;
-      const tgtVal = matchedRow.lowerIsBetter
-        ? +(Math.min(matchedRow.refMid, safeM2 > 0 ? safeM2 * 0.96 : matchedRow.refMid)).toFixed(2)
-        : +(Math.max(matchedRow.refMid, safeM2 > 0 ? safeM2 * 1.05 : matchedRow.refMid)).toFixed(1);
+      const evalRes = evaluateMotorRowTargetAndStatus(matchedRow);
 
       return {
         metricName: matchedRow.name,
-        currentValue: `${activeVal} ${matchedRow.unit}`,
+        currentValue: `${evalRes.activeVal} ${matchedRow.unit}`,
         estimated2ndValue: `${safeM2} ${matchedRow.unit}`,
-        targetValue: `${tgtVal} ${matchedRow.unit}`,
-        percentile: Math.max(35, Math.min(96, matchedRow.percentile || 65)),
+        targetValue: `${evalRes.targetValue} ${matchedRow.unit}`,
+        percentile: evalRes.percentile,
         drillRecommendation:
           rawItem?.drillRecommendation ||
           `${matchedRow.name} odaklı spesifik koordinasyon, kuvvet ve nöromüsküler gelişim drilleri`,
@@ -6030,7 +6431,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     }
 
     const finalComment =
-      !currentReport.expertComment || isStaleExpertComment(currentReport.expertComment)
+      !currentReport.expertComment || isStaleExpertComment(currentReport.expertComment, currentReport)
         ? generateAthleteInterpretiveExpertComment(currentReport)
         : currentReport.expertComment;
 
@@ -6499,6 +6900,30 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 </button>
               )}
             </div>
+
+            {/* Grup İçi Kıyaslama Toggle (En Üst Kontrol Alanı — Sıralama Yazmaz) */}
+            <button
+              type="button"
+              onClick={handleToggleIntraGroupComparison}
+              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 border transition-all cursor-pointer whitespace-nowrap ${
+                isIntraGroupComparisonEnabled
+                  ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs ring-2 ring-indigo-300/50'
+                  : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+              }`}
+              title="Aktif olduğunda grup ortalaması yalnızca seçili/yüklü toplu karne grubu kendi içinde hesaplanır (karnede sıralama gösterilmez)"
+            >
+              <Users className={`w-3.5 h-3.5 shrink-0 ${isIntraGroupComparisonEnabled ? 'text-white' : 'text-indigo-600'}`} />
+              <span>Grup İçi Kıyaslama</span>
+              <span
+                className={`px-1.5 py-0.5 rounded text-[10px] font-black tabular-nums ${
+                  isIntraGroupComparisonEnabled
+                    ? 'bg-white/20 text-white'
+                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                }`}
+              >
+                {isIntraGroupComparisonEnabled ? `Açık (${intraGroupComparisonPool.length})` : 'Kapalı'}
+              </span>
+            </button>
 
             {/* Primary Action Buttons: PDF Preview + A4 Print + Download PDF + Logout */}
             <div className="flex items-center gap-1.5 sm:gap-2">
@@ -8324,6 +8749,25 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   (Toplam {selectedBatchReports.length * 7} A4 Karne Sayfası)
                 </span>
               </div>
+
+              <button
+                type="button"
+                onClick={handleToggleIntraGroupComparison}
+                className={`px-3 py-1.5 rounded-xl border text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  isIntraGroupComparisonEnabled
+                    ? 'bg-indigo-600 border-indigo-400 text-white shadow-sm ring-2 ring-indigo-400/40'
+                    : 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200'
+                }`}
+                title="Aktif olduğunda seçili/yüklü toplu karne grubu kendi içinde ortalamaya göre kıyaslanır (karnede sıralama yazmaz)"
+              >
+                <Users className={`w-3.5 h-3.5 shrink-0 ${isIntraGroupComparisonEnabled ? 'text-white' : 'text-indigo-400'}`} />
+                <span>Grup İçi Kıyaslama:</span>
+                <span className="px-1.5 py-0.5 rounded bg-black/25 text-[10.5px] font-black tabular-nums">
+                  {isIntraGroupComparisonEnabled
+                    ? `Açık (${selectedBatchReports.length > 1 ? selectedBatchReports.length : batchReports.length} Sporcu)`
+                    : 'Kapalı'}
+                </span>
+              </button>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -8366,30 +8810,77 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
             </div>
           </div>
 
-          {/* Search Filter for Batch Table */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="relative flex-1 max-w-md">
-              <input
-                type="text"
-                value={batchSearchQuery}
-                onChange={(e) => setBatchSearchQuery(e.target.value)}
-                placeholder="Tablodaki sporcu adı, branş veya sporcu kodu içinde ara..."
-                className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500"
-              />
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              {batchSearchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setBatchSearchQuery('')}
-                  className="text-slate-400 hover:text-slate-600 absolute right-2.5 top-1/2 -translate-y-1/2"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
+          {/* Search Filter + Inline Audit Button for Batch Table */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5 flex-1">
+              <div className="relative flex-1 min-w-[240px] max-w-md">
+                <input
+                  type="text"
+                  value={batchSearchQuery}
+                  onChange={(e) => setBatchSearchQuery(e.target.value)}
+                  placeholder="Tablodaki sporcu adı, branş veya sporcu kodu içinde ara..."
+                  className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                {batchSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setBatchSearchQuery('')}
+                    className="text-slate-400 hover:text-slate-600 absolute right-2.5 top-1/2 -translate-y-1/2"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {batchLiveAuditSummary && (() => {
+                const issueCount =
+                  batchLiveAuditSummary.errorAthletesCount +
+                  batchLiveAuditSummary.warningAthletesCount;
+                const hasCritical = batchLiveAuditSummary.errorAthletesCount > 0;
+                return (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLabAuditModal({
+                        isOpen: true,
+                        summary: batchLiveAuditSummary,
+                        fileName: batchSourceFileName || 'Toplu Sporcu Listesi',
+                      })
+                    }
+                    className={`px-3 py-2 rounded-xl text-xs font-extrabold border flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+                      hasCritical
+                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-300 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-800'
+                        : issueCount > 0
+                        ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800'
+                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+                    }`}
+                    title="Uyarı veya eksik veri tespit edilen sporcuları bu ekranda düzenleyip karneye yansıtın"
+                  >
+                    {issueCount > 0 ? (
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    ) : (
+                      <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span>
+                      {issueCount > 0
+                        ? `Uyarıları Düzelt (${issueCount})`
+                        : 'Veri Denetimi (Temiz)'}
+                    </span>
+                  </button>
+                );
+              })()}
             </div>
 
-            <div className="text-[11px] text-slate-500 dark:text-slate-400">
-              Tablodaki herhangi bir sporcunun <strong>&ldquo;Karneyi Aç&rdquo;</strong> veya <strong>&ldquo;PDF Önizle&rdquo;</strong> butonuna tıklayarak 5 sayfalık karnesini anında inceleyebilirsiniz.
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-2">
+              {isIntraGroupComparisonEnabled && (
+                <span className="px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-extrabold">
+                  Grup İçi Sıralama Tabloda Aktif (Karne içinde gizli)
+                </span>
+              )}
+              <span>
+                Tablodaki herhangi bir sporcunun <strong>&ldquo;Karneyi Aç&rdquo;</strong> veya <strong>&ldquo;PDF Önizle&rdquo;</strong> butonuna tıklayarak 5 sayfalık karnesini anında inceleyebilirsiniz.
+              </span>
             </div>
           </div>
 
@@ -8409,6 +8900,21 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       className="w-4 h-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500 cursor-pointer"
                     />
                   </th>
+                  {isIntraGroupComparisonEnabled && (
+                    <th className="py-3 px-3 font-extrabold text-center whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setBatchRankSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+                        }
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-100/80 hover:bg-indigo-200/80 dark:bg-indigo-950/70 dark:hover:bg-indigo-900/70 text-indigo-800 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                        title="Grup içi sıralama yönünü değiştir (1 → N / N → 1)"
+                      >
+                        <span>Sıralama</span>
+                        <ArrowUpDown className="w-3 h-3 shrink-0" />
+                      </button>
+                    </th>
+                  )}
                   <th className="py-3 px-3 font-extrabold">Sporcu Adı &amp; Kodu</th>
                   <th className="py-3 px-3 font-extrabold">Branş / Yaş / Cinsiyet</th>
                   <th className="py-3 px-3 font-extrabold text-center">Boy / Kilo / Yağ %</th>
@@ -8421,8 +8927,9 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200/80 dark:divide-slate-800">
-                {filteredBatchReports.map((rep, idx) => {
+                {displayedBatchReports.map((rep, idx) => {
                   const isSelected = selectedBatchIds.includes(rep.id);
+                  const rankInfo = batchIntraGroupRanks.get(rep.id);
 
                   const getActiveRowVal = (
                     list: LabParameterRow[],
@@ -8465,17 +8972,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   const vo2Val = rep.cardio.test3Vo2 > 0 ? rep.cardio.test3Vo2 : rep.cardio.test1Vo2 > 0 ? rep.cardio.test1Vo2 : rep.cardio.test2Vo2 > 0 ? rep.cardio.test2Vo2 : 0;
                   const pacerDistVal = rep.cardio.test3Distance > 0 ? rep.cardio.test3Distance : rep.cardio.test1Distance > 0 ? rep.cardio.test1Distance : rep.cardio.test2Distance;
 
-                  const validMotorPcts = getDisplayedMotorPerformance(rep)
-                    .map((m) => m.percentile || 50);
-                  const avgPct = validMotorPcts.length > 0 ? Math.round(validMotorPcts.reduce((a, b) => a + b, 0) / validMotorPcts.length) : 74;
-
-                  const activeScore = rep.scoreHistory.p3Score > 0
-                    ? rep.scoreHistory.p3Score
-                    : rep.scoreHistory.p1Score > 0
-                    ? rep.scoreHistory.p1Score
-                    : rep.scoreHistory.p2Score > 0
-                    ? rep.scoreHistory.p2Score
-                    : avgPct;
+                  const activeScore = getBatchRowActiveScore(rep);
 
                   const displayDate = (rep.date3 && rep.date3 !== '—' && rep.date3 !== '')
                     ? rep.date3
@@ -8500,6 +8997,32 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                           className="w-4 h-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500 cursor-pointer"
                         />
                       </td>
+                      {isIntraGroupComparisonEnabled && (
+                        <td className="py-3 px-3 text-center font-sans tabular-nums">
+                          {rankInfo ? (
+                            <div className="inline-flex flex-col items-center">
+                              <span
+                                className={`inline-flex items-center justify-center min-w-[34px] px-2 py-1 rounded-lg font-black text-xs border ${
+                                  rankInfo.rank === 1
+                                    ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-700'
+                                    : rankInfo.rank === 2
+                                    ? 'bg-slate-200 text-slate-800 border-slate-300 dark:bg-slate-700 dark:text-slate-100 dark:border-slate-600'
+                                    : rankInfo.rank === 3
+                                    ? 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-950/60 dark:text-orange-300 dark:border-orange-700'
+                                    : 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-800'
+                                }`}
+                              >
+                                #{rankInfo.rank}
+                              </span>
+                              <span className="text-[9.5px] font-semibold text-slate-400 mt-0.5">
+                                {rankInfo.rank}. / {rankInfo.total}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 font-bold">—</span>
+                          )}
+                        </td>
+                      )}
                       <td className="py-3 px-3">
                         <div className="flex items-center gap-2.5">
                           <div className="w-8 h-8 rounded-lg bg-slate-900 text-white font-black text-[11px] flex items-center justify-center shrink-0">
@@ -10114,18 +10637,39 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
               {/* Expert Comment */}
               <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Uzman Değerlendirmesi ve Antrenör Notu
-                </label>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label className="block font-bold text-slate-700 dark:text-slate-300">
+                    Uzman Değerlendirmesi ve Antrenör Notu
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const regenerated = generateAthleteInterpretiveExpertComment(currentReport);
+                      handleUpdateCurrentReport({
+                        ...currentReport,
+                        isManualExpertComment: false,
+                        expertComment: regenerated,
+                      });
+                      notify('Uzman görüşü normlara ve hedef değerlere göre otomatik yenilendi.');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-[11px] font-bold cursor-pointer"
+                  >
+                    Otomatik Uzman Görüşü Oluştur
+                  </button>
+                </div>
                 <textarea
-                  rows={3}
+                  rows={4}
                   value={
-                    !currentReport.expertComment || isStaleExpertComment(currentReport.expertComment)
+                    !currentReport.expertComment || isStaleExpertComment(currentReport.expertComment, currentReport)
                       ? generateAthleteInterpretiveExpertComment(currentReport)
                       : currentReport.expertComment
                   }
                   onChange={(e) =>
-                    handleUpdateCurrentReport({ ...currentReport, expertComment: e.target.value })
+                    handleUpdateCurrentReport({
+                      ...currentReport,
+                      isManualExpertComment: true,
+                      expertComment: e.target.value,
+                    })
                   }
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
                 />
@@ -10382,9 +10926,29 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         summary={labAuditModal.summary}
         fileName={labAuditModal.fileName}
         onClose={() => setLabAuditModal((prev) => ({ ...prev, isOpen: false }))}
-        onConfirmAll={() => {
+        onConfirmAll={(updatedAthletes) => {
+          if (updatedAthletes && updatedAthletes.length > 0) {
+            const persistedBranding = getStoredLabSchoolBranding();
+            const brandedUpdated = updatedAthletes.map((a) =>
+              applyBrandingToReport(a, persistedBranding)
+            );
+            const updatedMap = new Map(brandedUpdated.map((a) => [a.id, a]));
+
+            setBatchReports((prev) =>
+              recalculateGroupAveragesAndRanks(
+                prev.map((rep) => updatedMap.get(rep.id) || rep)
+              )
+            );
+
+            const nextReports = applyBrandingToReports(
+              reports.map((rep) => updatedMap.get(rep.id) || rep),
+              persistedBranding
+            );
+            setReports(nextReports);
+            saveStoredLabReports(nextReports);
+          }
           setLabAuditModal((prev) => ({ ...prev, isOpen: false }));
-          notify('✓ Tüm sporcu verileri doğrulandı ve karne havuzuna aktarıldı.');
+          notify('✓ Düzenlenen sporcu verileri doğrulandı ve karne havuzuna kaydedildi.');
         }}
       />
 

@@ -171,6 +171,7 @@ export interface SportsFlyLabReport {
     groupPositionPercentile?: number;
   };
   expertComment: string;
+  isManualExpertComment?: boolean;
   aiRecommendations?: LabAiPerformanceAnalysis;
   parentInfo?: {
     anneAdSoyad?: string;
@@ -192,7 +193,304 @@ export interface SportsFlyLabReport {
   isAiForecast?: boolean;
 }
 
-export function isStaleExpertComment(comment?: string): boolean {
+export type MotorTargetTier = 'reached' | 'watch' | 'needs_dev';
+
+export interface MotorRowEvaluation {
+  tier: MotorTargetTier;
+  statusHeaderLabel: 'HEDEFE ULAŞTI' | 'TAKİP EDİLMELİ' | 'GELİŞİM GÖSTERMELİ';
+  verdict: 'Güçlü yön' | 'Korunmalı' | 'Geliştirilmesi önerilir';
+  targetValue: number;
+  activeVal: number;
+  sd: number;
+  percentile: number;
+}
+
+/**
+ * Converts a Z-score (SD) to a realistic population percentile [5..97] via standard normal CDF.
+ */
+export function sdToPercentile(sd: number): number {
+  const z = Math.max(-4, Math.min(4, Number.isFinite(sd) ? sd : 0));
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989422804014327 * Math.exp((-z * z) / 2);
+  const p =
+    d *
+    t *
+    (0.31938153 +
+      t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  const cdf = z >= 0 ? 1 - p : p;
+  return Math.max(5, Math.min(97, Math.round(cdf * 100)));
+}
+
+type NormTriplet = [number, number, number]; // [refLow, refMid, refHigh]
+const NORM_AGE_STEPS = [6, 8, 10, 12, 14, 16, 18] as const;
+
+function interpolateAgeNorm(ageYears: number, table: readonly NormTriplet[]): NormTriplet {
+  const clamped = Math.max(6, Math.min(18, Number.isFinite(ageYears) ? ageYears : 12));
+  let lowerIdx = 0;
+  for (let i = 0; i < NORM_AGE_STEPS.length - 1; i++) {
+    if (clamped >= NORM_AGE_STEPS[i]) lowerIdx = i;
+  }
+  const upperIdx = Math.min(NORM_AGE_STEPS.length - 1, lowerIdx + 1);
+  if (lowerIdx === upperIdx) {
+    return table[lowerIdx];
+  }
+  const a0 = NORM_AGE_STEPS[lowerIdx];
+  const a1 = NORM_AGE_STEPS[upperIdx];
+  const ratio = (clamped - a0) / Math.max(1, a1 - a0);
+  const t0 = table[lowerIdx];
+  const t1 = table[upperIdx];
+  return [
+    Number((t0[0] + (t1[0] - t0[0]) * ratio).toFixed(2)),
+    Number((t0[1] + (t1[1] - t0[1]) * ratio).toFixed(2)),
+    Number((t0[2] + (t1[2] - t0[2]) * ratio).toFixed(2)),
+  ];
+}
+
+// Anthropometric norms anchored at age 10 to the exact clinic reference table:
+// BKİ (13.6/16.7/22.8), Boy (127.2/140.1/153.0), Ağırlık (24.0/33.7/54.3), Beden Yağ % (16.0/22.9/35.2),
+// Subscapula (5.1/9.7/26.1), Triceps (8.4/15.5/31.6), Calf d.k.k. (9.5/20.2/33.6), S. Spinale (4.0/10.8/25.2),
+// Humerus (4.7/5.5/6.2), Femur (7.2/8.6/9.9), Calf çevre (21.4/27.5/33.1), Biceps çevre (15.9/20.3/25.8)
+const MALE_BODY_NORMS: Record<string, readonly NormTriplet[]> = {
+  height: [[109.0, 116.0, 123.0], [118.5, 128.0, 138.0], [127.2, 140.1, 153.0], [139.0, 151.0, 163.0], [153.0, 164.0, 175.0], [164.0, 173.0, 182.0], [168.0, 177.0, 186.0]],
+  weight: [[17.5, 21.0, 25.5], [20.8, 27.0, 38.0], [24.0, 33.7, 54.3], [32.0, 42.0, 58.0], [42.0, 52.5, 66.0], [52.0, 63.0, 76.0], [57.0, 69.0, 81.0]],
+  bmi: [[13.4, 15.5, 19.0], [13.5, 16.1, 21.0], [13.6, 16.7, 22.8], [14.8, 17.8, 23.2], [16.2, 19.3, 23.8], [17.6, 20.8, 24.5], [18.5, 21.8, 25.0]],
+  body_fat: [[14.0, 20.0, 31.0], [15.0, 21.5, 33.0], [16.0, 22.9, 35.2], [13.0, 19.5, 30.0], [10.0, 16.0, 25.0], [8.5, 13.5, 21.0], [8.0, 12.5, 19.5]],
+  subscapula: [[4.5, 8.5, 21.0], [4.8, 9.1, 23.5], [5.1, 9.7, 26.1], [5.1, 9.7, 24.5], [5.2, 9.8, 22.0], [5.4, 10.0, 20.5], [5.5, 10.2, 20.0]],
+  triceps: [[7.5, 13.8, 26.0], [8.0, 14.6, 28.8], [8.4, 15.5, 31.6], [7.8, 14.2, 28.5], [6.8, 12.0, 24.0], [6.0, 10.5, 21.0], [5.8, 10.0, 20.0]],
+  calf_skf: [[8.0, 17.0, 28.0], [8.8, 18.6, 30.8], [9.5, 20.2, 33.6], [8.8, 18.0, 30.0], [7.5, 15.0, 25.5], [6.5, 12.5, 22.0], [6.0, 11.5, 20.5]],
+  supraspinal: [[3.6, 9.2, 20.5], [3.8, 10.0, 22.8], [4.0, 10.8, 25.2], [4.0, 10.4, 24.0], [4.2, 10.0, 22.0], [4.4, 9.8, 20.5], [4.5, 9.8, 20.0]],
+  iliac_skf: [[3.6, 9.2, 20.5], [3.8, 10.0, 22.8], [4.0, 10.8, 25.2], [4.0, 10.4, 24.0], [4.2, 10.0, 22.0], [4.4, 9.8, 20.5], [4.5, 9.8, 20.0]],
+  humerus: [[3.9, 4.6, 5.2], [4.3, 5.1, 5.7], [4.7, 5.5, 6.2], [5.1, 5.9, 6.7], [5.6, 6.4, 7.2], [6.0, 6.8, 7.6], [6.2, 7.0, 7.8]],
+  femur: [[6.0, 7.2, 8.3], [6.6, 7.9, 9.1], [7.2, 8.6, 9.9], [7.7, 9.1, 10.4], [8.2, 9.5, 10.8], [8.5, 9.8, 11.1], [8.7, 10.0, 11.3]],
+  calf_girth: [[18.5, 23.5, 28.5], [20.0, 25.5, 30.8], [21.4, 27.5, 33.1], [23.8, 30.0, 36.0], [26.5, 32.8, 39.0], [29.0, 35.0, 41.0], [30.5, 36.2, 42.0]],
+  biceps_girth: [[13.8, 17.5, 21.8], [14.8, 18.9, 23.8], [15.9, 20.3, 25.8], [17.8, 22.4, 28.0], [20.2, 25.0, 30.8], [22.8, 27.5, 33.2], [24.2, 29.0, 34.8]],
+};
+
+const FEMALE_BODY_NORMS: Record<string, readonly NormTriplet[]> = {
+  height: [[108.0, 115.0, 122.0], [118.0, 127.5, 137.5], [127.2, 140.1, 153.0], [140.0, 151.0, 161.5], [151.0, 160.0, 169.0], [154.0, 162.0, 171.0], [155.0, 163.0, 172.0]],
+  weight: [[17.0, 20.5, 25.0], [20.5, 26.8, 37.5], [24.0, 33.7, 54.3], [32.5, 42.5, 57.5], [42.0, 51.0, 62.5], [46.5, 55.5, 65.5], [48.0, 57.5, 67.5]],
+  bmi: [[13.4, 15.3, 18.8], [13.5, 16.0, 20.8], [13.6, 16.7, 22.8], [15.0, 18.0, 23.2], [16.4, 19.5, 23.8], [17.6, 20.8, 24.5], [18.4, 21.3, 24.9]],
+  body_fat: [[14.5, 20.5, 31.5], [15.2, 21.8, 33.5], [16.0, 22.9, 35.2], [15.5, 22.0, 33.0], [15.5, 21.5, 31.0], [16.0, 21.5, 29.0], [16.0, 22.0, 29.0]],
+  subscapula: [[4.5, 8.5, 21.0], [4.8, 9.1, 23.5], [5.1, 9.7, 26.1], [5.4, 10.2, 26.0], [5.8, 10.8, 25.5], [6.0, 11.2, 25.0], [6.2, 11.5, 25.0]],
+  triceps: [[7.5, 13.8, 26.0], [8.0, 14.6, 28.8], [8.4, 15.5, 31.6], [8.5, 15.5, 30.5], [8.8, 15.8, 29.5], [9.0, 16.0, 29.0], [9.2, 16.2, 29.0]],
+  calf_skf: [[8.0, 17.0, 28.0], [8.8, 18.6, 30.8], [9.5, 20.2, 33.6], [9.2, 19.5, 32.0], [9.0, 18.8, 30.5], [9.0, 18.5, 29.5], [9.0, 18.5, 29.5]],
+  supraspinal: [[3.6, 9.2, 20.5], [3.8, 10.0, 22.8], [4.0, 10.8, 25.2], [4.2, 11.0, 25.0], [4.5, 11.2, 24.5], [4.6, 11.4, 24.0], [4.8, 11.5, 24.0]],
+  iliac_skf: [[3.6, 9.2, 20.5], [3.8, 10.0, 22.8], [4.0, 10.8, 25.2], [4.2, 11.0, 25.0], [4.5, 11.2, 24.5], [4.6, 11.4, 24.0], [4.8, 11.5, 24.0]],
+  humerus: [[3.8, 4.5, 5.1], [4.2, 5.0, 5.6], [4.7, 5.5, 6.2], [5.0, 5.7, 6.4], [5.2, 5.9, 6.6], [5.3, 6.0, 6.7], [5.4, 6.1, 6.8]],
+  femur: [[5.9, 7.1, 8.2], [6.5, 7.8, 9.0], [7.2, 8.6, 9.9], [7.5, 8.8, 10.1], [7.7, 9.0, 10.3], [7.8, 9.1, 10.4], [7.9, 9.2, 10.5]],
+  calf_girth: [[18.2, 23.2, 28.2], [19.8, 25.2, 30.5], [21.4, 27.5, 33.1], [23.5, 29.8, 35.5], [25.5, 31.8, 37.5], [26.8, 33.0, 38.5], [27.5, 33.5, 39.0]],
+  biceps_girth: [[13.5, 17.2, 21.5], [14.7, 18.7, 23.6], [15.9, 20.3, 25.8], [17.4, 21.8, 27.2], [18.8, 23.2, 28.5], [19.8, 24.2, 29.5], [20.5, 24.8, 30.0]],
+};
+
+// Motor norms keep refLow < refMid < refHigh convention; for lowerIsBetter tests refLow = fastest/best, refMid = target norm, refHigh = slow boundary
+const MALE_MOTOR_NORMS: Record<string, readonly NormTriplet[]> = {
+  sprint: [[4.10, 4.65, 5.20], [3.80, 4.30, 4.85], [3.50, 3.95, 4.45], [3.20, 3.65, 4.10], [2.95, 3.35, 3.80], [2.75, 3.10, 3.50], [2.65, 2.98, 3.35]],
+  agility_50m: [[20.5, 23.0, 25.5], [19.2, 21.6, 24.2], [18.0, 20.4, 22.8], [17.0, 19.2, 21.6], [16.0, 18.2, 20.6], [15.2, 17.3, 19.6], [14.8, 16.8, 19.0]],
+  agility_pro: [[5.80, 6.60, 7.50], [5.45, 6.20, 7.05], [5.15, 5.85, 6.65], [4.90, 5.55, 6.30], [4.65, 5.25, 5.95], [4.45, 5.00, 5.65], [4.35, 4.85, 5.45]],
+  vertical_jump: [[14, 20, 27], [17, 23, 30], [20, 27, 34], [24, 31, 39], [29, 37, 46], [34, 43, 52], [38, 47, 57]],
+  standing_long_jump: [[95, 118, 142], [112, 136, 160], [128, 152, 178], [144, 170, 196], [164, 192, 220], [182, 212, 240], [195, 224, 252]],
+  flexibility: [[16, 23, 31], [16, 24, 32], [17, 25, 33], [18, 26, 35], [19, 28, 37], [21, 30, 39], [22, 31, 40]],
+  balance: [[3, 9, 17], [2, 7, 15], [1, 6, 13], [1, 5, 12], [1, 4, 10], [0, 3, 9], [0, 3, 8]],
+  grip_strength_right: [[8, 12, 16], [11, 15, 20], [14, 19, 25], [18, 25, 33], [26, 34, 43], [34, 43, 52], [39, 48, 58]],
+  grip_strength_left: [[7.5, 11.5, 15.5], [10.5, 14.5, 19], [13.5, 18, 24], [17, 23.5, 31], [24.5, 32, 41], [32, 41, 50], [37, 46, 56]],
+  arm_speed_right: [[14.0, 17.5, 21.0], [12.5, 15.8, 19.2], [11.2, 14.2, 17.5], [10.0, 12.8, 15.8], [9.0, 11.5, 14.2], [8.3, 10.6, 13.0], [8.0, 10.2, 12.5]],
+  arm_speed_left: [[14.5, 18.0, 21.5], [13.0, 16.3, 19.8], [11.7, 14.7, 18.0], [10.5, 13.3, 16.3], [9.4, 12.0, 14.8], [8.7, 11.1, 13.6], [8.4, 10.7, 13.0]],
+  arm_speed_right_hits: [[70, 98, 128], [82, 114, 146], [96, 130, 166], [108, 145, 184], [118, 158, 200], [126, 168, 212], [132, 176, 222]],
+  arm_speed_left_hits: [[65, 92, 122], [78, 108, 140], [90, 124, 160], [102, 138, 178], [112, 152, 194], [120, 162, 206], [126, 170, 216]],
+  reaction: [[0.24, 0.32, 0.42], [0.22, 0.29, 0.38], [0.20, 0.27, 0.35], [0.18, 0.25, 0.33], [0.17, 0.23, 0.30], [0.16, 0.21, 0.28], [0.15, 0.20, 0.27]],
+  back_strength: [[18, 28, 38], [24, 35, 48], [30, 44, 58], [40, 56, 74], [58, 78, 100], [76, 98, 122], [88, 112, 138]],
+  aerobic: [[32, 38, 45], [34, 40, 47], [36, 43, 50], [38, 45, 52], [41, 48, 55], [43, 50, 58], [44, 52, 60]],
+};
+
+const FEMALE_MOTOR_NORMS: Record<string, readonly NormTriplet[]> = {
+  sprint: [[4.20, 4.75, 5.30], [3.95, 4.45, 4.98], [3.65, 4.12, 4.62], [3.40, 3.85, 4.30], [3.25, 3.68, 4.12], [3.15, 3.55, 3.98], [3.10, 3.48, 3.90]],
+  agility_50m: [[21.0, 23.6, 26.2], [19.8, 22.2, 24.8], [18.8, 21.2, 23.6], [17.8, 20.2, 22.6], [17.4, 19.8, 22.2], [17.2, 19.6, 22.0], [17.0, 19.4, 21.8]],
+  agility_pro: [[5.95, 6.75, 7.65], [5.60, 6.35, 7.20], [5.35, 6.05, 6.85], [5.15, 5.82, 6.60], [4.95, 5.60, 6.35], [4.80, 5.45, 6.20], [4.75, 5.38, 6.10]],
+  vertical_jump: [[13, 19, 25], [16, 22, 28], [18, 25, 32], [21, 28, 35], [22, 30, 38], [23, 31, 40], [24, 32, 41]],
+  standing_long_jump: [[90, 112, 136], [105, 128, 152], [120, 144, 168], [132, 158, 184], [140, 166, 192], [144, 170, 198], [146, 174, 202]],
+  flexibility: [[18, 25, 33], [19, 26, 34], [20, 27, 36], [21, 29, 38], [22, 30, 39], [22, 31, 40], [23, 32, 41]],
+  balance: [[3, 9, 17], [2, 7, 15], [1, 6, 13], [1, 5, 12], [1, 4, 10], [0, 3, 9], [0, 3, 8]],
+  grip_strength_right: [[7.5, 11, 15], [10, 14, 18.5], [13, 17.5, 22.5], [16, 22, 28.5], [19.5, 26, 33], [21.5, 28.5, 35.5], [22.5, 29.5, 37]],
+  grip_strength_left: [[7, 10.5, 14], [9.5, 13.5, 17.5], [12.5, 16.5, 21.5], [15, 20.5, 27], [18.5, 24.5, 31], [20.5, 27, 34], [21.5, 28, 35]],
+  arm_speed_right: [[14.5, 18.0, 21.5], [13.0, 16.3, 19.8], [11.8, 14.8, 18.0], [10.6, 13.4, 16.4], [9.8, 12.4, 15.2], [9.3, 11.8, 14.5], [9.0, 11.5, 14.2]],
+  arm_speed_left: [[15.0, 18.5, 22.0], [13.5, 16.8, 20.3], [12.2, 15.3, 18.5], [11.0, 13.9, 16.9], [10.2, 12.9, 15.8], [9.7, 12.3, 15.0], [9.4, 12.0, 14.7]],
+  arm_speed_right_hits: [[68, 94, 124], [80, 110, 142], [92, 126, 162], [104, 140, 178], [112, 150, 192], [118, 158, 202], [122, 164, 208]],
+  arm_speed_left_hits: [[64, 88, 118], [76, 104, 136], [88, 120, 156], [98, 134, 172], [106, 144, 186], [112, 152, 196], [116, 158, 202]],
+  reaction: [[0.25, 0.33, 0.43], [0.23, 0.30, 0.39], [0.21, 0.28, 0.36], [0.19, 0.26, 0.34], [0.18, 0.24, 0.31], [0.17, 0.22, 0.29], [0.16, 0.21, 0.28]],
+  back_strength: [[16, 25, 34], [21, 31, 42], [26, 38, 50], [33, 46, 60], [40, 55, 72], [46, 62, 80], [50, 68, 86]],
+  aerobic: [[30, 35, 42], [31, 37, 44], [32, 38, 45], [33, 39, 46], [34, 40, 47], [35, 41, 48], [35, 42, 49]],
+};
+
+/**
+ * Updates bodyComposition and motorPerformance refLow/refMid/refHigh strictly from the athlete's
+ * chronological age and gender (WHO / Eurofit / ACSM normative standards).
+ */
+export function applyAgeGenderNormsToReport(report: SportsFlyLabReport): void {
+  if (!report) return;
+  const age = Math.max(6, Math.min(35, Number(report.ageYears) || 12));
+  const genderStr = String(report.gender || '').toLowerCase();
+  const isFemale = genderStr.includes('kad') || genderStr.includes('kız') || genderStr.includes('kiz');
+  const bodyTable = isFemale ? FEMALE_BODY_NORMS : MALE_BODY_NORMS;
+  const motorTable = isFemale ? FEMALE_MOTOR_NORMS : MALE_MOTOR_NORMS;
+
+  const heightNorm = interpolateAgeNorm(age, bodyTable.height);
+
+  if (Array.isArray(report.bodyComposition)) {
+    report.bodyComposition.forEach((row) => {
+      if (bodyTable[row.id]) {
+        const [low, mid, high] = interpolateAgeNorm(age, bodyTable[row.id]);
+        row.refLow = low;
+        row.refMid = mid;
+        row.refHigh = high;
+      } else if (row.id === 'sitting_height') {
+        row.refLow = Number((heightNorm[0] * 0.52).toFixed(1));
+        row.refMid = Number((heightNorm[1] * 0.523).toFixed(1));
+        row.refHigh = Number((heightNorm[2] * 0.526).toFixed(1));
+      } else if (row.id === 'arm_span') {
+        row.refLow = Number((heightNorm[0] * 1.00).toFixed(1));
+        row.refMid = Number((heightNorm[1] * 1.008).toFixed(1));
+        row.refHigh = Number((heightNorm[2] * 1.015).toFixed(1));
+      }
+    });
+  }
+
+  if (Array.isArray(report.motorPerformance)) {
+    report.motorPerformance.forEach((row) => {
+      if (row.id === 'agility') {
+        const sampleVal = row.m3 > 0 ? row.m3 : row.m1 > 0 ? row.m1 : row.m2;
+        const isProAgilityScale = sampleVal > 0 && sampleVal <= 11.5;
+        const [low, mid, high] = interpolateAgeNorm(
+          age,
+          isProAgilityScale ? motorTable.agility_pro : motorTable.agility_50m
+        );
+        row.refLow = low;
+        row.refMid = mid;
+        row.refHigh = high;
+        row.lowerIsBetter = true;
+      } else if (row.id === 'arm_speed_right' || row.id === 'arm_speed_left') {
+        const sampleVal = row.m3 > 0 ? row.m3 : row.m1 > 0 ? row.m1 : row.m2;
+        const isSecondsProtocol = sampleVal > 0 && sampleVal <= 35;
+        const tableKey =
+          row.id === 'arm_speed_right'
+            ? isSecondsProtocol
+              ? 'arm_speed_right'
+              : 'arm_speed_right_hits'
+            : isSecondsProtocol
+            ? 'arm_speed_left'
+            : 'arm_speed_left_hits';
+        const [low, mid, high] = interpolateAgeNorm(age, motorTable[tableKey]);
+        row.refLow = low;
+        row.refMid = mid;
+        row.refHigh = high;
+        if (isSecondsProtocol) {
+          row.lowerIsBetter = true;
+          row.unit = 'sn';
+        } else {
+          row.lowerIsBetter = false;
+          row.unit = 'atım';
+          row.description =
+            row.id === 'arm_speed_right'
+              ? 'Sağ el ile 50 sn içinde disklere yapılan toplam vuruş (atım) sayısı.'
+              : 'Sol el ile 50 sn içinde disklere yapılan toplam vuruş (atım) sayısı.';
+        }
+      } else if (motorTable[row.id]) {
+        const [low, mid, high] = interpolateAgeNorm(age, motorTable[row.id]);
+        row.refLow = low;
+        row.refMid = mid;
+        row.refHigh = high;
+      }
+    });
+  }
+}
+
+/**
+ * Single Source of Truth for evaluating any measured Motor Performance row:
+ * guarantees targetValue, percentile, SD, and verdict/status pill NEVER contradict each other.
+ */
+export function evaluateMotorRowTargetAndStatus(row: LabParameterRow): MotorRowEvaluation {
+  const isBalance = row.id === 'balance' || row.unit === 'hata';
+  const activeVal = row.m3 > 0 ? row.m3 : row.m2 > 0 ? row.m2 : row.m1;
+  const span = Math.max(0.05, (row.refHigh - row.refLow) / 4);
+  const rawDiff = row.lowerIsBetter ? row.refMid - activeVal : activeVal - row.refMid;
+  const sd = Number((rawDiff / span).toFixed(2));
+  const percentile = sdToPercentile(sd);
+  const decimals = row.id === 'reaction' || row.id === 'sprint' || row.id === 'agility' ? 2 : 1;
+
+  // Strict normative achievement & tier rules
+  let tier: MotorTargetTier = 'watch';
+  if (row.lowerIsBetter) {
+    if (sd >= 0.67 && activeVal <= row.refMid) {
+      tier = 'reached';
+    } else if (activeVal > row.refHigh || sd < -0.4) {
+      tier = 'needs_dev';
+    } else {
+      tier = 'watch';
+    }
+  } else {
+    if (sd >= 0.67 && activeVal >= row.refMid) {
+      tier = 'reached';
+    } else if (activeVal < row.refLow || sd < -0.4) {
+      tier = 'needs_dev';
+    } else {
+      tier = 'watch';
+    }
+  }
+
+  // Target value MUST align strictly with direction (never worse than activeVal, never contradictory like 21.5 sn!)
+  let targetValue: number;
+  if (row.lowerIsBetter) {
+    if (tier === 'needs_dev' || activeVal > row.refMid) {
+      targetValue = Number(row.refMid.toFixed(decimals));
+    } else if (isBalance && activeVal === 0) {
+      targetValue = 0;
+    } else if (tier === 'watch') {
+      targetValue = Number(Math.min(row.refMid, Math.max(row.refLow, activeVal * 0.95)).toFixed(decimals));
+    } else {
+      const nextBest = Math.max(isBalance ? 0 : 0.1, activeVal * 0.96);
+      targetValue = isBalance ? Math.max(0, Math.floor(activeVal)) : Number(nextBest.toFixed(decimals));
+    }
+  } else {
+    const isCountMetric = row.unit === 'atım' || row.unit === 'vuruş' || row.unit === 'dokunma';
+    const roundTarget = (v: number) => (isCountMetric ? Math.round(v) : Number(v.toFixed(1)));
+    if (tier === 'needs_dev' || activeVal < row.refMid) {
+      targetValue = roundTarget(row.refMid);
+    } else if (tier === 'watch') {
+      targetValue = roundTarget(Math.max(row.refMid, Math.min(row.refHigh, activeVal * 1.06)));
+    } else {
+      targetValue = roundTarget(Math.max(row.refHigh, activeVal * 1.04));
+    }
+  }
+
+  const statusHeaderLabel: MotorRowEvaluation['statusHeaderLabel'] =
+    tier === 'reached' ? 'HEDEFE ULAŞTI' : tier === 'watch' ? 'TAKİP EDİLMELİ' : 'GELİŞİM GÖSTERMELİ';
+  const verdict: MotorRowEvaluation['verdict'] =
+    tier === 'reached' ? 'Güçlü yön' : tier === 'watch' ? 'Korunmalı' : 'Geliştirilmesi önerilir';
+
+  return {
+    tier,
+    statusHeaderLabel,
+    verdict,
+    targetValue,
+    activeVal,
+    sd,
+    percentile,
+  };
+}
+
+export function hasRealSecondTestReport(report?: SportsFlyLabReport): boolean {
+  if (!report) return false;
+  const date2Lower = (report.date2 || '').toLowerCase();
+  return Boolean(
+    !report.isAiForecast &&
+      report.date2 &&
+      report.date2 !== '—' &&
+      report.date2.trim() !== '' &&
+      !date2Lower.includes('tahmin') &&
+      !date2Lower.includes('2-4 ay')
+  );
+}
+
+export function isStaleExpertComment(comment?: string, report?: SportsFlyLabReport): boolean {
   if (!comment || !comment.trim()) return true;
   // Normalize string to handle Turkish locale dotless/dotted I casing (I/İ/ı/i) and diacritics
   const norm = comment
@@ -206,6 +504,10 @@ export function isStaleExpertComment(comment?: string): boolean {
     .replace(/ö/g, 'o')
     .replace(/ç/g, 'c');
 
+  const hasFakeSecondTestMentions =
+    (!report || !hasRealSecondTestReport(report)) &&
+    (norm.includes('ii. test') || norm.includes('2. test') || norm.includes('2. olcum'));
+
   return (
     norm.includes('ai projeksiyon') ||
     norm.includes('projeksiyon') ||
@@ -217,8 +519,59 @@ export function isStaleExpertComment(comment?: string): boolean {
     norm.includes('beklenen tahmini') ||
     norm.includes('2. test donemi') ||
     norm.includes('fiziksel gelisim sureci ve motor performans') ||
+    norm.includes('en yuksek potansiyele sahip sporculari') ||
+    norm.includes('gelisimi yas ve cinsiyet standartlarina uygundur') ||
+    norm.includes('dinamik kinetik zincir aktarimini mekanik olarak destekleyen') ||
+    norm.includes('patlayici kuvvet ve ivmelenme mekanigindeki bu yuksek verim') ||
+    norm.includes('yuksek potansiyeli basariyla ust seviyeye tasiyacaktir') ||
+    norm.includes('sirada') ||
+    norm.includes('sporcu arasinda') ||
+    norm.includes('ust siraya') ||
+    norm.includes('2-4 ay arasi') ||
+    norm.includes('artis ongorusu') ||
+    norm.includes('gelisim ivmesi kaydetmistir') ||
+    norm.includes('yukselterek') ||
+    norm.includes('(tahmini') ||
+    norm.includes('tahmini)') ||
+    hasFakeSecondTestMentions ||
     norm.length < 80
   );
+}
+
+function describeMotorDomain(row: LabParameterRow): string {
+  const id = (row.id || '').toLowerCase();
+  const name = (row.name || '').toLowerCase();
+  if (id.includes('grip') || name.includes('pençe') || name.includes('kavrama')) {
+    return 'üst ekstremite izometrik kavrama kuvveti';
+  }
+  if (id.includes('balance') || name.includes('denge') || name.includes('flamingo')) {
+    return 'statik tek ayak denge ve proprioseptif kontrol';
+  }
+  if (id.includes('flexibility') || name.includes('esneklik')) {
+    return 'eklem hareket açıklığı ve hamstring-lomber esneklik';
+  }
+  if (id.includes('vertical') || id.includes('long_jump') || name.includes('sıçrama') || name.includes('uzun atlama')) {
+    return 'alt ekstremite patlayıcı kuvveti ve elastik güç aktarımı';
+  }
+  if (id.includes('sprint') || name.includes('sürat')) {
+    return 'doğrusal ivmelenme ve sprint hızı';
+  }
+  if (id.includes('agility') || name.includes('çabukluk')) {
+    return 'çok yönlü yön değiştirme (COD) ve çeviklik mekaniği';
+  }
+  if (id.includes('arm_speed') || name.includes('kol sürat')) {
+    return 'üst ekstremite nöromüsküler koordinasyon ve hızı';
+  }
+  if (id.includes('reaction') || name.includes('reaksiyon')) {
+    return 'görsel-motor tepki süresi';
+  }
+  if (id.includes('back') || name.includes('sırt')) {
+    return 'gövde ve posterior zincir kuvveti';
+  }
+  if (id.includes('aerobic') || name.includes('mekik') || name.includes('vo2')) {
+    return 'aerobik dayanıklılık kapasitesi';
+  }
+  return 'biyomotorik performans kapasitesi';
 }
 
 export function generateAthleteInterpretiveExpertComment(report: SportsFlyLabReport): string {
@@ -239,96 +592,223 @@ export function generateAthleteInterpretiveExpertComment(report: SportsFlyLabRep
   ) {
     branch = 'Genel Spor Gelişimi';
   }
-  const p1 = report.scoreHistory?.p1Score || 72;
-  const p2 = report.scoreHistory?.p2Score || 78;
-  const scoreDiff = p2 - p1;
-  const d1 = report.date1 || 'I. Ölçüm';
-  const d2 = report.date2 || 'II. Ölçüm';
+  const d1 = report.date1 && report.date1 !== '—' ? report.date1 : 'I. Ölçüm';
+  const hasRealSecondTest = hasRealSecondTestReport(report);
+  const d2 = hasRealSecondTest ? report.date2 : '';
+  const hasRealThirdTest = Boolean(report.date3 && report.date3 !== '—' && report.date3.trim() !== '');
+
+  const p1 = report.scoreHistory?.p1Score || 0;
+  const p2 = hasRealSecondTest ? report.scoreHistory?.p2Score || p1 : 0;
+  const p3 = hasRealThirdTest ? report.scoreHistory?.p3Score || 0 : 0;
+  const activeScore = p3 > 0 ? p3 : p2 > 0 ? p2 : p1;
+  const scoreDiff = hasRealSecondTest ? p2 - p1 : 0;
 
   // Maturation & Biological Growth
   const matStatus = report.maturationStatus || 'Normal Büyüme Hızı';
-  const phvAge = report.phvAge ? `${report.phvAge} yaş` : '13.0 yaş';
+  const phvAge = report.phvAge ? `${report.phvAge} yaş` : '';
   const predHeight = report.predictedAdultHeight ? `${report.predictedAdultHeight.toFixed(1)} cm` : '';
 
-  // Body Composition
-  const boyRow = report.bodyComposition?.find((b) => b.id === 'height' || b.name?.toLowerCase().includes('boy'));
-  const kiloRow = report.bodyComposition?.find((b) => b.id === 'weight' || b.name?.toLowerCase().includes('ağırlık') || b.name?.toLowerCase().includes('kilo'));
-  const yagRow = report.bodyComposition?.find((b) => b.id === 'body_fat' || b.name?.toLowerCase().includes('yağ'));
+  // Body Composition & Anthropometry (WHO/ISAK norms — strictly real measured values, never AI m2 forecast)
+  const boyRow = report.bodyComposition?.find((b) => isLabRowMeasured(b) && (b.id === 'height' || b.name?.toLowerCase().includes('boy')));
+  const kiloRow = report.bodyComposition?.find((b) => isLabRowMeasured(b) && (b.id === 'weight' || b.name?.toLowerCase().includes('ağırlık') || b.name?.toLowerCase().includes('kilo')));
+  const bmiRow = report.bodyComposition?.find((b) => isLabRowMeasured(b) && b.id === 'bmi');
+  const yagRow = report.bodyComposition?.find((b) => isLabRowMeasured(b) && (b.id === 'body_fat' || b.name?.toLowerCase().includes('yağ')));
+
+  const pickRealBodyVal = (row?: LabParameterRow) => {
+    if (!row) return 0;
+    if (hasRealThirdTest && row.m3 > 0) return row.m3;
+    if (hasRealSecondTest && row.m2 > 0) return row.m2;
+    return row.m1 > 0 ? row.m1 : 0;
+  };
+  const computeRealBodySd = (row?: LabParameterRow, val = 0) => {
+    if (!row || val <= 0) return 0;
+    const halfSpan =
+      val >= row.refMid
+        ? Math.max(0.1, (row.refHigh - row.refMid) / 2)
+        : Math.max(0.1, (row.refMid - row.refLow) / 2);
+    return Number(((val - row.refMid) / halfSpan).toFixed(2));
+  };
+
   const boyM1 = boyRow?.m1 || 0;
-  const boyM2 = boyRow?.m2 || boyM1;
+  const boyM2 = hasRealSecondTest ? boyRow?.m2 || 0 : 0;
+  const activeBoy = pickRealBodyVal(boyRow);
   const kiloM1 = kiloRow?.m1 || 0;
-  const kiloM2 = kiloRow?.m2 || kiloM1;
-  const yagM2 = yagRow?.m2 || yagRow?.m1 || 0;
+  const kiloM2 = hasRealSecondTest ? kiloRow?.m2 || 0 : 0;
+  const activeKilo = pickRealBodyVal(kiloRow);
+  const activeBmi =
+    pickRealBodyVal(bmiRow) > 0
+      ? pickRealBodyVal(bmiRow)
+      : activeBoy > 50 && activeKilo > 10
+      ? Number((activeKilo / Math.pow(activeBoy / 100, 2)).toFixed(2))
+      : 0;
+  const yagVal = pickRealBodyVal(yagRow);
 
-  // Somatotype
-  const somatoCat = report.somatotype?.m2?.category || report.somatotype?.m1?.category || 'Mezomorfik Ektomorf';
+  const bmiSd = computeRealBodySd(bmiRow, activeBmi);
+  const weightSd = computeRealBodySd(kiloRow, activeKilo);
+  const fatSd = computeRealBodySd(yagRow, yagVal);
+  const heightSd = computeRealBodySd(boyRow, activeBoy);
 
-  // Group Rank & Percentile
-  const rank = report.groupInfo?.groupRank || 1;
-  const count = report.groupInfo?.groupAthleteCount || 15;
-  const ageRange = report.groupInfo?.ageRange || `${report.ageYears?.toFixed(1) || '11'} Yaş`;
-  const percentile = report.groupInfo?.groupPositionPercentile || 94;
+  const isSomatoNonZero = (s?: { endo: number; meso: number; ecto: number }) =>
+    Boolean(s && (s.endo > 0 || s.meso > 0 || s.ecto > 0));
+  const activeSomato =
+    hasRealThirdTest && isSomatoNonZero(report.somatotype?.m3)
+      ? report.somatotype.m3
+      : hasRealSecondTest && isSomatoNonZero(report.somatotype?.m2)
+      ? report.somatotype.m2
+      : report.somatotype?.m1;
+  const somatoEndo = activeSomato?.endo || 0;
+  const somatoCat = activeSomato?.category && activeSomato.category !== '—' ? activeSomato.category : '';
 
-  // Motor Performance Highlights (Only measured parameters)
+  const isSignificantlyOverweight =
+    activeBmi >= 26.0 ||
+    bmiSd > 1.35 ||
+    weightSd > 1.5 ||
+    fatSd > 1.35 ||
+    somatoEndo >= 5.5;
+  const isMildlyAboveNorm =
+    !isSignificantlyOverweight && (bmiSd > 0.85 || weightSd > 1.0 || fatSd > 0.85);
+  const isUnderweight = bmiSd < -1.1 || weightSd < -1.2;
+
+  // Normative context (strictly NO group ranking / placement order)
+  const athleteAgeLabel = `${Math.floor(report.ageYears || 12)} Yaş`;
+
+  // Evaluate ONLY real measured Motor Performance values (exclude estimated m2 when no real 2nd test occurred)
   const validMotor = getDisplayedMotorPerformance(report);
-  // Sort descending by percentile
-  const sortedStrengths = [...validMotor].sort((a, b) => (b.percentile || 0) - (a.percentile || 0));
-  const top1 = sortedStrengths[0];
-  const top2 = sortedStrengths[1];
+  const evaluated = validMotor.map((row) => {
+    const evalRow: LabParameterRow = hasRealSecondTest
+      ? hasRealThirdTest
+        ? row
+        : { ...row, m3: 0 }
+      : { ...row, m2: 0, m3: hasRealThirdTest ? row.m3 : 0 };
+    return { row, evalRes: evaluateMotorRowTargetAndStatus(evalRow) };
+  });
+  const reachedList = evaluated
+    .filter((e) => e.evalRes.tier === 'reached')
+    .sort((a, b) => b.evalRes.percentile - a.evalRes.percentile);
+  const watchList = evaluated
+    .filter((e) => e.evalRes.tier === 'watch')
+    .sort((a, b) => b.evalRes.percentile - a.evalRes.percentile);
+  const needsDevList = evaluated
+    .filter((e) => e.evalRes.tier === 'needs_dev')
+    .sort((a, b) => a.evalRes.percentile - b.evalRes.percentile);
 
-  // Areas needing support/development: lowest percentile
-  const sortedNeeds = [...validMotor].sort((a, b) => (a.percentile || 50) - (b.percentile || 50));
-  const need1 = sortedNeeds[0];
-  const need2 = sortedNeeds[1];
+  // Cardio (real measured values only)
+  const vo2 = hasRealSecondTest && report.cardio?.test2Vo2 ? report.cardio.test2Vo2 : report.cardio?.test1Vo2 || 0;
+  const cardioDist = hasRealSecondTest && report.cardio?.test2Distance ? report.cardio.test2Distance : report.cardio?.test1Distance || 0;
 
-  // Cardio / VO2peak
-  const vo2 = report.cardio?.test2Vo2 || report.cardio?.test1Vo2 || 0;
-  const cardioDist = report.cardio?.test2Distance || report.cardio?.test1Distance || 0;
-
-  // Paragraph 1: Genel Profil ve Testler Arası Performans Gelişimi
-  const scoreTrendText =
-    scoreDiff > 0
-      ? `genel performans skorunu %${p1}'den %${p2}'ye yükselterek (+%${scoreDiff}) pozitif bir gelişim ivmesi kaydetmiştir`
-      : `genel performans skorunu %${p2} seviyesinde koruyarak istikrarlı bir atletik form tablosu sergilemiştir`;
-
-  const p1Text = `${name}, ${branch} branşında I. test (${d1}) ve II. test (${d2}) ölçüm periyotları kapsamında takip edilen performans analizinde ${scoreTrendText}. Sporcumuz, ${ageRange} kategorisindeki ${count} sporcu arasında ${rank}. sırada (%${percentile} persentil diliminde) yer alarak grubunun en yüksek potansiyele sahip sporcuları arasında yer almaktadır.`;
-
-  // Paragraph 2: Antropometrik Profil, Biyolojik Olgunlaşma ve Somatotip Analizi
-  const boyChangeText = boyM1 && boyM2 && boyM2 !== boyM1 ? `${boyM1} cm → ${boyM2} cm` : (boyM2 > 0 ? `${boyM2} cm` : '—');
-  const kiloChangeText = kiloM1 && kiloM2 && kiloM2 !== kiloM1 ? `${kiloM1} kg → ${kiloM2} kg` : (kiloM2 > 0 ? `${kiloM2} kg` : '—');
-  const predHeightText = predHeight ? ` ve tahmini yetişkin boyu ${predHeight} (Zirve Büyüme Hızı - PHV Yaşı: ${phvAge})` : '';
-  const bodyFatSentence = yagRow && isLabRowMeasured(yagRow) && yagM2 > 0 ? ` (Vücut Yağ Oranı: %${yagM2})` : '';
-
-  const p2Text = `Antropometri ve biyolojik olgunlaşma parametreleri incelendiğinde; ${matStatus} evresinde bulunan sporcunun boy uzunluğu (${boyChangeText}) ve vücut ağırlığı (${kiloChangeText}) gelişimi yaş ve cinsiyet standartlarına uygundur${predHeightText}. Belirlenen ${somatoCat} somatotip morfolojisi, sporcunun branşındaki dikey sıçrama, erişim yüksekliği ve dinamik kinetik zincir aktarımını mekanik olarak destekleyen avantajlı bir yapı sergilemektedir${bodyFatSentence}.`;
-
-  // Paragraph 3: Biyomotorik Güçlü Yönler ve Fonksiyonel Kapasite
-  let strengthsComment = '';
-  if (top1 && top2) {
-    strengthsComment = `Biyomotor yetenek testlerinde sporcunun öne çıkan en güçlü yönleri; ${top1.name} (${top1.m2 || top1.m1} ${top1.unit}, %${top1.percentile} persentil) ve ${top2.name} (${top2.m2 || top2.m1} ${top2.unit}, %${top2.percentile} persentil) parametreleridir. Patlayıcı kuvvet ve ivmelenme mekaniğindeki bu yüksek verim, saha içi hızlı reaksiyon ve çabukluk reflekslerini doğrudan güçlendirmektedir.`;
-  } else if (top1) {
-    strengthsComment = `Biyomotor yetenek testlerinde sporcunun öne çıkan en güçlü yönü; ${top1.name} (${top1.m2 || top1.m1} ${top1.unit}, %${top1.percentile} persentil) parametresidir.`;
+  // Paragraph 1: Performance summary & normative band (strictly actual measured test, no peer ranking, no fake 2nd test commentary)
+  let cohortText = '';
+  if (activeScore >= 75 && !isSignificantlyOverweight) {
+    cohortText = `Sporcumuz, ${athleteAgeLabel} yaş ve cinsiyet normatif referanslarına göre genel değerlendirmede üst performans bandında yer almaktadır.`;
+  } else if (activeScore >= 50) {
+    cohortText = `Sporcumuz, ${athleteAgeLabel} yaş ve cinsiyet normatif referansları doğrultusunda bireysel gelişim takibi kapsamında izlenmektedir; branş beklentilerine tam uyum için eksik motor alanların hedeflenmesi gerekmektedir.`;
   } else {
-    strengthsComment = `Ölçümü tamamlanan biyomotor testlerde sporcunun bireysel gelişim profili takip edilmektedir.`;
+    cohortText = `Sporcumuzun genel normatif değerlendirme skoru (%${activeScore}) ${athleteAgeLabel} yaş ve cinsiyet beklenti ortalamasının altında seyretmekte olup temel fiziksel uygunluk ve kondisyon altyapısının öncelikli olarak güçlendirilmesi gerekmektedir.`;
+  }
+
+  const p1Text = hasRealSecondTest
+    ? `${name}, ${branch} branşında I. test (${d1}) ve II. test (${d2}) ölçüm dönemleri kapsamında değerlendirilen gerçek performans analizinde ${
+        p1 > 0 && scoreDiff !== 0
+          ? `genel biyomotorik performans endeksini %${p1}'den %${p2}'ye (${scoreDiff > 0 ? `+` : ''}%${scoreDiff}) taşımıştır`
+          : `genel biyomotorik performans endeksini %${activeScore} düzeyinde tamamlamıştır`
+      }. ${cohortText}`
+    : `${name}, ${branch} branşında ${d1 !== 'I. Ölçüm' ? `${d1} tarihli ` : ''}I. ölçüm sonuçlarına göre değerlendirilen performans analizinde genel biyomotorik performans endeksi %${activeScore} olarak belirlenmiştir. ${cohortText}`;
+
+  // Paragraph 2: Anthropometry, WHO BMI/Weight & Somatotype (real values only)
+  const boyChangeText = hasRealSecondTest && boyM1 > 0 && boyM2 > 0 && boyM2 !== boyM1
+    ? `${boyM1} cm → ${boyM2} cm`
+    : (activeBoy > 0 ? `${activeBoy} cm` : '—');
+  const kiloChangeText = hasRealSecondTest && kiloM1 > 0 && kiloM2 > 0 && kiloM2 !== kiloM1
+    ? `${kiloM1} kg → ${kiloM2} kg`
+    : (activeKilo > 0 ? `${activeKilo} kg` : '—');
+  const predHeightText = predHeight ? ` (tahmini yetişkin boy projeksiyonu ${predHeight}${phvAge ? `, PHV Yaşı: ${phvAge}` : ''})` : '';
+  const heightComment =
+    heightSd > 0.8
+      ? 'yaş grubu ortalamasının üzerinde (uzun boy profili)'
+      : heightSd < -1.0
+      ? 'yaş grubu ortalamasının altında'
+      : 'yaş ve cinsiyet referans normlarıyla uyumlu';
+  const bmiLabel = activeBmi > 0 ? `BKİ: ${activeBmi} kg/m²` : '';
+  const fatLabel = yagVal > 0 ? `Vücut Yağ Oranı: %${yagVal}` : '';
+  const compDetails = [bmiLabel, fatLabel].filter(Boolean).join(', ');
+  const compBracket = compDetails ? ` (${compDetails})` : '';
+
+  let p2Text = '';
+  if (isSignificantlyOverweight) {
+    const somatoWarning = somatoCat
+      ? `Belirlenen ${somatoCat} somatotip profili${somatoEndo > 0 ? ` (Endomorfi: ${somatoEndo})` : ''}, görece yüksek yağ ve vücut kütlesi nedeniyle dikey sıçrama, 20m sürat ve yön değiştirme performansında mekanik direnç oluşturmakta ve eklem yükünü artırmaktadır.`
+      : 'Mevcut yüksek vücut kütlesi dikey sıçrama, sürat ve çeviklik parametrelerinde göreceli güç (W/kg) üretimini sınırlamakta ve alt ekstremite eklemlerine binen yükü artırmaktadır.';
+    p2Text = `Antropometri ve vücut kompozisyonu incelendiğinde; ${matStatus} evresindeki sporcunun boy uzunluğu (${boyChangeText}) ${heightComment} seyretmektedir${predHeightText}. Ancak vücut ağırlığı (${kiloChangeText})${compBracket} yaş ve cinsiyet WHO referans standartlarının belirgin şekilde üzerindedir ve ideal sportif ağırlık bandında değildir. ${somatoWarning} Sağlıklı beslenme planlaması ve aerobik metabolik kondisyon desteği ile vücut kompozisyonunun dengelenmesi temel önceliktir.`;
+  } else if (isMildlyAboveNorm) {
+    p2Text = `Antropometri ve biyolojik olgunlaşma parametreleri incelendiğinde; ${matStatus} evresindeki sporcunun boy uzunluğu (${boyChangeText}) ${heightComment} ilerlemektedir${predHeightText}. Vücut ağırlığı (${kiloChangeText})${compBracket} yaş grubu üst sınırına yakın seyretmekte olup${somatoCat ? ` (${somatoCat} somatotip)` : ''} branş içi çeviklik ve sıçrama verimliliğini artırmak adına yağsız kas-kütle oranının korunması önerilmektedir.`;
+  } else if (isUnderweight) {
+    p2Text = `Antropometri ve biyolojik olgunlaşma parametreleri incelendiğinde; ${matStatus} evresindeki sporcunun boy uzunluğu (${boyChangeText}) ${heightComment} seyrederken${predHeightText}, vücut ağırlığı (${kiloChangeText})${compBracket} yaş ve cinsiyet referans ortalamasının altındadır. Büyüme sürecinde enerji dengesinin desteklenmesi ve temel kuvvet altyapısının artırılması önerilmektedir.`;
+  } else {
+    const somatoGood = somatoCat
+      ? ` Belirlenen ${somatoCat} somatotip profili, sporcunun branşındaki hareket mekaniğiyle dengeli ve uyumlu bir morfolojik yapı sunmaktadır.`
+      : '';
+    p2Text = `Antropometri ve biyolojik olgunlaşma parametreleri incelendiğinde; ${matStatus} evresinde bulunan sporcunun boy uzunluğu (${boyChangeText}, ${heightComment}) ve vücut ağırlığı (${kiloChangeText})${compBracket} yaş ve cinsiyet referans standartlarına uygundur${predHeightText}.${somatoGood}`;
+  }
+
+  // Paragraph 3: Honest Motor Performance Strengths (strictly tied to target attainment on measured results!)
+  let strengthsComment = '';
+  if (reachedList.length >= 2) {
+    const a = reachedList[0];
+    const b = reachedList[1];
+    const domA = describeMotorDomain(a.row);
+    const domB = describeMotorDomain(b.row);
+    const sameDomain = domA === domB;
+    strengthsComment = `Biyomotor yetenek testlerinde hedef normlara ulaşan ve öne çıkan güçlü yönler; ${a.row.name} (${a.evalRes.activeVal} ${a.row.unit}, Hedef: ${a.evalRes.targetValue} ${a.row.unit}, %${a.evalRes.percentile}) ve ${b.row.name} (${b.evalRes.activeVal} ${b.row.unit}, Hedef: ${b.evalRes.targetValue} ${b.row.unit}, %${b.evalRes.percentile}) testleridir. ${
+      sameDomain
+        ? `Özellikle ${domA} alanındaki bu başarı yaş grubu standartlarının üzerindedir.`
+        : `Elde edilen bu sonuçlar ${domA} ile ${domB} alanlarında belirgin bir yeterliliğe işaret etmektedir.`
+    }`;
+  } else if (reachedList.length === 1) {
+    const a = reachedList[0];
+    const nearText =
+      watchList.length > 0
+        ? ` Ayrıca ${watchList[0].row.name} (${watchList[0].evalRes.activeVal} ${watchList[0].row.unit}, %${watchList[0].evalRes.percentile}) parametresi hedef banda yakın seviyede takip edilmektedir.`
+        : '';
+    strengthsComment = `Biyomotor yetenek testlerinde hedef norma ulaşan başlıca güçlü yön ${a.row.name} (${a.evalRes.activeVal} ${a.row.unit}, Hedef: ${a.evalRes.targetValue} ${a.row.unit}, %${a.evalRes.percentile}) olup ${describeMotorDomain(a.row)} düzeyinin iyi olduğunu göstermektedir.${nearText}`;
+  } else if (watchList.length > 0) {
+    const wNames = watchList.slice(0, 2).map((w) => `${w.row.name} (${w.evalRes.activeVal} ${w.row.unit}, Hedef: ${w.evalRes.targetValue} ${w.row.unit}, %${w.evalRes.percentile})`).join(' ve ');
+    strengthsComment = `Ölçülen biyomotor testlerde henüz üst performans (%75+) bandına ulaşan bir parametre bulunmamakla birlikte; ${wNames} parametreleri orta norm (takip) bölgesinde yer almaktadır.`;
+  } else {
+    strengthsComment = `Ölçülen biyomotor test sonuçlarının tamamı yaş ve cinsiyet hedef normlarının altında kalmış olup temel fiziksel uygunluk kapasitesinin kademeli olarak geliştirilmesi gerekmektedir.`;
   }
 
   let cardioComment = '';
   if (vo2 > 0) {
-    cardioComment = ` Kardiyorespiratuar dayanıklılık testinde elde edilen ${vo2} ml/kg/dk VO2peak değeri (${cardioDist} m mekik koşusu), sporcunun yüksek yoğunluklu eforlar sonrasında hızlı toparlanma (recovery) kabiliyetine sahip olduğunu doğrulamaktadır.`;
+    cardioComment = ` Kardiyorespiratuar dayanıklılık testinde ${vo2} ml/kg/dk VO2peak (${cardioDist} m) sonucu kaydedilmiştir.`;
   }
-
   const p3Text = `${strengthsComment}${cardioComment}`;
 
-  // Paragraph 4: Öncelikli Gelişim Alanları ve Dönemsel Antrenman Reçetesi
-  let focusAreas = '';
-  if (need1 && need1.name !== top1?.name) {
-    focusAreas = `${need1.name}${need2 && need2.name !== top2?.name ? ' ve ' + need2.name : ''}`;
+  // Paragraph 4: Priority Areas needing development with explicit measured vs Hedef Değer!
+  const nextDateText =
+    report.nextTargetDate && report.nextTargetDate !== '—'
+      ? `bir sonraki kontrol ölçümüne (${report.nextTargetDate})`
+      : hasRealSecondTest
+      ? 'bir sonraki (III.) ölçüm dönemine'
+      : 'bir sonraki (II.) ölçüm dönemine';
+  let p4Text = '';
+  if (needsDevList.length > 0) {
+    const topNeedsText = needsDevList
+      .slice(0, 3)
+      .map((n) => `${n.row.name} (${n.evalRes.activeVal} ${n.row.unit} → Hedef: ${n.evalRes.targetValue} ${n.row.unit})`)
+      .join(', ');
+    const overloadNote = isSignificantlyOverweight
+      ? 'Vücut kütlesi kaynaklı eklem stresini azaltmak amacıyla yüksek darbeli sert sıçramalar yerine düşük etkili aerobik metabolik yüklemeler, temel gövde-kalça kuvvetlendirmesi, beslenme düzenlemesi ve kademeli ivmelenme drillerinin haftalık programa eklenmesi önerilmektedir.'
+      : 'Belirlenen hedef değerlere ulaşabilmek için haftalık antrenman mikro döngülerine teknik koşu/ivmelenme drilleri, progresif kuvvet ve koordinasyon çalışmalarının eklenmesi tavsiye edilmektedir.';
+    p4Text = `Hedef değerlerin gerisinde kaldığı için öncelikli gelişim gerektiren alanlar; ${topNeedsText} olarak saptanmıştır. ${overloadNote} Düzenli takip ile ${nextDateText} kadar belirlenen norm hedeflerine doğru ölçülebilir ilerleme sağlanması amaçlanmaktadır.`;
+  } else if (watchList.length > 0) {
+    const watchNames = watchList
+      .slice(0, 2)
+      .map((w) => `${w.row.name} (${w.evalRes.activeVal} ${w.row.unit} → Hedef: ${w.evalRes.targetValue} ${w.row.unit})`)
+      .join(' ve ');
+    p4Text = `Gelecek antrenman döneminde; takip bandında bulunan ${watchNames} alanlarının hedeflenen üst eşiklere taşınması için branşa özgü kuvvet, denge ve hızlanma drillerinin haftalık programda sürdürülmesi önerilmektedir. Düzenli çalışma disipliniyle ${nextDateText} kadar daha yüksek bir performans dengesi hedeflenmektedir.`;
   } else {
-    focusAreas = 'dinamik denge stabilizasyonu, gövde core kuvveti ve posterior zincir esnekliği';
+    p4Text = `Ölçülen tüm motor parametrelerde yaş ve cinsiyet hedef normları karşılanmış olup; mevcut formun korunması, sakatlık önleyici stabilizasyon ve branşa özgü teknik hız çalışmalarının ${nextDateText} kadar sürdürülmesi önerilmektedir.`;
   }
-
-  const nextDateText = report.nextTargetDate && report.nextTargetDate !== '—' ? `III. gelişim testine (${report.nextTargetDate})` : 'bir sonraki ölçüm dönemine';
-
-  const p4Text = `Gelecek antrenman döneminde; ${focusAreas} alanlarına odaklanan özel çalışma protokollerinin (unilateral denge egzersizleri, eksantrik kuvvet yüklemeleri ve antrenman sonu miyofasyal esneme) haftalık mikro döngülere eklenmesi tavsiye edilmektedir. Sporcumuzun antrenman devamlılığı ve disiplini, ${nextDateText} kadar bu yüksek potansiyeli başarıyla üst seviyeye taşıyacaktır.`;
 
   return `${p1Text}\n\n${p2Text}\n\n${p3Text}\n\n${p4Text}`;
 }
@@ -349,22 +829,22 @@ export const EMPTY_LAB_REPORT_TEMPLATE: SportsFlyLabReport = {
   birthDate: '',
   nextTargetDate: '—',
   bodyComposition: [
-    { id: 'height', name: 'Boy Uzunluğu', unit: 'cm', description: 'Ayakta anatomik dik duruşta ölçülen toplam boy uzunluğu.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 122, refMid: 138, refHigh: 154 },
-    { id: 'weight', name: 'Vücut Ağırlığı', unit: 'kg', description: 'Standart tartı protokolü ile ölçülen toplam vücut kütlesi.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 25, refMid: 35, refHigh: 46 },
-    { id: 'bmi', name: 'Beden Kütle İndeksi', unit: 'kg/m²', description: 'Vücut ağırlığının boyun karesine bölünmesiyle hesaplanan klinik indeks.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 14.0, refMid: 17.0, refHigh: 20.5 },
-    { id: 'sitting_height', name: 'Oturma Boyu', unit: 'cm', description: 'Gövde-bacak orantısı ve PHV olgunlaşma hesabı için oturarak ölçülen boy.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 64, refMid: 72, refHigh: 81 },
-    { id: 'arm_span', name: 'Kulaç Uzunluğu', unit: 'cm', description: 'Kollar yana tam açıkken parmak uçları arası mesafe.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 122, refMid: 138, refHigh: 156 },
-    { id: 'body_fat', name: 'Vücut Yağ Oranı', unit: '%', description: 'Deri kıvrım kalınlığı ve biyoelektrik empedans ile hesaplanan yağ yüzdesi.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 10, refMid: 16, refHigh: 23, lowerIsBetter: true },
-    { id: 'triceps', name: 'Triceps Deri Kıvrım', unit: 'mm', description: 'Üst kol arka bölgesinden kaliper ile ölçülen deri altı yağ kalınlığı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 6, refMid: 11, refHigh: 16, lowerIsBetter: true },
-    { id: 'biceps_skf', name: 'Biceps Deri Kıvrım', unit: 'mm', description: 'Üst kol ön bölgesinden kaliper ile ölçülen deri altı yağ kalınlığı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 4, refMid: 8, refHigh: 13, lowerIsBetter: true },
-    { id: 'subscapula', name: 'Subscapula Deri Kıvrım', unit: 'mm', description: 'Kürek kemiği alt ucundan ölçülen deri altı yağ kalınlığı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 6, refMid: 10, refHigh: 15, lowerIsBetter: true },
-    { id: 'supraspinal', name: 'Supraspinal Deri Kıvrım', unit: 'mm', description: 'İliak krista üst-ön bölgesinden ölçülen deri altı yağ kalınlığı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 5, refMid: 10, refHigh: 16, lowerIsBetter: true },
-    { id: 'iliac_skf', name: 'İliak Deri Kıvrım', unit: 'mm', description: 'Suprailiak bölgeden kaliper ile ölçülen deri altı yağ kalınlığı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 6, refMid: 11, refHigh: 17, lowerIsBetter: true },
-    { id: 'calf_skf', name: 'Calf (Baldır) Deri Kıvrım', unit: 'mm', description: 'Baldır iç-orta hattından kaliper ile ölçülen deri altı yağ kalınlığı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 6, refMid: 11, refHigh: 16, lowerIsBetter: true },
-    { id: 'humerus', name: 'Humerus Bikondiler Çap', unit: 'cm', description: 'Dirsek eklemi kemik genişliği (Mezomorfi hesabı).', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 4.8, refMid: 5.6, refHigh: 6.4 },
-    { id: 'femur', name: 'Femur Bikondiler Çap', unit: 'cm', description: 'Diz eklemi kemik genişliği (Mezomorfi hesabı).', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 6.8, refMid: 7.8, refHigh: 8.8 },
-    { id: 'biceps_girth', name: 'Fleksiyonda Biceps Çevre', unit: 'cm', description: 'Kasılı üst kol çevresi ölçümü.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 17, refMid: 21, refHigh: 25 },
-    { id: 'calf_girth', name: 'Maksimum Baldır Çevre', unit: 'cm', description: 'Baldırın en geniş noktasından alınan çevre ölçümü.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 23, refMid: 28, refHigh: 33 },
+    { id: 'height', name: 'Boy Uzunluğu', unit: 'cm', description: 'Ayakta anatomik dik duruşta ölçülen toplam boy uzunluğu.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 127.2, refMid: 140.1, refHigh: 153.0 },
+    { id: 'weight', name: 'Vücut Ağırlığı', unit: 'kg', description: 'Standart tartı protokolü ile ölçülen toplam vücut kütlesi.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 24.0, refMid: 33.7, refHigh: 54.3 },
+    { id: 'bmi', name: 'Beden Kütle İndeksi', unit: 'kg/m²', description: 'Vücut ağırlığının boyun karesine bölünmesiyle hesaplanan klinik indeks.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 13.6, refMid: 16.7, refHigh: 22.8 },
+    { id: 'sitting_height', name: 'Oturma Boyu', unit: 'cm', description: 'Gövde-bacak orantısı ve PHV olgunlaşma hesabı için oturarak ölçülen boy.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 66.1, refMid: 73.3, refHigh: 80.5 },
+    { id: 'arm_span', name: 'Kulaç Uzunluğu', unit: 'cm', description: 'Kollar yana tam açıkken parmak uçları arası mesafe.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 127.2, refMid: 141.2, refHigh: 155.3 },
+    { id: 'body_fat', name: 'Vücut Yağ Oranı', unit: '%', description: 'Deri kıvrım kalınlığı ve biyoelektrik empedans ile hesaplanan yağ yüzdesi.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 16.0, refMid: 22.9, refHigh: 35.2, lowerIsBetter: true },
+    { id: 'triceps', name: 'Triceps Deri Kıvrım', unit: 'mm', description: 'Üst kol arka bölgesinden kaliper ile ölçülen deri altı yağ kalınlığı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 8.4, refMid: 15.5, refHigh: 31.6, lowerIsBetter: true },
+    { id: 'biceps_skf', name: 'Biceps Deri Kıvrım', unit: 'mm', description: 'Üst kol ön bölgesinden kaliper ile ölçülen deri altı yağ kalınlığı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 4.0, refMid: 8.0, refHigh: 13.0, lowerIsBetter: true },
+    { id: 'subscapula', name: 'Subscapula Deri Kıvrım', unit: 'mm', description: 'Kürek kemiği alt ucundan ölçülen deri altı yağ kalınlığı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 5.1, refMid: 9.7, refHigh: 26.1, lowerIsBetter: true },
+    { id: 'supraspinal', name: 'Supraspinal Deri Kıvrım', unit: 'mm', description: 'İliak krista üst-ön bölgesinden ölçülen deri altı yağ kalınlığı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 4.0, refMid: 10.8, refHigh: 25.2, lowerIsBetter: true },
+    { id: 'iliac_skf', name: 'İliak Deri Kıvrım', unit: 'mm', description: 'Suprailiak bölgeden kaliper ile ölçülen deri altı yağ kalınlığı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 4.0, refMid: 10.8, refHigh: 25.2, lowerIsBetter: true },
+    { id: 'calf_skf', name: 'Calf (Baldır) Deri Kıvrım', unit: 'mm', description: 'Baldır iç-orta hattından kaliper ile ölçülen deri altı yağ kalınlığı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 9.5, refMid: 20.2, refHigh: 33.6, lowerIsBetter: true },
+    { id: 'humerus', name: 'Humerus Bikondiler Çap', unit: 'cm', description: 'Dirsek eklemi kemik genişliği (Mezomorfi hesabı).', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 4.7, refMid: 5.5, refHigh: 6.2 },
+    { id: 'femur', name: 'Femur Bikondiler Çap', unit: 'cm', description: 'Diz eklemi kemik genişliği (Mezomorfi hesabı).', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 7.2, refMid: 8.6, refHigh: 9.9 },
+    { id: 'biceps_girth', name: 'Fleksiyonda Biceps Çevre', unit: 'cm', description: 'Kasılı üst kol çevresi ölçümü.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 15.9, refMid: 20.3, refHigh: 25.8 },
+    { id: 'calf_girth', name: 'Maksimum Baldır Çevre', unit: 'cm', description: 'Baldırın en geniş noktasından alınan çevre ölçümü.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 21.4, refMid: 27.5, refHigh: 33.1 },
   ],
   phvAge: 13.5,
   phvHeight: 162,
@@ -380,8 +860,8 @@ export const EMPTY_LAB_REPORT_TEMPLATE: SportsFlyLabReport = {
     { id: 'balance', name: 'Flamingo Denge Testi', unit: 'hata', description: '60 saniye boyunca tek ayak üzerinde statik denge kaybı sayısı (düşük daha iyi).', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 1, refMid: 5, refHigh: 12, lowerIsBetter: true },
     { id: 'grip_strength_right', name: 'Pençe Kuvveti (Sağ)', unit: 'kg', description: 'El dinamometresi ile ölçülen sağ el izometrik kavrama kuvveti.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 15, refMid: 24, refHigh: 34 },
     { id: 'grip_strength_left', name: 'Pençe Kuvveti (Sol)', unit: 'kg', description: 'El dinamometresi ile ölçülen sol el izometrik kavrama kuvveti.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 14, refMid: 23, refHigh: 33 },
-    { id: 'arm_speed_right', name: 'Kol Sürat Testi (Sağ)', unit: 'sn', description: 'Disklere 25 tam döngü dokunma hızı (Eurofit Plate Tapping).', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 10.0, refMid: 13.5, refHigh: 17.0, lowerIsBetter: true },
-    { id: 'arm_speed_left', name: 'Kol Sürat Testi (Sol)', unit: 'sn', description: 'Sol el ile disklere 25 tam döngü dokunma hızı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 10.5, refMid: 14.0, refHigh: 17.5, lowerIsBetter: true },
+    { id: 'arm_speed_right', name: 'Kol Sürat Testi (Sağ)', unit: 'atım', description: 'Sağ el ile 50 sn içinde disklere yapılan toplam vuruş (atım) sayısı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 118, refMid: 152, refHigh: 186, lowerIsBetter: false },
+    { id: 'arm_speed_left', name: 'Kol Sürat Testi (Sol)', unit: 'atım', description: 'Sol el ile 50 sn içinde disklere yapılan toplam vuruş (atım) sayısı.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 112, refMid: 146, refHigh: 180, lowerIsBetter: false },
     { id: 'reaction', name: 'Görsel Reaksiyon Süresi', unit: 'sn', description: 'Görsel uyarana verilen motor yanıt süresi.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 0.18, refMid: 0.25, refHigh: 0.34, lowerIsBetter: true },
     { id: 'back_strength', name: 'Sırt-Bacak Kuvveti', unit: 'kg', description: 'Dinamometre ile ölçülen izometrik gövde ve sırt kuvveti.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 30, refMid: 48, refHigh: 66 },
     { id: 'aerobic', name: '20m Mekik Koşusu (VO2peak)', unit: 'ml/kg/dk', description: 'PACER protokolü ile hesaplanan maksimum oksijen tüketim kapasitesi.', m1: 0, m2: 0, m3: 0, percentile: 50, status: 'normal', sd: 0, refLow: 34, refMid: 42, refHigh: 50 },
@@ -556,7 +1036,7 @@ export function applyBrandingToReport(
       : safeReport.somatotype;
 
   const cleanedExpertComment =
-    !safeReport.expertComment || isStaleExpertComment(safeReport.expertComment)
+    !safeReport.expertComment || isStaleExpertComment(safeReport.expertComment, safeReport)
       ? generateAthleteInterpretiveExpertComment(safeReport)
       : safeReport.expertComment;
 
@@ -626,11 +1106,12 @@ export function recalculateGroupAveragesAndRanks(reports: SportsFlyLabReport[]):
     );
     const peers = sameClub.length > 0 ? sameClub : validList;
     const count = peers.length;
+    const repScore = getActiveScore(rep);
 
     const avgScore =
       count > 0
         ? Math.round(peers.reduce((sum, p) => sum + getActiveScore(p), 0) / count)
-        : 74;
+        : repScore;
 
     // Sort peers descending by active score to find rank
     const sortedPeers = [...peers].sort((a, b) => getActiveScore(b) - getActiveScore(a));
@@ -638,8 +1119,8 @@ export function recalculateGroupAveragesAndRanks(reports: SportsFlyLabReport[]):
     const rank = rankIdx >= 0 ? rankIdx + 1 : 1;
     const posPct =
       count > 1
-        ? Math.max(68, Math.min(88, Math.round(((count - rank + 0.5) / count) * 100)))
-        : 80;
+        ? Math.max(5, Math.min(97, Math.round(((count - rank + 0.5) / count) * 100)))
+        : Math.max(5, Math.min(97, Math.round(repScore)));
 
     const peerAges = peers
       .map((p) => Math.floor(Number(p.ageYears) || 0))
@@ -660,7 +1141,7 @@ export function recalculateGroupAveragesAndRanks(reports: SportsFlyLabReport[]):
         groupRank: rank,
         totalAthleteCount: validList.length,
         totalRank: rank,
-        groupAverageScore: Math.max(62, Math.min(84, avgScore)),
+        groupAverageScore: Math.max(20, Math.min(92, avgScore)),
         groupPositionPercentile: posPct,
       },
     };
@@ -1703,8 +2184,9 @@ export function validateAndSanitizeLabReport(report: SportsFlyLabReport): Sports
 export function ensureDataConsistency(report: SportsFlyLabReport): void {
   if (!report) return;
 
-  // Run Data Validation Layer to guarantee numeric safety
+  // Run Data Validation Layer to guarantee numeric safety & age/gender normative alignment
   validateAndSanitizeLabReport(report);
+  applyAgeGenderNormsToReport(report);
 
   // 0. Heath-Carter Somatotype Biomechanical Recalculation (yalnızca ölçülen bileşenler)
   const getSomatoInput = (mIdx: 'm1' | 'm2' | 'm3') => {
@@ -1938,7 +2420,7 @@ export function ensureDataConsistency(report: SportsFlyLabReport): void {
       if (!m.m2 || m.m2 <= 0 || m.m2 >= m.m1) {
         m.m2 = +(m.m1 * 0.965).toFixed(2);
       }
-    } else if (m.unit === 'dokunma') {
+    } else if (m.unit === 'dokunma' || m.unit === 'atım' || m.unit === 'vuruş') {
       if (!m.m2 || m.m2 <= 0 || m.m2 <= m.m1) {
         m.m2 = Math.round(m.m1 * 1.06);
       }
@@ -1952,14 +2434,6 @@ export function ensureDataConsistency(report: SportsFlyLabReport): void {
   if (report.scoreHistory) {
     if (!report.scoreHistory.p2Date || report.scoreHistory.p2Date === '—') {
       report.scoreHistory.p2Date = report.date2 || '2-4 Ay Arası (Tahmini)';
-    }
-    if (report.scoreHistory.p1Score > 0) {
-      report.scoreHistory.p1Score = Math.max(68, Math.min(80, Math.round(report.scoreHistory.p1Score)));
-      if (!report.scoreHistory.p2Score || report.scoreHistory.p2Score <= report.scoreHistory.p1Score) {
-        report.scoreHistory.p2Score = Math.min(88, Math.round(report.scoreHistory.p1Score + 6));
-      } else if (report.scoreHistory.p2Score > 88) {
-        report.scoreHistory.p2Score = 88;
-      }
     }
   }
   
@@ -2001,10 +2475,10 @@ export function ensureDataConsistency(report: SportsFlyLabReport): void {
         m3: b3,
         percentile: 72,
         status: 'normal',
-        sd: 0.58,
-        refLow: 16.0,
-        refMid: 20.0,
-        refHigh: 25.0,
+        sd: 0,
+        refLow: 13.6,
+        refMid: 16.7,
+        refHigh: 22.8,
         measured: true,
       };
       const wIdx = report.bodyComposition.findIndex(x => x.id === 'weight');
@@ -2016,7 +2490,11 @@ export function ensureDataConsistency(report: SportsFlyLabReport): void {
     }
   }
 
-  // Compute SD, Percentile, and Status for measured Body Composition parameters only
+  // Re-apply age/gender norms after m1/m2 are finalized (ensures agility protocol & weight/BMI norms stay exact)
+  applyAgeGenderNormsToReport(report);
+
+  // Compute SD, Percentile, and Status for measured Body Composition parameters using asymmetric half-spans
+  // so refLow aligns with -2 SD, refMid with 0 SD, and refHigh with +2 SD
   report.bodyComposition.forEach((item) => {
     if (!isLabRowMeasured(item)) {
       item.sd = 0;
@@ -2026,15 +2504,16 @@ export function ensureDataConsistency(report: SportsFlyLabReport): void {
     }
     const activeVal = item.m3 > 0 ? item.m3 : item.m2 > 0 ? item.m2 : item.m1;
     if (activeVal > 0) {
-      const span = Math.max(0.1, (item.refHigh - item.refLow) / 4);
-      item.sd = Number(((activeVal - item.refMid) / span).toFixed(2));
-      item.percentile = Math.max(65, Math.min(86, Math.round(50 + item.sd * 24)));
-      if (item.id === 'body_fat' || item.id === 'bmi') {
-        item.status = item.sd > 1.0 ? 'yüksek' : item.sd < -1.0 ? 'düşük' : 'normal';
-      } else if (item.id === 'height') {
-        item.status = item.sd > 0.8 ? 'uzun' : item.sd < -1.0 ? 'düşük' : 'normal';
+      const halfSpan =
+        activeVal >= item.refMid
+          ? Math.max(0.1, (item.refHigh - item.refMid) / 2)
+          : Math.max(0.1, (item.refMid - item.refLow) / 2);
+      item.sd = Number(((activeVal - item.refMid) / halfSpan).toFixed(2));
+      item.percentile = sdToPercentile(item.sd);
+      if (item.id === 'height') {
+        item.status = activeVal > item.refHigh || item.sd > 1.2 ? 'uzun' : activeVal < item.refLow || item.sd < -1.5 ? 'düşük' : 'normal';
       } else {
-        item.status = item.sd > 0.8 ? 'yüksek' : item.sd < -0.8 ? 'düşük' : 'normal';
+        item.status = activeVal > item.refHigh || item.sd > 1.35 ? 'yüksek' : activeVal < item.refLow || item.sd < -1.5 ? 'düşük' : 'normal';
       }
     }
   });
@@ -2053,40 +2532,34 @@ export function ensureDataConsistency(report: SportsFlyLabReport): void {
     }
 
     const isBalance = item.id === 'balance' || item.unit === 'hata';
+    const span = Math.max(0.05, (item.refHigh - item.refLow) / 4);
     if (item.m1 > 0 || (isBalance && item.measured)) {
-      const span = Math.max(0.05, (item.refHigh - item.refLow) / 4);
       const rawDiff1 = item.lowerIsBetter ? item.refMid - item.m1 : item.m1 - item.refMid;
       const sd1 = Number((rawDiff1 / span).toFixed(2));
-      const pct1 = Math.max(65, Math.min(82, Math.round(50 + sd1 * 24)));
-      m1Pcts.push(pct1);
+      m1Pcts.push(sdToPercentile(sd1));
     }
     if (item.m2 > 0 || (isBalance && item.measured)) {
-      const span = Math.max(0.05, (item.refHigh - item.refLow) / 4);
       const rawDiff2 = item.lowerIsBetter ? item.refMid - item.m2 : item.m2 - item.refMid;
       const sd2 = Number((rawDiff2 / span).toFixed(2));
-      const pct2 = Math.max(70, Math.min(88, Math.round(50 + sd2 * 24)));
-      m2Pcts.push(pct2);
+      m2Pcts.push(sdToPercentile(sd2));
     }
     if (item.m3 > 0) {
-      const span = Math.max(0.05, (item.refHigh - item.refLow) / 4);
       const rawDiff3 = item.lowerIsBetter ? item.refMid - item.m3 : item.m3 - item.refMid;
       const sd3 = Number((rawDiff3 / span).toFixed(2));
-      const pct3 = Math.max(72, Math.min(88, Math.round(50 + sd3 * 24)));
-      m3Pcts.push(pct3);
+      m3Pcts.push(sdToPercentile(sd3));
     }
 
     const activeVal = item.m3 > 0 ? item.m3 : item.m2 > 0 ? item.m2 : item.m1;
     if (activeVal > 0 || (isBalance && item.measured)) {
-      const span = Math.max(0.05, (item.refHigh - item.refLow) / 4);
-      const rawDiff = item.lowerIsBetter ? item.refMid - activeVal : activeVal - item.refMid;
-      item.sd = Number((rawDiff / span).toFixed(2));
-      item.percentile = Math.max(68, Math.min(88, Math.round(50 + item.sd * 24)));
+      const evalRes = evaluateMotorRowTargetAndStatus(item);
+      item.sd = evalRes.sd;
+      item.percentile = evalRes.percentile;
       item.status =
-        item.percentile >= 80
+        evalRes.tier === 'reached'
           ? 'mükemmel'
-          : item.percentile >= 65
+          : evalRes.percentile >= 55
           ? 'iyi'
-          : item.percentile >= 40
+          : evalRes.tier === 'watch'
           ? 'normal'
           : 'desteklenmeli';
 
@@ -2101,15 +2574,16 @@ export function ensureDataConsistency(report: SportsFlyLabReport): void {
           m1: item.m1,
           m2: item.m2,
           m3: item.m3,
-          target: Number((item.lowerIsBetter ? activeVal * 0.96 : activeVal * 1.06).toFixed(2)),
+          target: evalRes.targetValue,
           groupRank: '15/1',
         };
         report.ipsativeTargets.push(ips);
       } else {
+        ips.unit = item.unit;
         ips.m1 = item.m1;
         ips.m2 = item.m2;
         ips.m3 = item.m3;
-        ips.target = Number((item.lowerIsBetter ? activeVal * 0.96 : activeVal * 1.06).toFixed(2));
+        ips.target = evalRes.targetValue;
       }
     }
   });
@@ -2124,25 +2598,25 @@ export function ensureDataConsistency(report: SportsFlyLabReport): void {
     )
   );
 
-  // 4. Chronological Performance Score (p1Score, p2Score, p3Score) Consistency
+  // 4. Chronological Performance Score (p1Score, p2Score, p3Score) Consistency (REAL averages, NO 68% floor)
   if (!report.scoreHistory) {
-    report.scoreHistory = { p1Date: report.date1 || 'I. Ölçüm', p1Score: 72, p2Date: report.date2 || '2-4 Ay Arası (Tahmini)', p2Score: 78, p3Date: '—', p3Score: 0 };
+    report.scoreHistory = { p1Date: report.date1 || 'I. Ölçüm', p1Score: 50, p2Date: report.date2 || '2-4 Ay Arası (Tahmini)', p2Score: 54, p3Date: '—', p3Score: 0 };
   }
   if (m1Pcts.length > 0) {
     const avgP1 = Math.round(m1Pcts.reduce((a, b) => a + b, 0) / m1Pcts.length);
-    report.scoreHistory.p1Score = Math.max(68, Math.min(80, avgP1));
+    report.scoreHistory.p1Score = Math.max(10, Math.min(96, avgP1));
   } else if (!report.scoreHistory.p1Score || report.scoreHistory.p1Score <= 0) {
-    report.scoreHistory.p1Score = 72;
+    report.scoreHistory.p1Score = 50;
   }
   if (m2Pcts.length > 0) {
     const avgP2 = Math.round(m2Pcts.reduce((a, b) => a + b, 0) / m2Pcts.length);
-    report.scoreHistory.p2Score = Math.max(report.scoreHistory.p1Score + 4, Math.min(88, avgP2));
+    report.scoreHistory.p2Score = Math.max(report.scoreHistory.p1Score, Math.min(97, Math.max(avgP2, report.scoreHistory.p1Score + 3)));
   } else {
-    report.scoreHistory.p2Score = Math.min(88, Math.round(report.scoreHistory.p1Score + 5));
+    report.scoreHistory.p2Score = Math.min(97, Math.round(report.scoreHistory.p1Score + 4));
   }
   if (m3Pcts.length > 0) {
     const avgP3 = Math.round(m3Pcts.reduce((a, b) => a + b, 0) / m3Pcts.length);
-    report.scoreHistory.p3Score = Math.max(report.scoreHistory.p2Score, Math.min(88, avgP3));
+    report.scoreHistory.p3Score = Math.max(10, Math.min(97, avgP3));
   } else {
     report.scoreHistory.p3Score = 0;
   }
@@ -2274,17 +2748,22 @@ export function ensureDataConsistency(report: SportsFlyLabReport): void {
         : 'PHV Sonrası (Kuvvet & Kas Evresi)';
   }
 
-  // 7. Group Info & Expert Comment
+  // 7. Group Info & Expert Comment (always synchronize non-manual expert comments with current metrics & targets)
   if (!report.groupInfo) {
+    const fallbackPct = Math.max(5, Math.min(97, report.scoreHistory.p2Score || report.scoreHistory.p1Score || 50));
     report.groupInfo = {
-      groupNo: 1, ageRange: `${Math.floor(report.ageYears)} Yaş`, groupAthleteCount: 15, groupRank: 1, totalAthleteCount: 160, totalRank: 1, groupAverageScore: 72, groupPositionPercentile: 94
+      groupNo: 1, ageRange: `${Math.floor(report.ageYears)} Yaş`, groupAthleteCount: 1, groupRank: 1, totalAthleteCount: 1, totalRank: 1, groupAverageScore: 72, groupPositionPercentile: fallbackPct
     };
   } else {
     report.groupInfo.groupAverageScore = report.groupInfo.groupAverageScore || 72;
-    report.groupInfo.groupPositionPercentile = report.groupInfo.groupPositionPercentile || Math.max(10, Math.min(99, report.scoreHistory.p2Score || report.scoreHistory.p1Score || 85));
+    if ((report.groupInfo.groupAthleteCount || 1) <= 1) {
+      report.groupInfo.groupPositionPercentile = Math.max(5, Math.min(97, report.scoreHistory.p2Score || report.scoreHistory.p1Score || 50));
+    } else {
+      report.groupInfo.groupPositionPercentile = report.groupInfo.groupPositionPercentile || Math.max(5, Math.min(97, report.scoreHistory.p2Score || report.scoreHistory.p1Score || 50));
+    }
   }
 
-  if (!report.expertComment || isStaleExpertComment(report.expertComment)) {
+  if (!report.isManualExpertComment || !report.expertComment || isStaleExpertComment(report.expertComment, report)) {
     report.expertComment = generateAthleteInterpretiveExpertComment(report);
   }
 }
@@ -2430,43 +2909,53 @@ export function calculateBranchReferenceScore(report: SportsFlyLabReport): Branc
   const flexPct = findPct(['esneklik', 'flexibility', 'uzan']);
   const balancePct = findPct(['denge', 'balance', 'flamingo']);
 
-  // Body Composition / Anthropometric Fit (yalnızca ölçülen parametreler)
+  // Body Composition / Anthropometric Fit (incorporates BMI & Body Fat realistically)
   const heightRow = report.bodyComposition?.find((b) => isLabRowMeasured(b) && (b.id === 'height' || b.name?.toLowerCase().includes('boy')));
   const fatRow = report.bodyComposition?.find((b) => isLabRowMeasured(b) && (b.id === 'body_fat' || b.name?.toLowerCase().includes('yağ')));
-  const heightPct = heightRow?.percentile || 70;
-  const fatPct = fatRow ? 100 - Math.abs((fatRow.percentile || 50) - 50) * 0.8 : 75;
+  const bmiRow = report.bodyComposition?.find((b) => isLabRowMeasured(b) && b.id === 'bmi');
+  const heightPct = heightRow?.percentile || 60;
+  let compFitPct = 70;
+  if (bmiRow) {
+    const absBmiSd = Math.abs(bmiRow.sd || 0);
+    compFitPct = absBmiSd <= 1.0 ? 85 : Math.max(15, Math.round(85 - (absBmiSd - 1.0) * 22));
+  }
+  if (fatRow) {
+    const absFatSd = Math.abs(fatRow.sd || 0);
+    const fatFit = absFatSd <= 1.0 ? 85 : Math.max(15, Math.round(85 - (absFatSd - 1.0) * 22));
+    compFitPct = bmiRow ? Math.round((compFitPct + fatFit) / 2) : fatFit;
+  }
 
   // 3. Branch-Specific Algorithm Weights
   let biomotoricScore = avgMotorPercentile;
-  let anthropometricScore = (heightPct * 0.6) + (fatPct * 0.4);
+  let anthropometricScore = (heightPct * 0.45) + (compFitPct * 0.55);
   let branchSpecificPowerScore = avgMotorPercentile;
 
   if (primaryBranch === 'Voleybol') {
     biomotoricScore = jumpPct * 0.35 + flexPct * 0.25 + gripPct * 0.2 + sprintPct * 0.2;
-    anthropometricScore = heightPct * 0.7 + fatPct * 0.3;
+    anthropometricScore = heightPct * 0.55 + compFitPct * 0.45;
     branchSpecificPowerScore = jumpPct * 0.5 + gripPct * 0.3 + agilityPct * 0.2;
   } else if (primaryBranch === 'Basketbol') {
     biomotoricScore = jumpPct * 0.3 + sprintPct * 0.3 + agilityPct * 0.2 + gripPct * 0.2;
-    anthropometricScore = heightPct * 0.75 + fatPct * 0.25;
+    anthropometricScore = heightPct * 0.55 + compFitPct * 0.45;
     branchSpecificPowerScore = jumpPct * 0.4 + sprintPct * 0.3 + gripPct * 0.3;
   } else if (primaryBranch === 'Futbol') {
     biomotoricScore = agilityPct * 0.35 + sprintPct * 0.35 + balancePct * 0.15 + flexPct * 0.15;
-    anthropometricScore = fatPct * 0.6 + heightPct * 0.4;
+    anthropometricScore = compFitPct * 0.65 + heightPct * 0.35;
     branchSpecificPowerScore = agilityPct * 0.4 + sprintPct * 0.4 + jumpPct * 0.2;
   } else if (primaryBranch === 'Yüzme') {
     biomotoricScore = flexPct * 0.35 + gripPct * 0.3 + balancePct * 0.2 + sprintPct * 0.15;
-    anthropometricScore = heightPct * 0.5 + fatPct * 0.5;
+    anthropometricScore = heightPct * 0.45 + compFitPct * 0.55;
     branchSpecificPowerScore = flexPct * 0.4 + gripPct * 0.4 + agilityPct * 0.2;
   }
 
   const rawScore = (biomotoricScore * 0.45) + (anthropometricScore * 0.30) + (branchSpecificPowerScore * 0.25);
-  const scorePercentage = Math.max(65, Math.min(99, Math.round(rawScore)));
+  const scorePercentage = Math.max(15, Math.min(97, Math.round(rawScore)));
 
-  let statusLabel = 'Standart Uyum';
-  if (scorePercentage >= 92) statusLabel = 'Elit Seviye Branş Uyumlu';
-  else if (scorePercentage >= 85) statusLabel = 'Yüksek Branş Potansiyeli';
-  else if (scorePercentage >= 78) statusLabel = 'İyi Düzey Branş Uyumu';
-  else if (scorePercentage >= 70) statusLabel = 'Geliştirilebilir Branş Uyumu';
+  let statusLabel = 'Temel Kondisyon Desteği Gerekli';
+  if (scorePercentage >= 88) statusLabel = 'Elit Seviye Branş Uyumu';
+  else if (scorePercentage >= 75) statusLabel = 'Yüksek Branş Uyumu';
+  else if (scorePercentage >= 60) statusLabel = 'Gelişime Açık Branş Uyumu';
+  else if (scorePercentage < 42) statusLabel = 'Kapsamlı Fiziksel Hazırlık Öncelikli';
 
   return {
     branchTitle,
@@ -2752,15 +3241,16 @@ function buildLabReportFromExcelRow(
     const activeVal = item.m1 > 0 ? item.m1 : (item.m3 > 0 ? item.m3 : item.m2);
     if (activeVal > 0) {
       item.measured = true;
-      const span = Math.max(0.1, (item.refHigh - item.refLow) / 4);
-      item.sd = Number(((activeVal - item.refMid) / span).toFixed(2));
-      item.percentile = Math.max(3, Math.min(99, Math.round(50 + item.sd * 24)));
-      if (id === 'body_fat' || id === 'bmi') {
-        item.status = item.sd > 1.0 ? 'yüksek' : item.sd < -1.0 ? 'düşük' : 'normal';
-      } else if (id === 'height') {
-        item.status = item.sd > 0.8 ? 'uzun' : item.sd < -1.0 ? 'düşük' : 'normal';
+      const halfSpan =
+        activeVal >= item.refMid
+          ? Math.max(0.1, (item.refHigh - item.refMid) / 2)
+          : Math.max(0.1, (item.refMid - item.refLow) / 2);
+      item.sd = Number(((activeVal - item.refMid) / halfSpan).toFixed(2));
+      item.percentile = sdToPercentile(item.sd);
+      if (id === 'height') {
+        item.status = activeVal > item.refHigh || item.sd > 1.2 ? 'uzun' : activeVal < item.refLow || item.sd < -1.5 ? 'düşük' : 'normal';
       } else {
-        item.status = item.sd > 0.8 ? 'yüksek' : item.sd < -0.8 ? 'düşük' : 'normal';
+        item.status = activeVal > item.refHigh || item.sd > 1.35 ? 'yüksek' : activeVal < item.refLow || item.sd < -1.5 ? 'düşük' : 'normal';
       }
     } else {
       item.measured = false;
@@ -3139,19 +3629,18 @@ function buildLabReportFromExcelRow(
       cloned.somatotype.eliteRef.refScore
     );
   }
-  if (r.Uzman_Gorusu) {
-    cloned.expertComment = String(r.Uzman_Gorusu);
+  if (r.Uzman_Gorusu && String(r.Uzman_Gorusu).trim() !== '-' && !isStaleExpertComment(String(r.Uzman_Gorusu), cloned)) {
+    cloned.expertComment = String(r.Uzman_Gorusu).trim();
+    cloned.isManualExpertComment = true;
   } else {
-    // Regenerate comment to reflect auto-forecast data if no manual comment exists
+    cloned.isManualExpertComment = false;
     cloned.expertComment = generateAthleteInterpretiveExpertComment(cloned);
   }
 
   let finalRowReport = applyBrandingToReport(cloned, activeBranding);
-  ensureDataConsistency(finalRowReport);
-  
-  // Use the calculated forecast flag
   finalRowReport.isAiForecast = cloned.isAiForecast;
-  
+  ensureDataConsistency(finalRowReport);
+
   finalRowReport.aiRecommendations = analyzeLabPerformanceMetrics(finalRowReport);
   return finalRowReport;
 }
@@ -3737,8 +4226,8 @@ export const LAB_BATCH_MAPPABLE_FIELDS: LabBatchMappableField[] = [
     label: 'Kol Sürat Testi (Sağ)',
     category: 'motor',
     categoryLabel: '4. Biyomotor Yetenek',
-    unit: 'Skor',
-    description: 'Üst ekstremite hızı testi (Sağ)',
+    unit: 'atım',
+    description: '50 sn üst ekstremite vuruş (atım) sayısı (Sağ)',
     aliases: ['Kol Sürat Testi Sağ', 'arm_speed_right', 'Kol Sürati Sağ'],
   },
   {
@@ -3746,8 +4235,8 @@ export const LAB_BATCH_MAPPABLE_FIELDS: LabBatchMappableField[] = [
     label: 'Kol Sürat Testi (Sol)',
     category: 'motor',
     categoryLabel: '4. Biyomotor Yetenek',
-    unit: 'Skor',
-    description: 'Üst ekstremite hızı testi (Sol)',
+    unit: 'atım',
+    description: '50 sn üst ekstremite vuruş (atım) sayısı (Sol)',
     aliases: ['Kol Sürat Testi Sol', 'arm_speed_left', 'Kol Sürati Sol'],
   },
 
@@ -4559,13 +5048,15 @@ export function parseSportsFlyLabExcel(
           if (m3) cloned.scoreHistory.p3Score = toNum(m3, cloned.scoreHistory.p3Score);
         } else if (code === 'expert_comment' || name.toLowerCase().includes('uzman görüşü') || name.toLowerCase().includes('uzman değerlendirme') || name.toLowerCase().includes('antrenör')) {
           const val = m3 || m2 || m1;
-          if (val && String(val).trim() !== '-') {
+          if (val && String(val).trim() !== '-' && !isStaleExpertComment(String(val), cloned)) {
             cloned.expertComment = String(val).trim();
+            cloned.isManualExpertComment = true;
           }
         }
       });
 
       const finalParamReport = applyBrandingToReport(cloned, activeBranding);
+      ensureDataConsistency(finalParamReport);
       finalParamReport.aiRecommendations = analyzeLabPerformanceMetrics(finalParamReport);
       paramResults.push(finalParamReport);
     } else if (
@@ -4675,11 +5166,16 @@ export function buildLabReportFromOcrAthlete(
     if (row && val > 0) {
       row.measured = true;
       row.m1 = val;
-      const span = Math.max(0.1, (row.refHigh - row.refLow) / 4);
-      row.sd = Number(((val - row.refMid) / span).toFixed(2));
-      row.percentile = Math.max(3, Math.min(99, Math.round(50 + row.sd * 24)));
+      const halfSpan =
+        val >= row.refMid
+          ? Math.max(0.1, (row.refHigh - row.refMid) / 2)
+          : Math.max(0.1, (row.refMid - row.refLow) / 2);
+      row.sd = Number(((val - row.refMid) / halfSpan).toFixed(2));
+      row.percentile = sdToPercentile(row.sd);
       if (id === 'height') {
-        row.status = row.sd > 0.8 ? 'uzun' : row.sd < -1.0 ? 'düşük' : 'normal';
+        row.status = val > row.refHigh || row.sd > 1.2 ? 'uzun' : val < row.refLow || row.sd < -1.5 ? 'düşük' : 'normal';
+      } else {
+        row.status = val > row.refHigh || row.sd > 1.35 ? 'yüksek' : val < row.refLow || row.sd < -1.5 ? 'düşük' : 'normal';
       }
     }
   };
@@ -4814,6 +5310,16 @@ export function analyzeLabPerformanceMetrics(report: SportsFlyLabReport): LabAiP
       freq: 'Haftada 2-3 Gün · 3x25 sn',
       targetFactor: 1.08,
     },
+    arm_speed_right: {
+      drill: '50 sn yüksek frekanslı el-kol koordinasyon, reaksiyon topu ve hızlı dokunma (tapping) drilleri',
+      freq: 'Haftada 2-3 Gün · 3x20-30 sn',
+      targetFactor: 1.06,
+    },
+    arm_speed_left: {
+      drill: 'Non-dominant (sol) el odaklı yüksek frekanslı tapping, duvar pası ve nöromüsküler koordinasyon drilleri',
+      freq: 'Haftada 2-3 Gün · 3x20-30 sn',
+      targetFactor: 1.06,
+    },
     standing_long_jump: {
       drill: 'Yatay pliometrik çift bacak sıçrama (broad jump), pogo hops ve eksantrik iniş mekaniği (landing) drilleri',
       freq: 'Haftada 2 Gün · 4x5 Patlayıcı Tekrar',
@@ -4846,27 +5352,27 @@ export function analyzeLabPerformanceMetrics(report: SportsFlyLabReport): LabAiP
     r.m3 > 0 ? r.m3 : r.m2 > 0 ? r.m2 : r.m1 > 0 ? r.m1 : 0;
 
   const buildMotorImprovementItem = (m: LabParameterRow): LabAiImprovementItem => {
-    const curVal = getActiveVal(m);
+    const evalRes = evaluateMotorRowTargetAndStatus(m);
+    const curVal = evalRes.activeVal;
     const m1Val = m.m1 > 0 ? m.m1 : curVal;
-    const safePct = Math.max(52, Math.min(92, m.percentile || 68));
+    const safePct = evalRes.percentile;
     const catInfo = drillCatalog[m.id] || {
       drill: `${m.name} odaklı spesifik koordinasyon, kuvvet ve nöromüsküler gelişim drilleri`,
       freq: 'Haftada 2-3 Gün · 3 Set',
       targetFactor: m.lowerIsBetter ? 0.96 : 1.06,
     };
 
-    const ipsMatch = report.ipsativeTargets.find((t) =>
-      m.name.toLowerCase().includes(t.parameter.toLowerCase())
+    const computedTarget = evalRes.targetValue;
+    const hasRealSecond = Boolean(
+      !report.isAiForecast &&
+        report.date2 &&
+        report.date2 !== '—' &&
+        !report.date2.toLowerCase().includes('tahmin') &&
+        !report.date2.toLowerCase().includes('2-4 ay')
     );
-    const rawTarget =
-      ipsMatch && ipsMatch.target > 0
-        ? ipsMatch.target
-        : Number((curVal * catInfo.targetFactor).toFixed(2));
-    const computedTarget = m.lowerIsBetter
-      ? Number(Math.min(curVal * 0.96, rawTarget).toFixed(2))
-      : Number(Math.max(curVal * 1.04, rawTarget).toFixed(2));
-
-    const trendText = `1. ölçüm (${m1Val} ${m.unit}) ve 2. tahmini ölçüm (${m.m2 > 0 ? m.m2 : curVal} ${m.unit}) verilerine göre hedef değer ${computedTarget} ${m.unit} olarak planlanmıştır.`;
+    const trendText = hasRealSecond && m.m2 > 0
+      ? `1. ölçüm (${m1Val} ${m.unit}) ve 2. ölçüm (${m.m2} ${m.unit}) verilerine göre hedef değer ${computedTarget} ${m.unit} olarak planlanmıştır.`
+      : `1. ölçüm (${m1Val} ${m.unit}) verisine göre hedef değer ${computedTarget} ${m.unit} olarak belirlenmiştir.`;
 
     return {
       metricName: m.name,
@@ -4874,8 +5380,8 @@ export function analyzeLabPerformanceMetrics(report: SportsFlyLabReport): LabAiP
       currentValue: `${curVal} ${m.unit}`,
       targetValue: `${computedTarget} ${m.unit}`,
       percentile: safePct,
-      sd: m.sd,
-      priority: 'Gelişim Takibi',
+      sd: evalRes.sd,
+      priority: evalRes.tier === 'needs_dev' ? 'Öncelikli Gelişim' : 'Gelişim Takibi',
       analysis: trendText,
       drillRecommendation: catInfo.drill,
       weeklyFrequency: catInfo.freq,
@@ -4925,19 +5431,25 @@ export function analyzeLabPerformanceMetrics(report: SportsFlyLabReport): LabAiP
     });
   }
 
-  // 3. Identify Top Strengths strictly from measured parameters
+  // 3. Identify Top Strengths strictly from measured parameters (exclude excess weight/BMI/fat!)
   const strengths: LabAiStrengthItem[] = [...measuredMotors, ...measuredBody]
-    .filter((row) => row.id !== 'body_fat' && row.id !== 'bmi' && row.id !== 'calf_skf' && row.id !== 'supraspinal')
+    .filter((row) => row.id !== 'body_fat' && row.id !== 'bmi' && row.id !== 'weight' && row.id !== 'calf_skf' && row.id !== 'supraspinal')
     .sort((a, b) => b.percentile - a.percentile)
     .slice(0, 3)
     .map((row) => {
       const curVal = getActiveVal(row);
-      const safePct = Math.max(65, Math.min(95, row.percentile || 82));
+      const safePct = Math.max(5, Math.min(97, row.percentile || 50));
+      const insightText =
+        safePct >= 75
+          ? `Yaş ve cinsiyet referans grubunda %${safePct} yüzdelik dilimde (${row.sd > 0 ? `+${row.sd}` : row.sd} SD) yer alarak hedef normları karşılamaktadır.`
+          : safePct >= 50
+          ? `Yaş ve cinsiyet referans grubunda %${safePct} yüzdelik dilimde (${row.sd > 0 ? `+${row.sd}` : row.sd} SD) orta-iyi seviyede seyretmektedir.`
+          : `Mevcut ölçüm %${safePct} yüzdelik dilimde (${row.sd} SD) olup hedef norm (${row.refMid} ${row.unit}) için geliştirilmesi önerilmektedir.`;
       return {
         metricName: row.name,
         currentValue: `${curVal} ${row.unit}`,
         percentile: safePct,
-        insight: `Yaş grubunda %${safePct} yüzdelik dilimde (${row.sd > 0 ? `+${row.sd}` : row.sd} SD) yer alarak branş için önemli bir biyomekanik avantaj sağlamaktadır.`,
+        insight: insightText,
       };
     });
 
@@ -5004,11 +5516,14 @@ export function analyzeLabPerformanceMetrics(report: SportsFlyLabReport): LabAiP
     },
   ];
 
-  const overallSummary = `${report.athleteName}, 1. testten (%${report.scoreHistory.p1Score}) güncel ölçüm dönemine (%${report.scoreHistory.p2Score || report.scoreHistory.p3Score}) genel sportif performans endeksinde anlamlı bir gelişim göstermiştir. Ölçüm verileri incelendiğinde ${
-    strengths.length > 0 ? strengths.map((s) => s.metricName).slice(0, 2).join(' ve ') : 'ölçülen temel biyomotorik parametreler'
-  } güçlü yönler olarak öne çıkarken; ${
+  const highStrengths = strengths.filter((s) => s.percentile >= 75);
+  const overallSummary = `${report.athleteName}, 1. test (%${report.scoreHistory.p1Score}) ve güncel dönem (%${report.scoreHistory.p2Score || report.scoreHistory.p3Score}) verilerine göre ${
+    highStrengths.length > 0
+      ? `${highStrengths.map((s) => s.metricName).slice(0, 2).join(' ve ')} alanlarında hedef normları yakalamış olup `
+      : 'henüz üst hedef dilimine (%75+) ulaşan parametrelerin artırılmasına ihtiyaç duymakta olup '
+  }${
     improvementAreas.length > 0 ? improvementAreas.map((i) => i.metricName).slice(0, 3).join(', ') : 'ölçülen alanlar'
-  } için odaklanmış antrenman müdahalesi önerilmektedir.`;
+  } için hedef değer odaklı antrenman planlaması önerilmektedir.`;
 
   const bmrText = report.cardio.basalMetabolicRate > 0 ? `Sporcunun bazal metabolik hızı ${report.cardio.basalMetabolicRate} kcal/gün olarak hesaplanmıştır. ` : '';
   const somatoText = hasSomatoData

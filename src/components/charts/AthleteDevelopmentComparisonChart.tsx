@@ -23,6 +23,7 @@ import {
   SportsFlyLabReport,
   getStoredLabReports,
   getDisplayedMotorPerformance,
+  evaluateMotorRowTargetAndStatus,
 } from '../../data/sportsFlyLabData';
 
 export interface AthleteDevelopmentComparisonChartProps {
@@ -33,6 +34,7 @@ export interface AthleteDevelopmentComparisonChartProps {
   onToast?: (message: string) => void;
   defaultChartType?: 'bar' | 'line';
   initialFilterMode?: 'critical' | 'all';
+  intraGroupOnly?: boolean;
 }
 
 const cleanSubjectName = (rawName: string): string => {
@@ -103,14 +105,20 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
   onToast,
   defaultChartType = 'bar',
   initialFilterMode = 'critical',
+  intraGroupOnly = false,
 }) => {
   const [chartType, setChartType] = useState<'bar' | 'line'>(defaultChartType);
   const [filterMode, setFilterMode] = useState<'critical' | 'all'>(initialFilterMode);
 
-  // SportsFly Lab içindeki aynı spor okulu veya aynı grup sporcularını bul
+  // SportsFly Lab içindeki aynı spor okulu veya seçili grup içi sporcuları bul
   const peerReports = useMemo(() => {
     const pool = allReports && allReports.length > 0 ? allReports : getStoredLabReports();
     if (!pool || pool.length === 0) return [report];
+
+    if (intraGroupOnly) {
+      const hasCurrent = pool.some((r) => r.id === report.id);
+      return hasCurrent ? pool : [report, ...pool];
+    }
 
     const normClub = (report.clubName || '').trim().toLocaleLowerCase('tr-TR');
     const normAge = (report.groupInfo?.ageRange || '').trim().toLocaleLowerCase('tr-TR');
@@ -132,7 +140,7 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
 
     // 3. Tüm SportsFly Lab sporcuları
     return pool;
-  }, [report, allReports]);
+  }, [report, allReports, intraGroupOnly]);
 
   const athleticScore = getReportActiveScore(report);
 
@@ -149,13 +157,14 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
   const targetRemaining = targetScore - athleticScore;
 
   // Process and filter chart data with real group averages from peer athletes
-  const chartData = useMemo(() => {
+  const { chartData, allEvaluatedRows } = useMemo(() => {
     const displayedMotor = getDisplayedMotorPerformance(report);
-    if (displayedMotor.length === 0) return [];
+    if (displayedMotor.length === 0) return { chartData: [], allEvaluatedRows: [] };
 
     const rows = displayedMotor.map((row) => {
-      const activeVal = row.m3 > 0 ? row.m3 : (row.m2 > 0 ? row.m2 : row.m1);
-      const pVal = Math.max(35, Math.min(96, row.percentile || Math.round(activeVal)));
+      const evalRes = evaluateMotorRowTargetAndStatus(row);
+      const activeVal = evalRes.activeVal;
+      const pVal = evalRes.percentile;
       const label = cleanSubjectName(row.name);
 
       // Aynı grup / spor okulundaki tüm sporcuların bu testteki gerçek yüzdelik ortalaması
@@ -164,8 +173,8 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
         const matchedRow = getDisplayedMotorPerformance(pr).find(
           (m) => m.id === row.id || cleanSubjectName(m.name) === label
         );
-        if (matchedRow && matchedRow.percentile > 0) {
-          peerPercentiles.push(Math.max(35, Math.min(96, matchedRow.percentile)));
+        if (matchedRow) {
+          peerPercentiles.push(evaluateMotorRowTargetAndStatus(matchedRow).percentile);
         }
       });
 
@@ -174,13 +183,16 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
           ? Math.round(peerPercentiles.reduce((a, b) => a + b, 0) / peerPercentiles.length)
           : Math.max(40, Math.min(88, grpAvgScore));
 
-      const targetVal = Math.min(96, Math.max(pVal + 7, grpVal + 8, 85));
+      // Normatif "Hedefe Ulaştı" eşiği (%75 / +0.67 SD)
+      const targetVal = 75;
       const isCritical = isCriticalMetric(row.name);
 
       return {
         subject: label,
         fullName: row.name,
         isCritical,
+        isReached: evalRes.tier === 'reached',
+        targetValue: evalRes.targetValue,
         'Mevcut Değer': pVal,
         'Hedef Değer': targetVal,
         'Grup Ortalaması': grpVal,
@@ -200,10 +212,13 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
           distinct.push(r);
         }
       });
-      return distinct.length >= 4 ? distinct : rows.slice(0, 4);
+      return {
+        chartData: distinct.length >= 4 ? distinct : rows.slice(0, 4),
+        allEvaluatedRows: rows,
+      };
     }
 
-    return rows.slice(0, 10);
+    return { chartData: rows.slice(0, 10), allEvaluatedRows: rows };
   }, [report, peerReports, grpAvgScore, filterMode]);
 
   return (
@@ -247,7 +262,9 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
             %{grpAvgScore}
           </div>
           <p className="text-[10px] text-slate-500 font-medium leading-tight">
-            Grup Normu ({peerReports.length} Sporcu Ortalaması)
+            {intraGroupOnly
+              ? `Grup İçi Kıyaslama (${peerReports.length} Sporcu Ort.)`
+              : `Grup Normu (${peerReports.length} Sporcu Ortalaması)`}
           </p>
         </div>
 
@@ -484,44 +501,75 @@ export const AthleteDevelopmentComparisonChart: React.FC<AthleteDevelopmentCompa
         </div>
       </div>
 
-      {/* 4. Mini Summary of Top Strengths vs Focus Areas (Zero Typewriter Font, Clean Professional Badges) */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 text-sm">
-        <div className="p-3 rounded-xl bg-emerald-50/80 border border-emerald-200">
-          <div className="text-xs font-bold text-emerald-950 uppercase">
-            Hedefe Ulaşılan / Üst Düzey
-          </div>
-          <div className="text-sm font-extrabold text-emerald-900 mt-1 tabular-nums">
-            {chartData.filter((d) => d['Mevcut Değer'] >= d['Hedef Değer']).length} Motor Test
-          </div>
-          <p className="text-xs text-emerald-800 mt-0.5">
-            Hedef norm eşiğini geçen biyomotor parametreler
-          </p>
-        </div>
+      {/* 4. Meaningful Athlete Summary Cards (Top Capacity, Group Average Comparison, 1st Priority Target) */}
+      {(() => {
+        const evalSource = allEvaluatedRows.length > 0 ? allEvaluatedRows : chartData;
+        const sortedDesc = [...evalSource].sort((a, b) => b['Mevcut Değer'] - a['Mevcut Değer']);
+        const sortedAsc = [...evalSource].sort((a, b) => a['Mevcut Değer'] - b['Mevcut Değer']);
+        const topMetric = sortedDesc[0];
+        const priorityMetric = sortedAsc.find((r) => !r.isReached) || sortedAsc[0];
+        const closestGroupMetric = [...evalSource].sort((a, b) => b.deltaGroup - a.deltaGroup)[0];
+        const reachedCount = evalSource.filter((d) => d.isReached).length;
+        const aboveGroupCount = evalSource.filter((d) => d['Mevcut Değer'] >= d['Grup Ortalaması']).length;
+        const focusCount = evalSource.filter((d) => !d.isReached).length;
+        const diffLabel = groupDifference >= 0 ? `+${groupDifference}` : `${groupDifference}`;
 
-        <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200">
-          <div className="text-xs font-bold text-blue-950 uppercase">
-            Grup Üzeri Gelişim
-          </div>
-          <div className="text-sm font-extrabold text-blue-900 mt-1 tabular-nums">
-            {chartData.filter((d) => d['Mevcut Değer'] >= d['Grup Ortalaması']).length} Motor Test
-          </div>
-          <p className="text-xs text-blue-800 mt-0.5">
-            Akran grubu ortalamasının üzerinde seyreden alanlar
-          </p>
-        </div>
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3 gap-3 pt-1 text-sm">
+            <div className="p-3 rounded-xl bg-emerald-50/80 border border-emerald-200">
+              <div className="text-[11px] font-bold text-emerald-950 uppercase tracking-wide">
+                En Yüksek Kapasite
+              </div>
+              <div className="text-sm font-extrabold text-emerald-900 mt-1 tabular-nums truncate">
+                {topMetric ? `${topMetric.subject} · %${topMetric['Mevcut Değer']}` : 'Veri Bekleniyor'}
+              </div>
+              <p className="text-[11px] text-emerald-800 mt-0.5 leading-snug">
+                {topMetric
+                  ? `Ölçüm: ${topMetric.rawM3} ${topMetric.unit}${
+                      reachedCount > 0
+                        ? ` · ${reachedCount}/${evalSource.length} test %75+ normda`
+                        : ' · Profildeki en güçlü alan'
+                    }`
+                  : 'Ölçüm girildiğinde otomatik hesaplanır'}
+              </p>
+            </div>
 
-        <div className="p-3 rounded-xl bg-slate-100 border border-slate-200">
-          <div className="text-xs font-bold text-slate-900 uppercase">
-            Öncelikli Gelişim Odakları
+            <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200">
+              <div className="text-[11px] font-bold text-blue-950 uppercase tracking-wide">
+                Grup Karşılaştırması
+              </div>
+              <div className="text-sm font-extrabold text-blue-900 mt-1 tabular-nums truncate">
+                Sporcu %{athleticScore} · Grup %{grpAvgScore} ({diffLabel})
+              </div>
+              <p className="text-[11px] text-blue-800 mt-0.5 leading-snug">
+                {aboveGroupCount > 0
+                  ? `${aboveGroupCount}/${evalSource.length} motor testte grup ortalamasının üzerinde`
+                  : closestGroupMetric
+                  ? `Gruba en yakın: ${closestGroupMetric.subject} (%${closestGroupMetric['Mevcut Değer']} / %${closestGroupMetric['Grup Ortalaması']})`
+                  : 'Akran grubu ortalama referansıyla karşılaştırma'}
+              </p>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-100 border border-slate-200">
+              <div className="text-[11px] font-bold text-slate-900 uppercase tracking-wide">
+                1. Öncelikli Gelişim Hedefi
+              </div>
+              <div className="text-sm font-extrabold text-slate-800 mt-1 tabular-nums truncate">
+                {priorityMetric
+                  ? `${priorityMetric.subject}: ${priorityMetric.rawM3} → ${priorityMetric.targetValue} ${priorityMetric.unit}`
+                  : 'Hedef Belirleniyor'}
+              </div>
+              <p className="text-[11px] text-slate-600 mt-0.5 leading-snug">
+                {priorityMetric
+                  ? focusCount > 0
+                    ? `Mevcut %${priorityMetric['Mevcut Değer']} · ${focusCount}/${evalSource.length} test gelişim odaklı`
+                    : `Mevcut %${priorityMetric['Mevcut Değer']} · Tüm testler hedef normda`
+                  : 'Antrenman drilleriyle gelişim takibi'}
+              </p>
+            </div>
           </div>
-          <div className="text-sm font-extrabold text-slate-800 mt-1 tabular-nums">
-            {chartData.filter((d) => d['Mevcut Değer'] < d['Hedef Değer']).length} Gelişim Hedefi
-          </div>
-          <p className="text-xs text-slate-600 mt-0.5">
-            Antrenman drilleriyle geliştirilmesi hedeflenen testler
-          </p>
-        </div>
-      </div>
+        );
+      })()}
     </div>
   );
 };

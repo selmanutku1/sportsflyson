@@ -26,6 +26,7 @@ import {
 import {
   SportsFlyLabReport,
   LabParameterRow,
+  evaluateMotorRowTargetAndStatus,
   getDisplayedMotorPerformance,
   getDisplayedBodyComposition,
   isLabRowMeasured,
@@ -34,14 +35,17 @@ import { SporcuKarne } from '../../data/mockKarneData';
 
 // Helper to normalize any LabParameterRow value (m1, m2, m3) to a 0-100 normative score using D3 scaleLinear
 const normalizeLabRowValue = (val: number, row: LabParameterRow): number => {
-  if (!Number.isFinite(val) || val === 0) return 50;
-  const domainMin = row.refLow * 0.78;
-  const domainMax = row.refHigh * 1.12;
+  const isBalance = row.id === 'balance' || row.unit === 'hata';
+  if (!Number.isFinite(val)) return 50;
+  if (val === 0 && !(isBalance && row.measured)) return 50;
+  if (isBalance && val === 0) return 96;
+  const domainMin = Math.max(0, row.refLow * 0.72);
+  const domainMax = row.refHigh * 1.25;
   if (domainMax === domainMin) return 50;
   const scale = d3
     .scaleLinear()
     .domain(row.lowerIsBetter ? [domainMax, domainMin] : [domainMin, domainMax])
-    .range([15, 95])
+    .range([5, 96])
     .clamp(true);
   const result = scale(val);
   return Number.isFinite(result) ? Math.round(result) : 50;
@@ -104,11 +108,11 @@ export const RechartsSportsFlyRadarChart: React.FC<RechartsSportsFlyRadarProps> 
     return displayedMotor.map((row) => {
       const p1Val = normalizeLabRowValue(row.m1, row);
       const p2Val = normalizeLabRowValue(row.m2, row);
-      const p3Val = row.percentile || normalizeLabRowValue(row.m3, row);
-      const groupAvgScore = report.groupInfo?.groupAverageScore ?? 72;
-      const grpAvgVal = Math.max(35, Math.min(88, Math.round(p3Val * 0.82 + groupAvgScore * 0.18 - 4)));
-      const p1GrpAvgVal = Math.max(25, Math.min(85, Math.round(p1Val * 0.85 + groupAvgScore * 0.15 - 5)));
-      const targetVal = Math.min(100, Math.max(p3Val + 8, 85));
+      const p3Val = evaluateMotorRowTargetAndStatus(row).percentile;
+      const groupAvgScore = report.groupInfo?.groupAverageScore ?? 65;
+      const grpAvgVal = Math.max(10, Math.min(88, Math.round(p3Val * 0.82 + groupAvgScore * 0.18 - 4)));
+      const p1GrpAvgVal = Math.max(10, Math.min(85, Math.round(p1Val * 0.85 + groupAvgScore * 0.15 - 5)));
+      const targetVal = Math.min(97, Math.max(p3Val + 8, 65));
 
       const subjectName = formatCleanSubjectName(row.name);
 
@@ -1108,12 +1112,7 @@ export const SportsFlyLabKarnePage6LineContent: React.FC<{ report: SportsFlyLabR
     const longJumpRow = findMotor(['standing_long_jump', 'broad_jump'], ['uzun atlama']);
 
     const getTargetFor = (row: LabParameterRow) => {
-      const match = report.ipsativeTargets.find((t) =>
-        row.name.toLowerCase().includes(t.parameter.toLowerCase())
-      );
-      if (match) return match.target;
-      const base = row.m3 > 0 ? row.m3 : row.m2 > 0 ? row.m2 : row.m1;
-      return Number((base * (row.lowerIsBetter ? 0.96 : 1.05)).toFixed(2));
+      return evaluateMotorRowTargetAndStatus(row).targetValue;
     };
 
     const hasVo2 = (report.cardio.test1Vo2 || 0) > 0 || (report.cardio.test2Vo2 || 0) > 0 || (report.cardio.test3Vo2 || 0) > 0;
@@ -1665,12 +1664,15 @@ export const SportsFlyLabPerformanceCharts: React.FC<SportsFlyLabPerformanceChar
       report.bodyComposition.find((b) => b.id === selectedLineMetricId) ||
       report.motorPerformance[0];
 
+    const isMotorRow = report.motorPerformance.some((m) => m.id === foundRow.id);
     const ipsMatch = report.ipsativeTargets.find((t) =>
       foundRow.name.toLowerCase().includes(t.parameter.toLowerCase())
     );
-    const computedTarget = ipsMatch
+    const computedTarget = isMotorRow
+      ? evaluateMotorRowTargetAndStatus(foundRow).targetValue
+      : ipsMatch
       ? ipsMatch.target
-      : Number((foundRow.m3 * (foundRow.lowerIsBetter ? 0.96 : 1.05)).toFixed(2));
+      : Number(foundRow.refMid.toFixed(2));
 
     return {
       title: `${foundRow.name} — 3 Dönemlik Ölçüm & Hedef Eğrisi`,
@@ -2816,15 +2818,15 @@ export const ThreeWayGroupTargetAthleteComparisonChart: React.FC<ThreeWayCompari
   className = '',
   height = 250,
 }) => {
-  const grpAvgScore = report.groupInfo?.groupAverageScore ?? 70;
-  const athleticScore = report.scoreHistory?.p3Score || 88;
-  const targetScore = Math.min(100, Math.max(athleticScore + 6, 85));
+  const grpAvgScore = report.groupInfo?.groupAverageScore ?? 65;
+  const athleticScore = report.scoreHistory?.p3Score || report.scoreHistory?.p1Score || 65;
+  const targetScore = Math.min(97, Math.max(athleticScore + 6, 65));
 
   const barData = useMemo(() => {
     return getDisplayedMotorPerformance(report).slice(0, 8).map((row) => {
-      const p3Val = row.percentile || normalizeLabRowValue(row.m3, row);
-      const grpVal = Math.max(35, Math.min(88, Math.round(p3Val * 0.82 + grpAvgScore * 0.18 - 4)));
-      const targetVal = Math.min(100, Math.max(p3Val + 8, 85));
+      const p3Val = evaluateMotorRowTargetAndStatus(row).percentile;
+      const grpVal = Math.max(10, Math.min(88, Math.round(p3Val * 0.82 + grpAvgScore * 0.18 - 4)));
+      const targetVal = Math.min(97, Math.max(p3Val + 8, 65));
       const shortName = row.name.replace(' Testi', '').replace(' Ölçümü', '');
 
       return {
