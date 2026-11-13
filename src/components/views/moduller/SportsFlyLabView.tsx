@@ -63,6 +63,7 @@ import {
   Camera,
   BookOpen,
   ArrowUpDown,
+  Filter,
 } from 'lucide-react';
 import { SportsFlyVectorMark } from '../../SportsFlyLogo';
 import {
@@ -113,6 +114,9 @@ import {
   archiveBatchLabReports,
   renameLabArchiveItem,
   deleteLabArchiveItem,
+  deleteLabArchiveBatchItems,
+  getLocalIsoDateString,
+  normalizeArchiveDateIso,
   applyBrandingToReport,
   applyBrandingToReports,
   recalculateGroupAveragesAndRanks,
@@ -140,7 +144,17 @@ import {
   parseDateString,
 } from '../../../data/sportsFlyLabData';
 import { getStoredKarneler, saveStoredKarneler } from '../../../data/mockKarneData';
-import { saveKarneToFirestore } from '../../../services/karneFirestoreService';
+import {
+  saveKarneToFirestore,
+  fetchFirestoreLabReports,
+  saveLabReportsBatchToFirestore,
+  fetchFirestoreLabArchives,
+  saveLabArchiveToFirestore,
+  saveLabArchivesBatchToFirestore,
+  updateLabArchiveMetaInFirestore,
+  deleteLabArchiveFromFirestore,
+  deleteLabArchivesBatchFromFirestore,
+} from '../../../services/karneFirestoreService';
 import { DosyaHavuzuView } from '../DosyaHavuzuView';
 import {
   ExcelDataAuditModal,
@@ -437,6 +451,71 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       setArchivedReports(updatedArchives);
       localStorage.setItem('sportsfly_lab_archive_v1', JSON.stringify(updatedArchives));
     }
+
+    // Sync Karne Arşivi records with Firestore 'labArchives' collection on mount & backfill local items
+    fetchFirestoreLabArchives()
+      .then((remoteArchives) => {
+        const remoteIdSet = new Set(remoteArchives.map((r) => r.archiveId));
+        setArchivedReports((prevLocal) => {
+          const unsyncedLocal = prevLocal.filter(
+            (item) => !remoteIdSet.has(item.archiveId) && !item.archiveId.startsWith('lab-arch-default-')
+          );
+          if (unsyncedLocal.length > 0) {
+            void saveLabArchivesBatchToFirestore(unsyncedLocal);
+          }
+          if (remoteArchives.length === 0) return prevLocal;
+
+          const mergedMap = new Map<string, SportsFlyLabArchivedReport>();
+          remoteArchives.forEach((item) => mergedMap.set(item.archiveId, item));
+          prevLocal.forEach((item) => {
+            if (!mergedMap.has(item.archiveId)) {
+              mergedMap.set(item.archiveId, item);
+            }
+          });
+          const merged = Array.from(mergedMap.values()).sort(
+            (a, b) => (b.savedTimestamp || 0) - (a.savedTimestamp || 0)
+          );
+          try {
+            localStorage.setItem('sportsfly_lab_archive_v1', JSON.stringify(merged));
+          } catch {
+            // ignore storage quota warning
+          }
+          return merged;
+        });
+      })
+      .catch((err) => {
+        console.warn('[SportsFlyLabView] Firestore archive sync warning:', err);
+      });
+
+    // Sync active studio report cards with Firestore 'labReports' collection on mount
+    fetchFirestoreLabReports()
+      .then((remoteReports) => {
+        const remoteIdSet = new Set(remoteReports.map((r) => r.id));
+        const defaultIds = new Set(DEFAULT_LAB_REPORTS.map((r) => r.id));
+        setReports((prevLocal) => {
+          const unsyncedLocal = prevLocal.filter(
+            (r) => !remoteIdSet.has(r.id) && !defaultIds.has(r.id)
+          );
+          if (unsyncedLocal.length > 0) {
+            void saveLabReportsBatchToFirestore(unsyncedLocal);
+          }
+          if (remoteReports.length === 0) return prevLocal;
+
+          const mergedMap = new Map<string, SportsFlyLabReport>();
+          prevLocal.forEach((r) => mergedMap.set(r.id, r));
+          remoteReports.forEach((r) => {
+            if (!mergedMap.has(r.id)) {
+              mergedMap.set(r.id, r);
+            }
+          });
+          const merged = Array.from(mergedMap.values());
+          saveStoredLabReports(merged);
+          return merged;
+        });
+      })
+      .catch((err) => {
+        console.warn('[SportsFlyLabView] Firestore labReports sync warning:', err);
+      });
   }, []);
 
   // Main module tab: 'studio', 'batch', 'dosya-havuzu', 'archive', or 'company-profile' (Company Profile only in integration entry)
@@ -462,6 +541,13 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
   const [batchGroupNote, setBatchGroupNote] = useState<string>(
     'Excel Toplu Sporcu Verisi · Kurumsal Performans Taraması'
   );
+  const [batchSchoolName, setBatchSchoolName] = useState<string>(
+    () => getStoredLabSchoolBranding().schoolName || ''
+  );
+  const [batchArchiveDateIso, setBatchArchiveDateIso] = useState<string>(() =>
+    getLocalIsoDateString()
+  );
+  const [isArchivingBatch, setIsArchivingBatch] = useState<boolean>(false);
   const [autoArchiveOnBatchCreate, setAutoArchiveOnBatchCreate] = useState<boolean>(true);
   const [batchSearchQuery, setBatchSearchQuery] = useState<string>('');
   const [isGeneratingBatchPDF, setIsGeneratingBatchPDF] = useState<boolean>(false);
@@ -496,10 +582,31 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     getStoredLabArchives()
   );
   const [archiveSearchQuery, setArchiveSearchQuery] = useState<string>('');
-  const [archiveSortBy, setArchiveSortBy] = useState<'newest' | 'score' | 'name'>('newest');
+  const [archiveSortBy, setArchiveSortBy] = useState<'newest' | 'score' | 'name' | 'school'>(
+    'newest'
+  );
+  const [archiveSchoolFilter, setArchiveSchoolFilter] = useState<string>('all');
+  const [archiveDateFilter, setArchiveDateFilter] = useState<string>('');
+  const [archiveDateFrom, setArchiveDateFrom] = useState<string>('');
+  const [archiveDateTo, setArchiveDateTo] = useState<string>('');
+  const [archiveBranchFilter, setArchiveBranchFilter] = useState<string>('all');
+  const [archiveSourceTypeFilter, setArchiveSourceTypeFilter] = useState<
+    'all' | 'batch' | 'single'
+  >('all');
+  const [archiveViewMode, setArchiveViewMode] = useState<'database' | 'cards'>('database');
+  const [archiveCalendarMonth, setArchiveCalendarMonth] = useState<{
+    year: number;
+    month: number;
+  }>(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
   const [showSaveArchiveModal, setShowSaveArchiveModal] = useState<boolean>(false);
+  const [archiveTargetReport, setArchiveTargetReport] = useState<SportsFlyLabReport | null>(null);
   const [archiveTitleInput, setArchiveTitleInput] = useState<string>('');
   const [archiveNoteInput, setArchiveNoteInput] = useState<string>('');
+  const [archiveSchoolInput, setArchiveSchoolInput] = useState<string>('');
+  const [archiveDateInput, setArchiveDateInput] = useState<string>(() => getLocalIsoDateString());
   const [editingArchiveItem, setEditingArchiveItem] = useState<SportsFlyLabArchivedReport | null>(
     null
   );
@@ -984,6 +1091,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     const nextList = [createdReport, ...reports];
     setReports(nextList);
     saveStoredLabReports(nextList);
+    void saveLabReportsBatchToFirestore([createdReport]);
     setSelectedReportId(createdReport.id);
     setShowNewReportModal(false);
     setNewAthleteForm({
@@ -999,33 +1107,109 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
   // Open Save-to-Archive modal with a pre-filled descriptive name
   const handleOpenSaveArchiveModal = (targetReport: SportsFlyLabReport = currentReport) => {
+    setArchiveTargetReport(targetReport);
     setArchiveTitleInput(
-      `${targetReport.athleteName} — ${targetReport.date3} Dönem Karnesi (${targetReport.sportBranch})`
+      `${targetReport.athleteName} — ${targetReport.date3 && targetReport.date3 !== '—' ? targetReport.date3 : targetReport.date1} Dönem Karnesi (${targetReport.sportBranch})`
     );
     setArchiveNoteInput(
-      `${effectiveClubName} · Genel Performans Puanı: %${targetReport.scoreHistory.p2Score || targetReport.scoreHistory.p3Score}`
+      `${effectiveClubName} · Genel Performans Puanı: %${targetReport.scoreHistory.p3Score || targetReport.scoreHistory.p1Score || targetReport.scoreHistory.p2Score}`
     );
+    setArchiveSchoolInput(batchSchoolName.trim() || targetReport.clubName || effectiveClubName);
+    setArchiveDateInput(batchArchiveDateIso || getLocalIsoDateString());
     setShowSaveArchiveModal(true);
   };
 
-  // Save current report card into Karne Arşivi with user's custom name
+  // Save target report card into Karne Arşivi with user's custom name, school & calendar date
   const handleConfirmSaveToArchive = (e: React.FormEvent) => {
     e.preventDefault();
+    const target = archiveTargetReport || currentReport;
     const customName =
       archiveTitleInput.trim() ||
-      `${currentReport.athleteName} — ${currentReport.date3} Dönem Karnesi`;
-    const nextArchives = archiveLabReport(currentReport, customName, archiveNoteInput);
+      `${target.athleteName} — ${target.date3 !== '—' ? target.date3 : target.date1} Dönem Karnesi`;
+    const resolvedSchool = archiveSchoolInput.trim() || target.clubName || effectiveClubName;
+    const resolvedDateIso = archiveDateInput || getLocalIsoDateString();
+    const nextArchives = archiveLabReport(target, customName, archiveNoteInput, {
+      schoolName: resolvedSchool,
+      createdDateIso: resolvedDateIso,
+    });
     setArchivedReports(nextArchives);
+    if (nextArchives[0]) {
+      void saveLabArchiveToFirestore(nextArchives[0]);
+    }
     setShowSaveArchiveModal(false);
-    notify(`"${customName}" adıyla Karne Arşivi'ne kaydedildi.`);
+    setArchiveTargetReport(null);
+    notify(`"${customName}" (${resolvedSchool}) adıyla Karne Arşivi'ne kaydedildi.`);
   };
 
-  // Open an archived report card in the 7-page viewer (and optionally in A4 PDF preview or download)
+  // Save ALL (or selected) Batch Report Cards into Karne Arşivi at once with Calendar Date + Sports School Name
+  const handleArchiveBatchReportsNow = async (archiveAll: boolean = true) => {
+    const targetList = archiveAll ? batchReports : selectedBatchReports;
+    if (targetList.length === 0) {
+      notify('Arşivlenecek toplu karne bulunamadı. Lütfen önce Excel listesi yükleyin.');
+      return;
+    }
+
+    setIsArchivingBatch(true);
+    try {
+      const persistedBranding = getStoredLabSchoolBranding();
+      const resolvedSchool =
+        batchSchoolName.trim() || persistedBranding.schoolName.trim() || effectiveClubName;
+      const resolvedDateIso =
+        batchArchiveDateIso && /^\d{4}-\d{2}-\d{2}$/.test(batchArchiveDateIso)
+          ? batchArchiveDateIso
+          : getLocalIsoDateString();
+
+      const preparedBatch = targetList.map((rep) => {
+        const branded = applyBrandingToReport(rep, {
+          ...persistedBranding,
+          schoolName: resolvedSchool,
+        });
+        branded.clubName = resolvedSchool;
+        if (!branded.aiRecommendations) {
+          branded.aiRecommendations = analyzeLabPerformanceMetrics(branded);
+        }
+        return branded;
+      });
+
+      const finalBatch = isIntraGroupComparisonEnabled
+        ? recalculateGroupAveragesAndRanks(preparedBatch)
+        : preparedBatch;
+
+      const nextArchives = archiveBatchLabReports(finalBatch, batchGroupTitle, batchGroupNote, {
+        schoolName: resolvedSchool,
+        createdDateIso: resolvedDateIso,
+      });
+      setArchivedReports(nextArchives);
+
+      const newlyCreated = nextArchives.slice(0, finalBatch.length);
+      await saveLabArchivesBatchToFirestore(newlyCreated);
+
+      const [yy, mm, dd] = resolvedDateIso.split('-');
+      const trDateStr = `${dd}.${mm}.${yy}`;
+      notify(
+        `${finalBatch.length} sporcunun karnesi "${resolvedSchool}" adına (${trDateStr}) toplu olarak Karne Arşivi'ne kaydedildi.`
+      );
+    } catch (err) {
+      console.error('Toplu arşivleme hatası:', err);
+      notify('Toplu karne arşivleme sırasında beklenmeyen bir hata oluştu.');
+    } finally {
+      setIsArchivingBatch(false);
+    }
+  };
+
+  // Open an archived report card in the 5-page viewer (preserving archived sports school name)
   const handleOpenArchivedReport = (
     item: SportsFlyLabArchivedReport,
     mode: 'view' | 'pdf-preview' | 'download-pdf' = 'view'
   ) => {
-    const snapshot = applyBrandingToReport(item.reportSnapshot, schoolBranding);
+    const preservedSchool =
+      item.schoolName || item.reportSnapshot?.clubName || effectiveClubName;
+    const snapshot = applyBrandingToReport(item.reportSnapshot, {
+      ...schoolBranding,
+      schoolName: preservedSchool,
+    });
+    snapshot.clubName = preservedSchool;
+
     const exists = reports.some((r) => r.id === snapshot.id);
     const nextReports = exists
       ? reports.map((r) => (r.id === snapshot.id ? snapshot : r))
@@ -1062,6 +1246,10 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       editArchiveNoteInput
     );
     setArchivedReports(next);
+    const updatedItem = next.find((x) => x.archiveId === editingArchiveItem.archiveId);
+    if (updatedItem) {
+      void updateLabArchiveMetaInFirestore(updatedItem);
+    }
     setEditingArchiveItem(null);
     notify('Arşivdeki karne ismi güncellendi.');
   };
@@ -1070,37 +1258,284 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
   const handleDeleteArchiveItem = (item: SportsFlyLabArchivedReport) => {
     const next = deleteLabArchiveItem(item.archiveId);
     setArchivedReports(next);
+    void deleteLabArchiveFromFirestore(item.archiveId);
     notify(`"${item.archiveTitle}" karne arşivinden kaldırıldı.`);
   };
+
+  // Delete an entire date+school batch session from archive
+  const handleDeleteArchiveSession = (archiveIds: string[], sessionLabel: string) => {
+    if (!archiveIds || archiveIds.length === 0) return;
+    const next = deleteLabArchiveBatchItems(archiveIds);
+    setArchivedReports(next);
+    void deleteLabArchivesBatchFromFirestore(archiveIds);
+    notify(`"${sessionLabel}" (${archiveIds.length} karne) arşivden kaldırıldı.`);
+  };
+
+  const handleClearArchiveFilters = () => {
+    setArchiveSearchQuery('');
+    setArchiveSchoolFilter('all');
+    setArchiveDateFilter('');
+    setArchiveDateFrom('');
+    setArchiveDateTo('');
+    setArchiveBranchFilter('all');
+    setArchiveSourceTypeFilter('all');
+  };
+
+  // Unique sports schools in archive for filter dropdown
+  const archiveSchoolOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    archivedReports.forEach((item) => {
+      const s = (item.schoolName || item.reportSnapshot?.clubName || '').trim();
+      if (s) set.add(s);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'tr'));
+  }, [archivedReports]);
+
+  // Unique sport branches in archive for filter dropdown
+  const archiveBranchOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    archivedReports.forEach((item) => {
+      const b = (item.reportSnapshot?.sportBranch || '').trim();
+      if (b) set.add(b);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'tr'));
+  }, [archivedReports]);
+
+  // Per-date stats for interactive monthly calendar
+  const archiveCalendarDayStats = React.useMemo(() => {
+    const map = new Map<string, { count: number; schools: string[]; batchCount: number }>();
+    archivedReports.forEach((item) => {
+      const iso = normalizeArchiveDateIso(item);
+      const school = (item.schoolName || item.reportSnapshot?.clubName || 'SportsFly Spor Okulu').trim();
+      const existing = map.get(iso);
+      if (existing) {
+        existing.count += 1;
+        if (!existing.schools.includes(school)) existing.schools.push(school);
+        if (item.sourceType === 'batch' || item.batchId) existing.batchCount += 1;
+      } else {
+        map.set(iso, {
+          count: 1,
+          schools: [school],
+          batchCount: item.sourceType === 'batch' || item.batchId ? 1 : 0,
+        });
+      }
+    });
+    return map;
+  }, [archivedReports]);
+
+  // Grouped "Hangi Tarihte Hangi Spor Okuluna Karne Oluşturuldu" sessions
+  const archiveSessionsByDateAndSchool = React.useMemo(() => {
+    const sessionMap = new Map<
+      string,
+      {
+        key: string;
+        createdDateIso: string;
+        displayDate: string;
+        schoolName: string;
+        groupTitle: string;
+        sourceType: 'batch' | 'single';
+        count: number;
+        scoreSum: number;
+        branches: string[];
+        archiveIds: string[];
+        firstItem: SportsFlyLabArchivedReport;
+        latestTimestamp: number;
+      }
+    >();
+
+    archivedReports.forEach((item) => {
+      const iso = normalizeArchiveDateIso(item);
+      const school = (item.schoolName || item.reportSnapshot?.clubName || 'SportsFly Spor Okulu').trim();
+      const sType: 'batch' | 'single' = item.sourceType === 'batch' || item.batchId ? 'batch' : 'single';
+      const groupTitle = item.batchGroupTitle || (sType === 'batch' ? 'Toplu Karne Grubu' : 'Bireysel Kayıt');
+      const key = item.batchId
+        ? `${iso}||${school}||${item.batchId}`
+        : `${iso}||${school}||${groupTitle}||${sType}`;
+
+      const rep = item.reportSnapshot;
+      const activeScore =
+        rep?.scoreHistory?.p3Score || rep?.scoreHistory?.p1Score || rep?.scoreHistory?.p2Score || 0;
+      const branch = (rep?.sportBranch || '').trim();
+      const [yy, mm, dd] = iso.split('-');
+      const displayDate = yy && mm && dd ? `${dd}.${mm}.${yy}` : iso;
+
+      const existing = sessionMap.get(key);
+      if (existing) {
+        existing.count += 1;
+        existing.scoreSum += activeScore;
+        if (branch && !existing.branches.includes(branch)) existing.branches.push(branch);
+        existing.archiveIds.push(item.archiveId);
+        if ((item.savedTimestamp || 0) > existing.latestTimestamp) {
+          existing.latestTimestamp = item.savedTimestamp || 0;
+        }
+      } else {
+        sessionMap.set(key, {
+          key,
+          createdDateIso: iso,
+          displayDate,
+          schoolName: school,
+          groupTitle,
+          sourceType: sType,
+          count: 1,
+          scoreSum: activeScore,
+          branches: branch ? [branch] : [],
+          archiveIds: [item.archiveId],
+          firstItem: item,
+          latestTimestamp: item.savedTimestamp || 0,
+        });
+      }
+    });
+
+    return Array.from(sessionMap.values())
+      .map((s) => ({
+        ...s,
+        avgScore: s.count > 0 ? Math.round(s.scoreSum / s.count) : 0,
+      }))
+      .sort((a, b) => {
+        if (a.createdDateIso !== b.createdDateIso) {
+          return b.createdDateIso.localeCompare(a.createdDateIso);
+        }
+        return b.latestTimestamp - a.latestTimestamp;
+      });
+  }, [archivedReports]);
 
   const filteredArchivedReports = React.useMemo(() => {
     const q = archiveSearchQuery.trim().toLowerCase();
     const filtered = archivedReports.filter((item) => {
-      if (!q) return true;
       const rep = item.reportSnapshot;
+      const itemSchool = (item.schoolName || rep?.clubName || 'SportsFly Spor Okulu').trim();
+      const itemIso = normalizeArchiveDateIso(item);
+      const itemSourceType: 'batch' | 'single' =
+        item.sourceType === 'batch' || item.batchId ? 'batch' : 'single';
+
+      if (archiveSchoolFilter !== 'all' && itemSchool !== archiveSchoolFilter) {
+        return false;
+      }
+      if (archiveDateFilter && itemIso !== archiveDateFilter) {
+        return false;
+      }
+      if (archiveDateFrom && itemIso < archiveDateFrom) {
+        return false;
+      }
+      if (archiveDateTo && itemIso > archiveDateTo) {
+        return false;
+      }
+      if (archiveBranchFilter !== 'all' && (rep?.sportBranch || '') !== archiveBranchFilter) {
+        return false;
+      }
+      if (archiveSourceTypeFilter !== 'all' && itemSourceType !== archiveSourceTypeFilter) {
+        return false;
+      }
+
+      if (!q) return true;
       return (
         item.archiveTitle.toLowerCase().includes(q) ||
         (item.archiveNote || '').toLowerCase().includes(q) ||
-        rep.athleteName.toLowerCase().includes(q) ||
-        rep.sportBranch.toLowerCase().includes(q) ||
-        rep.clubName.toLowerCase().includes(q) ||
-        item.savedAt.toLowerCase().includes(q)
+        (item.batchGroupTitle || '').toLowerCase().includes(q) ||
+        itemSchool.toLowerCase().includes(q) ||
+        (rep?.athleteName || '').toLowerCase().includes(q) ||
+        (rep?.sportBranch || '').toLowerCase().includes(q) ||
+        item.savedAt.toLowerCase().includes(q) ||
+        itemIso.includes(q)
       );
     });
 
     return [...filtered].sort((a, b) => {
       if (archiveSortBy === 'score') {
-        return (
-          (b.reportSnapshot.scoreHistory?.p3Score || 0) -
-          (a.reportSnapshot.scoreHistory?.p3Score || 0)
-        );
+        const sB = b.reportSnapshot.scoreHistory?.p3Score || b.reportSnapshot.scoreHistory?.p1Score || 0;
+        const sA = a.reportSnapshot.scoreHistory?.p3Score || a.reportSnapshot.scoreHistory?.p1Score || 0;
+        return sB - sA;
       }
       if (archiveSortBy === 'name') {
         return a.archiveTitle.localeCompare(b.archiveTitle, 'tr');
       }
+      if (archiveSortBy === 'school') {
+        const scA = a.schoolName || a.reportSnapshot?.clubName || '';
+        const scB = b.schoolName || b.reportSnapshot?.clubName || '';
+        return scA.localeCompare(scB, 'tr') || (b.savedTimestamp || 0) - (a.savedTimestamp || 0);
+      }
       return (b.savedTimestamp || 0) - (a.savedTimestamp || 0);
     });
-  }, [archivedReports, archiveSearchQuery, archiveSortBy]);
+  }, [
+    archivedReports,
+    archiveSearchQuery,
+    archiveSortBy,
+    archiveSchoolFilter,
+    archiveDateFilter,
+    archiveDateFrom,
+    archiveDateTo,
+    archiveBranchFilter,
+    archiveSourceTypeFilter,
+  ]);
+
+  const handleExportArchiveDatabaseCsv = () => {
+    if (filteredArchivedReports.length === 0) {
+      notify('Dışa aktarılacak filtrelenmiş arşiv kaydı bulunamadı.');
+      return;
+    }
+    const headers = [
+      'Takvim Tarihi',
+      'Kayıt Zamanı',
+      'Spor Okulu / Kulüp',
+      'Kayıt Türü',
+      'Dönem / Grup Başlığı',
+      'Sporcu Adı',
+      'Branş',
+      'Yaş',
+      'Cinsiyet',
+      'Boy (cm)',
+      'Kilo (kg)',
+      '18 Yaş Tahmini Boy (cm)',
+      'VO2peak',
+      'Performans Puanı (%)',
+      'Arşiv Başlığı',
+      'Not',
+    ];
+    const escapeCsv = (val: string | number | undefined) => {
+      const s = String(val ?? '').replace(/"/g, '""');
+      return `"${s}"`;
+    };
+    const rows = filteredArchivedReports.map((item) => {
+      const rep = item.reportSnapshot;
+      const iso = normalizeArchiveDateIso(item);
+      const school = item.schoolName || rep.clubName || 'SportsFly Spor Okulu';
+      const heightVal = getActiveParamVal(rep.bodyComposition.find((x) => x.id === 'height'), 0);
+      const weightVal = getActiveParamVal(rep.bodyComposition.find((x) => x.id === 'weight'), 0);
+      const scoreVal = rep.scoreHistory?.p3Score || rep.scoreHistory?.p1Score || rep.scoreHistory?.p2Score || 0;
+      return [
+        iso,
+        item.savedAt,
+        school,
+        item.sourceType === 'batch' || item.batchId ? 'Toplu Üretim' : 'Bireysel',
+        item.batchGroupTitle || '—',
+        rep.athleteName,
+        rep.sportBranch,
+        rep.ageYears,
+        rep.gender,
+        heightVal,
+        weightVal,
+        rep.predictedAdultHeight,
+        rep.cardio?.test3Vo2 || rep.cardio?.test1Vo2 || 0,
+        scoreVal,
+        item.archiveTitle,
+        item.archiveNote || '',
+      ]
+        .map(escapeCsv)
+        .join(';');
+    });
+
+    const csvContent = '\uFEFF' + [headers.map(escapeCsv).join(';'), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `SportsFly_Lab_Karne_Veritabani_${getLocalIsoDateString()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    notify(`${filteredArchivedReports.length} arşiv kaydı Excel/CSV veritabanı olarak indirildi.`);
+  };
 
   // Handle Sport School Logo Upload (converts to compact Base64 Data URL for persistence & A4 PDF export)
   const handleSchoolLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1735,10 +2170,18 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     }
 
     const persistedBranding = getStoredLabSchoolBranding();
-    setSchoolBranding(persistedBranding);
+    const resolvedSchool =
+      batchSchoolName.trim() || persistedBranding.schoolName.trim() || effectiveClubName;
+    const resolvedDateIso =
+      batchArchiveDateIso && /^\d{4}-\d{2}-\d{2}$/.test(batchArchiveDateIso)
+        ? batchArchiveDateIso
+        : getLocalIsoDateString();
+    const brandingForBatch = { ...persistedBranding, schoolName: resolvedSchool };
+    setSchoolBranding(brandingForBatch);
 
     const brandedBatch = selectedBatchReports.map((rep) => {
-      const branded = applyBrandingToReport(rep, persistedBranding);
+      const branded = applyBrandingToReport(rep, brandingForBatch);
+      branded.clubName = resolvedSchool;
       if (!branded.aiRecommendations) {
         branded.aiRecommendations = analyzeLabPerformanceMetrics(branded);
       }
@@ -1752,26 +2195,32 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     );
     const nextReports = isIntraGroupComparisonEnabled
       ? [...intraComputedBatch, ...existingWithoutBatch]
-      : applyBrandingToReports([...brandedBatch, ...existingWithoutBatch], persistedBranding);
+      : applyBrandingToReports([...brandedBatch, ...existingWithoutBatch], brandingForBatch);
     setReports(nextReports);
     saveStoredLabReports(nextReports);
+    void saveLabReportsBatchToFirestore(intraComputedBatch);
     setSelectedReportId(intraComputedBatch[0].id);
     setActiveLabTab('studio');
     setViewMode('all');
 
     if (autoArchiveOnBatchCreate) {
       const nextArchives = archiveBatchLabReports(
-        brandedBatch,
+        intraComputedBatch,
         batchGroupTitle,
-        batchGroupNote
+        batchGroupNote,
+        {
+          schoolName: resolvedSchool,
+          createdDateIso: resolvedDateIso,
+        }
       );
       setArchivedReports(nextArchives);
+      void saveLabArchivesBatchToFirestore(nextArchives.slice(0, intraComputedBatch.length));
       notify(
-        `${brandedBatch.length} sporcunun karnesi Excel verileriyle başarıyla oluşturuldu ve karne stüdyosuna aktarıldı.`
+        `${intraComputedBatch.length} sporcunun karnesi "${resolvedSchool}" adına oluşturuldu, Karne Arşivi'ne kaydedildi ve Karne Stüdyosu'na aktarıldı.`
       );
     } else {
       notify(
-        `${brandedBatch.length} sporcunun karnesi "${persistedBranding.schoolName}" başlığıyla başarıyla oluşturuldu ve karne stüdyosuna aktarıldı.`
+        `${intraComputedBatch.length} sporcunun karnesi "${resolvedSchool}" başlığıyla başarıyla oluşturuldu ve karne stüdyosuna aktarıldı.`
       );
     }
   };
@@ -1827,12 +2276,29 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     }
 
     const persistedBranding = getStoredLabSchoolBranding();
-    const rawBrandedBatch = selectedBatchReports.map((rep) =>
-      applyBrandingToReport(rep, persistedBranding)
-    );
+    const resolvedSchool =
+      batchSchoolName.trim() || persistedBranding.schoolName.trim() || effectiveClubName;
+    const resolvedDateIso =
+      batchArchiveDateIso && /^\d{4}-\d{2}-\d{2}$/.test(batchArchiveDateIso)
+        ? batchArchiveDateIso
+        : getLocalIsoDateString();
+    const rawBrandedBatch = selectedBatchReports.map((rep) => {
+      const b = applyBrandingToReport(rep, { ...persistedBranding, schoolName: resolvedSchool });
+      b.clubName = resolvedSchool;
+      return b;
+    });
     const brandedBatch = isIntraGroupComparisonEnabled
       ? recalculateGroupAveragesAndRanks(rawBrandedBatch)
       : rawBrandedBatch;
+
+    if (autoArchiveOnBatchCreate) {
+      const nextArchives = archiveBatchLabReports(brandedBatch, batchGroupTitle, batchGroupNote, {
+        schoolName: resolvedSchool,
+        createdDateIso: resolvedDateIso,
+      });
+      setArchivedReports(nextArchives);
+      void saveLabArchivesBatchToFirestore(nextArchives.slice(0, brandedBatch.length));
+    }
 
     // Ensure all selected batch athletes are in `reports` so `currentReport` resolves each one as we loop
     const existingWithoutBatch = reports.filter(
@@ -8452,35 +8918,58 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs font-extrabold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-violet-600 shrink-0" />
-                  <span>Toplu Karne Dönem Başlığı &amp; Otomatik Arşivleme Ayarları</span>
+                  <span>Toplu Karne Spor Okulu, Takvim Tarihi &amp; Arşivleme Ayarları</span>
                 </div>
                 <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                  Kurumsal Başlık: <strong className="text-slate-900 dark:text-white">{effectiveClubName}</strong>
+                  Aktif Okul: <strong className="text-slate-900 dark:text-white">{batchSchoolName.trim() || effectiveClubName}</strong>
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                <div className="sm:col-span-1 lg:col-span-1">
                   <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Toplu Karne Dönem / Grup Başlığı
+                    Spor Okulu / Kulüp Adı
+                  </label>
+                  <input
+                    type="text"
+                    value={batchSchoolName}
+                    onChange={(e) => setBatchSchoolName(e.target.value)}
+                    placeholder={effectiveClubName}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  />
+                </div>
+                <div className="sm:col-span-1 lg:col-span-1">
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Arşiv / Takvim Tarihi
+                  </label>
+                  <input
+                    type="date"
+                    value={batchArchiveDateIso}
+                    onChange={(e) => setBatchArchiveDateIso(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold font-sans tabular-nums text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  />
+                </div>
+                <div className="sm:col-span-1 lg:col-span-1">
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Toplu Karne Grup Başlığı
                   </label>
                   <input
                     type="text"
                     value={batchGroupTitle}
                     onChange={(e) => setBatchGroupTitle(e.target.value)}
-                    placeholder="Örn: 2026 Eylül Dönemi 3. Ölçüm Karnesi"
+                    placeholder="Örn: 2026 Kasım Dönemi"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
                   />
                 </div>
-                <div>
+                <div className="sm:col-span-1 lg:col-span-1">
                   <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Toplu Dönem Notu / Açıklama
+                    Toplu Dönem Notu
                   </label>
                   <input
                     type="text"
                     value={batchGroupNote}
                     onChange={(e) => setBatchGroupNote(e.target.value)}
-                    placeholder="Örn: U12 Akademi Fiziksel Uygunluk ve PHV Taraması"
+                    placeholder="Örn: U12 Akademi Taraması"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-500"
                   />
                 </div>
@@ -8496,12 +8985,12 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   />
                   <span>
                     Toplu karne oluşturulduğunda seçili sporcuları otomatik olarak{' '}
-                    <strong className="text-amber-600 dark:text-amber-400">Karne Arşivi</strong>&apos;ne de isimle kaydet
+                    <strong className="text-amber-600 dark:text-amber-400">Karne Arşivi</strong>&apos;ne tarih &amp; okul adıyla kaydet
                   </span>
                 </label>
 
                 <span className="text-[11px] font-sans tabular-nums text-slate-500 dark:text-slate-400">
-                  Arşiv Formatı: [Sporcu Adı] — {batchGroupTitle || 'Dönem Karnesi'}
+                  Arşiv Etiketi: {batchArchiveDateIso} · {batchSchoolName.trim() || effectiveClubName}
                 </span>
               </div>
             </div>
@@ -8775,7 +9264,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 type="button"
                 onClick={handleCreateAndArchiveSelectedBatch}
                 disabled={selectedBatchReports.length === 0 || isGeneratingBatchPDF}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-black flex items-center justify-center gap-2 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-black flex items-center justify-center gap-2 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
                 title="Seçili sporcuların verilerini karnelere aktar ve doğrudan Karne Stüdyosu'nda görüntüle"
               >
                 <Sparkles className="w-4 h-4 shrink-0 text-amber-300" />
@@ -8786,14 +9275,31 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
               <button
                 type="button"
+                onClick={() => void handleArchiveBatchReportsNow(true)}
+                disabled={batchReports.length === 0 || isArchivingBatch || isGeneratingBatchPDF}
+                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer disabled:opacity-50"
+                title="Listedeki TÜM sporcu karnelerini seçili tarih ve spor okulu adıyla toplu olarak Karne Arşivi'ne kaydeder"
+              >
+                {isArchivingBatch ? (
+                  <RefreshCw className="w-4 h-4 shrink-0 animate-spin" />
+                ) : (
+                  <Archive className="w-4 h-4 shrink-0" />
+                )}
+                <span>
+                  Tümünü Toplu Arşive Al ({batchReports.length} Karne)
+                </span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => void handleExportBatchPDF('combined')}
                 disabled={selectedBatchReports.length === 0 || isGeneratingBatchPDF}
                 className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
-                title="Seçili tüm sporcuların 7'şer sayfalık karnelerini tek bir birleşik A4 PDF dosyası olarak indir"
+                title="Seçili tüm sporcuların 5'er sayfalık karnelerini tek bir birleşik A4 PDF dosyası olarak indir"
               >
                 <Files className="w-4 h-4 shrink-0" />
                 <span>
-                  Tek Birleşik PDF İndir ({selectedBatchReports.length * 7} Sayfa)
+                  Tek Birleşik PDF İndir ({selectedBatchReports.length * 5} Sayfa)
                 </span>
               </button>
 
@@ -9173,7 +9679,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         </div>
       )}
 
-      {/* KARNE ARŞİVİ TAB VIEW */}
+      {/* KARNE ARŞİVİ TAB VIEW — TAKVİM, SPOR OKULU & GENEL VERİTABANI */}
       {activeLabTab === 'archive' && (
         <div className="bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xs print:hidden space-y-5">
           {/* Archive Header & Controls */}
@@ -9185,26 +9691,54 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">
-                    Karne Arşivi — Kayıtlı Sporcu Performans Karneleri
+                    Karne Arşivi — Takvim, Spor Okulu &amp; Genel Veritabanı
                   </h2>
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-sans tabular-nums font-extrabold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                     {archivedReports.length} Kayıtlı Karne
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Belirli bir isimle kaydettiğiniz 5 sayfalık sporcu karnelerini dilediğiniz zaman tekrar açıp inceleyebilir, karşılaştırabilir veya A4 PDF olarak indirebilirsiniz.
+                  Hangi tarihte hangi spor okuluna karne oluşturulduğunu takvim üzerinden takip edin, toplu karnelerin tümünü arşivleyin ve genel veritabanını spor okulu, tarih veya branşa göre filtreleyin.
                 </p>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {batchReports.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void handleArchiveBatchReportsNow(true)}
+                  disabled={isArchivingBatch}
+                  className="px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-extrabold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+                  title="Toplu Karne ekranındaki tüm sporcuları tek tıkla arşive al"
+                >
+                  {isArchivingBatch ? (
+                    <RefreshCw className="w-4 h-4 shrink-0 animate-spin" />
+                  ) : (
+                    <Database className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>Toplu Listedeki Tümünü Arşivle ({batchReports.length})</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => handleOpenSaveArchiveModal(currentReport)}
                 className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
               >
                 <BookmarkPlus className="w-4 h-4 shrink-0" />
-                <span>Aktif Karneyi ({currentReport.athleteName}) İsimle Kaydet</span>
+                <span>Aktif Karneyi ({currentReport.athleteName}) Kaydet</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportArchiveDatabaseCsv}
+                disabled={filteredArchivedReports.length === 0}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                title="Filtrelenmiş genel veritabanını Excel/CSV olarak indir"
+              >
+                <Download className="w-4 h-4 shrink-0" />
+                <span>Excel / CSV İndir</span>
               </button>
 
               <button
@@ -9218,72 +9752,648 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
             </div>
           </div>
 
-          {/* Search & Sort Filter Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="relative flex-1 max-w-md">
-              <input
-                type="text"
-                value={archiveSearchQuery}
-                onChange={(e) => setArchiveSearchQuery(e.target.value)}
-                placeholder="Kaydedilen karne adı, sporcu adı, branş veya tarih ara..."
-                className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              {archiveSearchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setArchiveSearchQuery('')}
-                  className="text-slate-400 hover:text-slate-600 absolute right-2.5 top-1/2 -translate-y-1/2"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
+          {/* KPI Özet Kartları */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/40 p-3.5">
+              <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+                <Archive className="w-3.5 h-3.5 text-amber-500" />
+                <span>Toplam Arşiv Karnesi</span>
+              </div>
+              <div className="text-xl font-black font-sans tabular-nums text-slate-900 dark:text-white mt-1">
+                {archivedReports.length}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 text-xs">
-              <span className="font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                Sıralama:
-              </span>
-              <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
-                {[
-                  { id: 'newest', label: 'En Yeni Kayıt' },
-                  { id: 'score', label: 'En Yüksek Puan' },
-                  { id: 'name', label: 'Karne İsmi (A-Z)' },
-                ].map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setArchiveSortBy(opt.id as 'newest' | 'score' | 'name')}
-                    className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer whitespace-nowrap ${
-                      archiveSortBy === opt.id
-                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/40 p-3.5">
+              <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-violet-500" />
+                <span>Kayıtlı Spor Okulu</span>
+              </div>
+              <div className="text-xl font-black font-sans tabular-nums text-slate-900 dark:text-white mt-1">
+                {archiveSchoolOptions.length}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/40 p-3.5">
+              <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-sky-500" />
+                <span>Tarih × Okul Oturumu</span>
+              </div>
+              <div className="text-xl font-black font-sans tabular-nums text-slate-900 dark:text-white mt-1">
+                {archiveSessionsByDateAndSchool.length}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/40 p-3.5">
+              <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Filtrelenen Kayıt</span>
+              </div>
+              <div className="text-xl font-black font-sans tabular-nums text-emerald-600 dark:text-emerald-400 mt-1">
+                {filteredArchivedReports.length}
               </div>
             </div>
           </div>
 
-          {/* Archive Cards Grid */}
+          {/* Takvim & "Hangi Tarihte Hangi Spor Okuluna Karne Oluşturuldu" Paneli */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+            {/* Sol: İnteraktif Aylık Arşiv Takvimi */}
+            <div className="xl:col-span-5 rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-900/40 p-4 space-y-3">
+              {(() => {
+                const { year, month } = archiveCalendarMonth;
+                const monthNames = [
+                  'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+                  'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık',
+                ];
+                const firstDay = new Date(year, month, 1);
+                const startWeekday = (firstDay.getDay() + 6) % 7; // 0 = Pzt
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                const cells: Array<{ day: number; iso: string } | null> = [];
+                for (let i = 0; i < startWeekday; i++) cells.push(null);
+                for (let d = 1; d <= daysInMonth; d++) {
+                  const mmStr = String(month + 1).padStart(2, '0');
+                  const ddStr = String(d).padStart(2, '0');
+                  cells.push({ day: d, iso: `${year}-${mmStr}-${ddStr}` });
+                }
+                const todayIso = getLocalIsoDateString();
+
+                return (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-amber-500 shrink-0" />
+                        <h3 className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white">
+                          {monthNames[month]} {year} Karne Takvimi
+                        </h3>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const prev = month === 0 ? { year: year - 1, month: 11 } : { year, month: month - 1 };
+                            setArchiveCalendarMonth(prev);
+                          }}
+                          className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 cursor-pointer"
+                          title="Önceki Ay"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const now = new Date();
+                            setArchiveCalendarMonth({ year: now.getFullYear(), month: now.getMonth() });
+                            setArchiveDateFilter('');
+                          }}
+                          className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-[10.5px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 cursor-pointer"
+                        >
+                          Bugün
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = month === 11 ? { year: year + 1, month: 0 } : { year, month: month + 1 };
+                            setArchiveCalendarMonth(next);
+                          }}
+                          className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 cursor-pointer"
+                          title="Sonraki Ay"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-extrabold text-slate-500 uppercase">
+                      {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map((w) => (
+                        <div key={w} className="py-1">
+                          {w}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-1">
+                      {cells.map((cell, idx) => {
+                        if (!cell) {
+                          return <div key={`empty-${idx}`} className="h-12 rounded-lg" />;
+                        }
+                        const stat = archiveCalendarDayStats.get(cell.iso);
+                        const isSelected = archiveDateFilter === cell.iso;
+                        const isToday = cell.iso === todayIso;
+                        return (
+                          <button
+                            key={cell.iso}
+                            type="button"
+                            onClick={() =>
+                              setArchiveDateFilter((prev) => (prev === cell.iso ? '' : cell.iso))
+                            }
+                            title={
+                              stat
+                                ? `${cell.iso}: ${stat.count} karne (${stat.schools.join(', ')})`
+                                : cell.iso
+                            }
+                            className={`h-12 rounded-xl border p-1 flex flex-col items-center justify-between transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-amber-500 border-amber-600 text-slate-950 shadow-sm ring-2 ring-amber-300'
+                                : stat
+                                ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700/80 text-slate-900 dark:text-white hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
+                                : isToday
+                                ? 'bg-sky-50 dark:bg-sky-950/30 border-sky-300 dark:border-sky-700 text-sky-800 dark:text-sky-200'
+                                : 'bg-white dark:bg-slate-800/60 border-slate-200/80 dark:border-slate-700/60 text-slate-600 dark:text-slate-300 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span className="text-[11px] font-extrabold font-sans tabular-nums leading-none">
+                              {cell.day}
+                            </span>
+                            {stat ? (
+                              <span
+                                className={`text-[9px] font-black font-sans tabular-nums px-1 py-0.2 rounded leading-tight ${
+                                  isSelected
+                                    ? 'bg-slate-950 text-amber-300'
+                                    : 'bg-emerald-600 text-white'
+                                }`}
+                              >
+                                {stat.count}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-transparent">0</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span>Bir güne tıklayarak o günkü karneleri filtreleyebilirsiniz.</span>
+                      {archiveDateFilter && (
+                        <button
+                          type="button"
+                          onClick={() => setArchiveDateFilter('')}
+                          className="text-amber-700 dark:text-amber-300 font-extrabold underline cursor-pointer"
+                        >
+                          Gün Seçimini Kaldır ({archiveDateFilter})
+                        </button>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Sağ: Hangi Tarihte Hangi Spor Okuluna Karne Oluşturuldu (Oturum Özeti) */}
+            <div className="xl:col-span-7 rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-900/40 p-4 flex flex-col">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-violet-600 shrink-0" />
+                  <h3 className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white">
+                    Hangi Tarihte Hangi Spor Okuluna Karne Oluşturuldu
+                  </h3>
+                </div>
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                  {archiveSessionsByDateAndSchool.length} Kayıt Grubu
+                </span>
+              </div>
+
+              {archiveSessionsByDateAndSchool.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center py-8 text-xs text-slate-400">
+                  Henüz tarih &amp; spor okulu bazlı karne kaydı bulunmuyor.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                  {archiveSessionsByDateAndSchool.map((sess) => {
+                    const isSessionActive =
+                      archiveDateFilter === sess.createdDateIso &&
+                      archiveSchoolFilter === sess.schoolName;
+                    return (
+                      <div
+                        key={sess.key}
+                        className={`rounded-xl border p-3 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                          isSessionActive
+                            ? 'bg-amber-50/90 dark:bg-amber-950/30 border-amber-400 ring-1 ring-amber-300'
+                            : 'bg-white dark:bg-slate-800/70 border-slate-200 dark:border-slate-700/80 hover:border-violet-300'
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950/60 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-300 text-[10.5px] font-extrabold font-sans tabular-nums">
+                              <Calendar className="w-3 h-3" />
+                              {sess.displayDate}
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-950/60 border border-violet-200 dark:border-violet-800 text-violet-700 dark:text-violet-300 text-[10.5px] font-extrabold">
+                              <Building2 className="w-3 h-3" />
+                              {sess.schoolName}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
+                                sess.sourceType === 'batch'
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                  : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
+                              }`}
+                            >
+                              {sess.sourceType === 'batch' ? 'Toplu Üretim' : 'Bireysel'} · {sess.count} Karne
+                            </span>
+                          </div>
+                          <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                            {sess.groupTitle}
+                            {sess.branches.length > 0 && (
+                              <span className="font-normal text-slate-500 dark:text-slate-400">
+                                {' '}· {sess.branches.join(', ')}
+                              </span>
+                            )}
+                            {sess.avgScore > 0 && (
+                              <span className="font-extrabold text-emerald-600 dark:text-emerald-400 ml-1.5 font-sans tabular-nums">
+                                (Ort. %{sess.avgScore})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isSessionActive) {
+                                setArchiveDateFilter('');
+                                setArchiveSchoolFilter('all');
+                              } else {
+                                setArchiveDateFilter(sess.createdDateIso);
+                                setArchiveSchoolFilter(sess.schoolName);
+                              }
+                            }}
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold transition cursor-pointer ${
+                              isSessionActive
+                                ? 'bg-amber-500 text-slate-950'
+                                : 'bg-slate-900 hover:bg-slate-800 dark:bg-violet-600 dark:hover:bg-violet-500 text-white'
+                            }`}
+                          >
+                            {isSessionActive ? 'Filtreyi Kaldır' : 'Listede Filtrele'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenArchivedReport(sess.firstItem, 'view')}
+                            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-sky-600 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                            title="Bu gruptaki ilk karneyi aç"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleDeleteArchiveSession(
+                                sess.archiveIds,
+                                `${sess.displayDate} — ${sess.schoolName}`
+                              )
+                            }
+                            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                            title="Bu tarih ve okul oturumundaki tüm karneleri arşivden kaldır"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Genel Veritabanı Filtreleme Çubuğu */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-slate-50/70 dark:bg-slate-800/40 p-3.5 sm:p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-extrabold text-slate-800 dark:text-white uppercase tracking-wide">
+                <Filter className="w-4 h-4 text-amber-500 shrink-0" />
+                <span>Genel Karne Veritabanı Filtreleri</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {(archiveSearchQuery ||
+                  archiveSchoolFilter !== 'all' ||
+                  archiveDateFilter ||
+                  archiveDateFrom ||
+                  archiveDateTo ||
+                  archiveBranchFilter !== 'all' ||
+                  archiveSourceTypeFilter !== 'all') && (
+                  <button
+                    type="button"
+                    onClick={handleClearArchiveFilters}
+                    className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                    <span>Filtreleri Temizle</span>
+                  </button>
+                )}
+
+                <div className="flex items-center gap-1 p-1 bg-slate-200/80 dark:bg-slate-900 rounded-xl text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setArchiveViewMode('database')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                      archiveViewMode === 'database'
+                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-2xs'
+                        : 'text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    Veritabanı Tablosu
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setArchiveViewMode('cards')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                      archiveViewMode === 'cards'
+                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-2xs'
+                        : 'text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    Kart Görünümü
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 text-xs">
+              <div className="relative lg:col-span-2">
+                <input
+                  type="text"
+                  value={archiveSearchQuery}
+                  onChange={(e) => setArchiveSearchQuery(e.target.value)}
+                  placeholder="Sporcu, spor okulu, grup başlığı veya tarih ara..."
+                  className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                {archiveSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setArchiveSearchQuery('')}
+                    className="text-slate-400 hover:text-slate-600 absolute right-2.5 top-1/2 -translate-y-1/2"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <select
+                value={archiveSchoolFilter}
+                onChange={(e) => setArchiveSchoolFilter(e.target.value)}
+                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="all">Tüm Spor Okulları ({archiveSchoolOptions.length})</option>
+                {archiveSchoolOptions.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={archiveBranchFilter}
+                onChange={(e) => setArchiveBranchFilter(e.target.value)}
+                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="all">Tüm Branşlar</option>
+                {archiveBranchOptions.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={archiveSourceTypeFilter}
+                onChange={(e) =>
+                  setArchiveSourceTypeFilter(e.target.value as 'all' | 'batch' | 'single')
+                }
+                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="all">Tüm Kayıt Türleri</option>
+                <option value="batch">Toplu Karne Üretimi</option>
+                <option value="single">Bireysel Kayıt</option>
+              </select>
+
+              <select
+                value={archiveSortBy}
+                onChange={(e) =>
+                  setArchiveSortBy(e.target.value as 'newest' | 'score' | 'name' | 'school')
+                }
+                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="newest">Sırala: En Yeni Tarih</option>
+                <option value="school">Sırala: Spor Okulu (A-Z)</option>
+                <option value="score">Sırala: En Yüksek Puan</option>
+                <option value="name">Sırala: İsim (A-Z)</option>
+              </select>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-xs pt-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                  Başlangıç Tarihi:
+                </span>
+                <input
+                  type="date"
+                  value={archiveDateFrom}
+                  onChange={(e) => setArchiveDateFrom(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-sans tabular-nums text-slate-800 dark:text-slate-200"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                  Bitiş Tarihi:
+                </span>
+                <input
+                  type="date"
+                  value={archiveDateTo}
+                  onChange={(e) => setArchiveDateTo(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-sans tabular-nums text-slate-800 dark:text-slate-200"
+                />
+              </div>
+              {archiveDateFilter && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-bold text-[11px]">
+                  Takvim Günü: {archiveDateFilter}
+                  <button
+                    type="button"
+                    onClick={() => setArchiveDateFilter('')}
+                    className="hover:text-rose-600 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Archive Records Display: General Database Table OR Cards */}
           {filteredArchivedReports.length === 0 ? (
             <div className="py-12 px-4 text-center rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30">
               <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto mb-3">
                 <Archive className="w-6 h-6" />
               </div>
               <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
-                Arşivde Eşleşen Karne Bulunamadı
+                Seçilen Filtrelerle Eşleşen Arşiv Karnesi Bulunamadı
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
-                Üstteki &ldquo;Arşive İsimle Kaydet&rdquo; butonunu kullanarak oluşturduğunuz sporcu karnelerini özel bir isimle arşive ekleyebilirsiniz.
+                Toplu Karne sekmesindeki &ldquo;Tümünü Toplu Arşive Al&rdquo; butonuyla tüm karneleri tarih ve spor okulu etiketiyle kaydedebilir veya mevcut filtreleri temizleyebilirsiniz.
               </p>
+            </div>
+          ) : archiveViewMode === 'database' ? (
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700/80">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-100 dark:bg-slate-800/90 text-slate-700 dark:text-slate-200 border-b border-slate-200 dark:border-slate-700 text-[11px] uppercase tracking-wider">
+                    <th className="py-3 px-3 font-extrabold whitespace-nowrap">Takvim Tarihi</th>
+                    <th className="py-3 px-3 font-extrabold">Spor Okulu / Kulüp</th>
+                    <th className="py-3 px-3 font-extrabold">Sporcu &amp; Branş</th>
+                    <th className="py-3 px-3 font-extrabold">Dönem / Grup Başlığı</th>
+                    <th className="py-3 px-3 font-extrabold text-center">Boy / Kilo / 18Y</th>
+                    <th className="py-3 px-3 font-extrabold text-center">Puan</th>
+                    <th className="py-3 px-3 font-extrabold text-right">İşlemler</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200/80 dark:divide-slate-800">
+                  {filteredArchivedReports.map((item) => {
+                    const rep = item.reportSnapshot;
+                    const itemSchool =
+                      item.schoolName || rep.clubName || 'SportsFly Spor Okulu';
+                    const itemIso = normalizeArchiveDateIso(item);
+                    const [yy, mm, dd] = itemIso.split('-');
+                    const displayDate = yy && mm && dd ? `${dd}.${mm}.${yy}` : itemIso;
+                    const isCurrentlyLoaded = rep.id === currentReport.id;
+                    const heightVal = getActiveParamVal(
+                      rep.bodyComposition.find((x) => x.id === 'height'),
+                      0
+                    );
+                    const weightVal = getActiveParamVal(
+                      rep.bodyComposition.find((x) => x.id === 'weight'),
+                      0
+                    );
+                    const scoreVal =
+                      rep.scoreHistory?.p3Score ||
+                      rep.scoreHistory?.p1Score ||
+                      rep.scoreHistory?.p2Score ||
+                      0;
+
+                    return (
+                      <tr
+                        key={item.archiveId}
+                        className={`transition-colors ${
+                          isCurrentlyLoaded
+                            ? 'bg-amber-50/50 dark:bg-amber-950/20'
+                            : 'bg-white dark:bg-slate-900/40 hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                        }`}
+                      >
+                        <td className="py-3 px-3 whitespace-nowrap font-sans tabular-nums">
+                          <div className="font-extrabold text-slate-900 dark:text-white">
+                            {displayDate}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            {item.savedAt.split(' ')[1] || ''}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className="font-extrabold text-violet-700 dark:text-violet-300 flex items-center gap-1.5">
+                            <Building2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>{itemSchool}</span>
+                          </div>
+                          <span
+                            className={`inline-block mt-0.5 px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                              item.sourceType === 'batch' || item.batchId
+                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                            }`}
+                          >
+                            {item.sourceType === 'batch' || item.batchId
+                              ? 'Toplu Üretim'
+                              : 'Bireysel'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className="font-extrabold text-slate-900 dark:text-white">
+                            {rep.athleteName}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            {rep.sportBranch} · {rep.ageYears} Yaş · {rep.gender}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 max-w-[240px]">
+                          <div className="font-bold text-slate-800 dark:text-slate-200 truncate">
+                            {item.batchGroupTitle || item.archiveTitle}
+                          </div>
+                          {item.archiveNote && (
+                            <div className="text-[10.5px] text-slate-500 truncate">
+                              {item.archiveNote}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-center font-sans tabular-nums whitespace-nowrap">
+                          <div className="font-bold text-slate-800 dark:text-slate-200">
+                            {heightVal}cm / {weightVal}kg
+                          </div>
+                          <div className="text-[10px] text-blue-600 dark:text-blue-400 font-bold">
+                            18Y: {rep.predictedAdultHeight} cm
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 text-center font-sans tabular-nums">
+                          <span className="inline-flex px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-black">
+                            %{scoreVal}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenArchivedReport(item, 'view')}
+                              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white text-[11px] font-extrabold cursor-pointer"
+                            >
+                              Karneyi Aç
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenArchivedReport(item, 'pdf-preview')}
+                              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 hover:text-blue-600 cursor-pointer"
+                              title="PDF Önizle"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenArchivedReport(item, 'download-pdf')}
+                              className="p-1.5 rounded-lg border border-emerald-200 text-emerald-600 hover:bg-emerald-50 cursor-pointer"
+                              title="PDF İndir"
+                            >
+                              <FileDown className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingArchiveItem(item);
+                                setEditArchiveTitleInput(item.archiveTitle);
+                                setEditArchiveNoteInput(item.archiveNote || '');
+                              }}
+                              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-blue-600 cursor-pointer"
+                              title="Düzenle"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteArchiveItem(item)}
+                              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-rose-600 cursor-pointer"
+                              title="Arşivden Sil"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {filteredArchivedReports.map((item) => {
                 const rep = item.reportSnapshot;
+                const itemSchool = item.schoolName || rep.clubName || 'SportsFly Spor Okulu';
                 const isCurrentlyLoaded = rep.id === currentReport.id;
                 const heightVal = getActiveParamVal(
                   rep.bodyComposition.find((x) => x.id === 'height'),
@@ -9311,6 +10421,10 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[10px] font-sans tabular-nums font-bold text-slate-600 dark:text-slate-300">
                               <Calendar className="w-3 h-3 text-amber-600 shrink-0" />
                               <span>Kayıt: {item.savedAt}</span>
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-100 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 text-[10px] font-bold">
+                              <Building2 className="w-3 h-3 shrink-0" />
+                              <span>{itemSchool}</span>
                             </span>
                             {isCurrentlyLoaded && (
                               <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
@@ -9374,7 +10488,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                               </span>
                             </div>
                             <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                              {rep.sportBranch} · {effectiveClubName}
+                              {rep.sportBranch} · {itemSchool}
                             </div>
                           </div>
                         </div>
@@ -9384,7 +10498,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                             Genel Puan
                           </div>
                           <div className="text-base font-black font-sans tabular-nums text-emerald-600 dark:text-emerald-400">
-                            %{rep.scoreHistory.p3Score}
+                            %{rep.scoreHistory.p3Score || rep.scoreHistory.p1Score || rep.scoreHistory.p2Score}
                           </div>
                         </div>
                       </div>
@@ -9412,7 +10526,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                             VO2peak
                           </div>
                           <div className="text-[11px] font-bold font-sans tabular-nums text-emerald-600 dark:text-emerald-400 mt-0.5">
-                            {rep.cardio.test3Vo2}
+                            {rep.cardio.test3Vo2 || rep.cardio.test1Vo2}
                           </div>
                         </div>
                         <div className="p-2 rounded-lg bg-slate-50/80 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-700/60">
@@ -9420,7 +10534,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                             Ölçüm Tarihi
                           </div>
                           <div className="text-[11px] font-bold font-sans tabular-nums text-slate-700 dark:text-slate-300 mt-0.5">
-                            {rep.date3}
+                            {rep.date3 !== '—' ? rep.date3 : rep.date1}
                           </div>
                         </div>
                       </div>
@@ -9985,20 +11099,51 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
             </div>
 
             <form onSubmit={handleConfirmSaveToArchive} className="p-5 space-y-4 text-xs">
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
+              {(() => {
+                const modalTarget = archiveTargetReport || currentReport;
+                return (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-extrabold text-slate-900 dark:text-white">
+                        {modalTarget.athleteName} ({modalTarget.ageYears} Yaş)
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {modalTarget.sportBranch} · {archiveSchoolInput || effectiveClubName}
+                      </div>
+                    </div>
+                    <div className="text-right font-sans tabular-nums">
+                      <div className="text-[10px] text-slate-400 uppercase">Performans Puanı</div>
+                      <div className="text-sm font-black text-emerald-600">
+                        %{modalTarget.scoreHistory.p3Score || modalTarget.scoreHistory.p1Score || modalTarget.scoreHistory.p2Score}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <div className="font-extrabold text-slate-900 dark:text-white">
-                    {currentReport.athleteName} ({currentReport.ageYears} Yaş)
-                  </div>
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {currentReport.sportBranch} · {effectiveClubName}
-                  </div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Spor Okulu / Kulüp Adı
+                  </label>
+                  <input
+                    type="text"
+                    value={archiveSchoolInput}
+                    onChange={(e) => setArchiveSchoolInput(e.target.value)}
+                    placeholder={effectiveClubName}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
                 </div>
-                <div className="text-right font-sans tabular-nums">
-                  <div className="text-[10px] text-slate-400 uppercase">Performans Puanı</div>
-                  <div className="text-sm font-black text-emerald-600">
-                    %{currentReport.scoreHistory.p2Score || currentReport.scoreHistory.p3Score}
-                  </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Arşiv / Takvim Tarihi
+                  </label>
+                  <input
+                    type="date"
+                    value={archiveDateInput}
+                    onChange={(e) => setArchiveDateInput(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-bold font-sans tabular-nums focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
                 </div>
               </div>
 

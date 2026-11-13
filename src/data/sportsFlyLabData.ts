@@ -80,6 +80,11 @@ export interface SportsFlyLabArchivedReport {
   archiveNote?: string;
   savedAt: string;
   savedTimestamp: number;
+  createdDateIso?: string;
+  schoolName?: string;
+  batchId?: string;
+  batchGroupTitle?: string;
+  sourceType?: 'batch' | 'single';
   reportSnapshot: SportsFlyLabReport;
 }
 
@@ -1280,6 +1285,32 @@ export function saveStoredLabReports(reports: SportsFlyLabReport[]): void {
   }
 }
 
+export function getLocalIsoDateString(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function normalizeArchiveDateIso(item: Partial<SportsFlyLabArchivedReport>): string {
+  if (item.createdDateIso && /^\d{4}-\d{2}-\d{2}$/.test(item.createdDateIso)) {
+    return item.createdDateIso;
+  }
+  if (item.savedAt) {
+    const trMatch = item.savedAt.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+    if (trMatch) {
+      const dd = trMatch[1].padStart(2, '0');
+      const mm = trMatch[2].padStart(2, '0');
+      const yyyy = trMatch[3];
+      return `${yyyy}-${mm}-${dd}`;
+    }
+  }
+  if (item.savedTimestamp && Number.isFinite(item.savedTimestamp)) {
+    return getLocalIsoDateString(new Date(item.savedTimestamp));
+  }
+  return getLocalIsoDateString();
+}
+
 /**
  * Returns default initial archive items so the 'Karne Arşivi' tab has realistic saved examples out-of-the-box.
  */
@@ -1287,13 +1318,20 @@ function getDefaultLabArchives(): SportsFlyLabArchivedReport[] {
   const activeBranding = getStoredLabSchoolBranding();
   return DEFAULT_LAB_REPORTS.map((rawRep, idx) => {
     const branded = applyBrandingToReport(rawRep, activeBranding);
+    const ts = Date.now() - idx * 86400000;
+    const isoDate = getLocalIsoDateString(new Date(ts));
+    const school = rawRep.clubName || activeBranding.schoolName || 'SportsFly Spor Okulu';
     return {
       archiveId: `lab-arch-default-${idx + 1}`,
       archiveTitle: `${branded.athleteName} — Performans Gelişim Karnesi`,
-      archiveNote: `${branded.sportBranch} · Genel Performans Puanı: %${branded.scoreHistory.p2Score || branded.scoreHistory.p3Score}`,
-      savedAt: `${branded.date2 !== '—' ? branded.date2 : branded.date1} 14:30`,
-      savedTimestamp: Date.now() - idx * 86400000,
-      reportSnapshot: branded,
+      archiveNote: `${branded.sportBranch} · Genel Performans Puanı: %${branded.scoreHistory.p2Score || branded.scoreHistory.p3Score || branded.scoreHistory.p1Score}`,
+      savedAt: `${branded.date2 && branded.date2 !== '—' && !branded.date2.toLowerCase().includes('tahmin') ? branded.date2 : branded.date1} 14:30`,
+      savedTimestamp: ts,
+      createdDateIso: isoDate,
+      schoolName: school,
+      batchGroupTitle: 'Örnek Kayıtlar',
+      sourceType: 'single',
+      reportSnapshot: { ...branded, clubName: school },
     };
   });
 }
@@ -1305,10 +1343,26 @@ export function getStoredLabArchives(): SportsFlyLabArchivedReport[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.map((item: SportsFlyLabArchivedReport) => ({
-          ...item,
-          reportSnapshot: applyBrandingToReport(item.reportSnapshot, activeBranding),
-        }));
+        return parsed.map((item: SportsFlyLabArchivedReport) => {
+          const preservedSchool =
+            item.schoolName ||
+            item.reportSnapshot?.clubName ||
+            activeBranding.schoolName ||
+            'SportsFly Spor Okulu';
+          const snapshot = item.reportSnapshot
+            ? {
+                ...item.reportSnapshot,
+                clubName: preservedSchool,
+              }
+            : item.reportSnapshot;
+          return {
+            ...item,
+            schoolName: preservedSchool,
+            createdDateIso: normalizeArchiveDateIso(item),
+            sourceType: item.sourceType || (item.archiveId?.includes('batch') ? 'batch' : 'single'),
+            reportSnapshot: snapshot,
+          };
+        });
       }
     }
   } catch (e) {
@@ -1319,24 +1373,33 @@ export function getStoredLabArchives(): SportsFlyLabArchivedReport[] {
 
 export function saveStoredLabArchives(archives: SportsFlyLabArchivedReport[]): void {
   try {
-    const activeBranding = getStoredLabSchoolBranding();
     const sanitizedArchives = archives.map((arch) => {
-      const branded = applyBrandingToReport(arch.reportSnapshot, activeBranding);
-      const clone = { ...branded };
-      if (
-        clone.clubLogoUrl &&
-        (clone.clubLogoUrl === activeBranding.logoDataUrl ||
-          clone.clubLogoUrl === DEFAULT_LAB_SCHOOL_BRANDING.logoDataUrl ||
-          clone.clubLogoUrl.startsWith('data:image/'))
-      ) {
+      const preservedSchool = arch.schoolName || arch.reportSnapshot?.clubName || 'SportsFly Spor Okulu';
+      const clone: SportsFlyLabReport = {
+        ...arch.reportSnapshot,
+        clubName: preservedSchool,
+      };
+      if (clone.clubLogoUrl && clone.clubLogoUrl.startsWith('data:image/')) {
         delete clone.clubLogoUrl;
       }
       return {
         ...arch,
+        schoolName: preservedSchool,
+        createdDateIso: normalizeArchiveDateIso(arch),
         reportSnapshot: clone,
       };
     });
-    safeSetItem(LAB_ARCHIVE_STORAGE_KEY, JSON.stringify(sanitizedArchives));
+    const success = safeSetItem(LAB_ARCHIVE_STORAGE_KEY, JSON.stringify(sanitizedArchives));
+    if (!success) {
+      const compactArchives = sanitizedArchives.map((arch) => ({
+        ...arch,
+        reportSnapshot: {
+          ...arch.reportSnapshot,
+          aiRecommendations: undefined,
+        },
+      }));
+      safeSetItem(LAB_ARCHIVE_STORAGE_KEY, JSON.stringify(compactArchives));
+    }
   } catch (e) {
     console.warn('SportsFly Lab karne arşivi saklama uyarısı:', e);
   }
@@ -1345,32 +1408,63 @@ export function saveStoredLabArchives(archives: SportsFlyLabArchivedReport[]): v
 export function archiveLabReport(
   report: SportsFlyLabReport,
   archiveTitle: string,
-  archiveNote?: string
+  archiveNote?: string,
+  options?: { schoolName?: string; createdDateIso?: string }
 ): SportsFlyLabArchivedReport[] {
   const activeBranding = getStoredLabSchoolBranding();
+  const resolvedSchool = (
+    options?.schoolName ||
+    report.clubName ||
+    activeBranding.schoolName ||
+    'SportsFly Spor Okulu'
+  ).trim();
   const brandedSnapshot: SportsFlyLabReport = JSON.parse(
-    JSON.stringify(applyBrandingToReport(report, activeBranding))
+    JSON.stringify(
+      applyBrandingToReport(report, {
+        ...activeBranding,
+        schoolName: resolvedSchool,
+      })
+    )
   );
+  brandedSnapshot.clubName = resolvedSchool;
   if (!brandedSnapshot.aiRecommendations) {
     brandedSnapshot.aiRecommendations = analyzeLabPerformanceMetrics(brandedSnapshot);
   }
 
   const now = new Date();
-  const formattedDate = `${now.toLocaleDateString('tr-TR')} ${now.toLocaleTimeString('tr-TR', {
+  const dateIso =
+    options?.createdDateIso && /^\d{4}-\d{2}-\d{2}$/.test(options.createdDateIso)
+      ? options.createdDateIso
+      : getLocalIsoDateString(now);
+  const [yy, mm, dd] = dateIso.split('-');
+  const timeStr = now.toLocaleTimeString('tr-TR', {
     hour: '2-digit',
     minute: '2-digit',
-  })}`;
+  });
+  const formattedDate = `${dd}.${mm}.${yy} ${timeStr}`;
 
   const cleanTitle =
     archiveTitle.trim() ||
-    `${brandedSnapshot.athleteName} — ${brandedSnapshot.date3 !== '—' ? brandedSnapshot.date3 : brandedSnapshot.date2} Dönem Karnesi`;
+    `${brandedSnapshot.athleteName} — ${brandedSnapshot.date3 !== '—' ? brandedSnapshot.date3 : brandedSnapshot.date1} Dönem Karnesi`;
+
+  const scoreVal =
+    brandedSnapshot.scoreHistory.p3Score ||
+    brandedSnapshot.scoreHistory.p1Score ||
+    brandedSnapshot.scoreHistory.p2Score ||
+    75;
 
   const newEntry: SportsFlyLabArchivedReport = {
-    archiveId: `lab-arch-${Date.now()}`,
+    archiveId: `lab-arch-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     archiveTitle: cleanTitle,
-    archiveNote: archiveNote?.trim() || `${brandedSnapshot.sportBranch} · %${brandedSnapshot.scoreHistory.p3Score} Performans`,
+    archiveNote:
+      archiveNote?.trim() ||
+      `${resolvedSchool} · ${brandedSnapshot.sportBranch} · %${scoreVal} Performans`,
     savedAt: formattedDate,
     savedTimestamp: Date.now(),
+    createdDateIso: dateIso,
+    schoolName: resolvedSchool,
+    batchGroupTitle: 'Bireysel Kayıt',
+    sourceType: 'single',
     reportSnapshot: brandedSnapshot,
   };
 
@@ -1405,35 +1499,84 @@ export function deleteLabArchiveItem(archiveId: string): SportsFlyLabArchivedRep
   return nextArchives;
 }
 
+export function deleteLabArchiveBatchItems(archiveIds: string[]): SportsFlyLabArchivedReport[] {
+  const idSet = new Set(archiveIds);
+  const currentArchives = getStoredLabArchives();
+  const nextArchives = currentArchives.filter((item) => !idSet.has(item.archiveId));
+  saveStoredLabArchives(nextArchives);
+  return nextArchives;
+}
+
 /**
- * Archives multiple report cards at once (Batch Archive) into Karne Arşivi (localStorage).
+ * Archives multiple report cards at once (Batch Archive) into Karne Arşivi (localStorage),
+ * tagging every athlete card with exact Calendar Date (createdDateIso), Sports School Name, and shared batchId.
  */
 export function archiveBatchLabReports(
   reportsToArchive: SportsFlyLabReport[],
   batchGroupTitle: string,
-  batchNote?: string
+  batchNote?: string,
+  options?: {
+    schoolName?: string;
+    createdDateIso?: string;
+    batchId?: string;
+  }
 ): SportsFlyLabArchivedReport[] {
   const currentBranding = getStoredLabSchoolBranding();
   const currentArchives = getStoredLabArchives();
-  const nowStr = new Date().toLocaleString('tr-TR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
+  const now = new Date();
+  const dateIso =
+    options?.createdDateIso && /^\d{4}-\d{2}-\d{2}$/.test(options.createdDateIso)
+      ? options.createdDateIso
+      : getLocalIsoDateString(now);
+  const [yy, mm, dd] = dateIso.split('-');
+  const timeStr = now.toLocaleTimeString('tr-TR', {
     hour: '2-digit',
     minute: '2-digit',
   });
-  const groupLabel = batchGroupTitle.trim() || `${new Date().toLocaleDateString('tr-TR')} Toplu Karne Grubu`;
+  const nowStr = `${dd}.${mm}.${yy} ${timeStr}`;
+
+  const baseAnchorDate = new Date(`${dateIso}T${timeStr}:00`);
+  const baseTs = Number.isNaN(baseAnchorDate.getTime())
+    ? Date.now()
+    : baseAnchorDate.getTime();
+
+  const fallbackSchool = (
+    options?.schoolName ||
+    currentBranding.schoolName ||
+    reportsToArchive[0]?.clubName ||
+    'SportsFly Spor Okulu'
+  ).trim();
+  const groupLabel =
+    batchGroupTitle.trim() || `${dd}.${mm}.${yy} Toplu Karne Grubu`;
+  const batchId =
+    options?.batchId || `batch-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
   const newEntries: SportsFlyLabArchivedReport[] = reportsToArchive.map((rep, idx) => {
-    const brandedSnapshot = applyBrandingToReport(rep, currentBranding);
+    const resolvedSchool = (options?.schoolName || rep.clubName || fallbackSchool).trim();
+    const brandedSnapshot = applyBrandingToReport(rep, {
+      ...currentBranding,
+      schoolName: resolvedSchool,
+    });
+    brandedSnapshot.clubName = resolvedSchool;
+    const activePct =
+      brandedSnapshot.scoreHistory.p3Score ||
+      brandedSnapshot.scoreHistory.p1Score ||
+      brandedSnapshot.scoreHistory.p2Score ||
+      75;
+
     return {
       archiveId: `lab-arch-batch-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
       archiveTitle: `${brandedSnapshot.athleteName} — ${groupLabel} (${brandedSnapshot.sportBranch})`,
       archiveNote:
         batchNote?.trim() ||
-        `Toplu Excel Karne Üretimi · Güncel Genel Performans: %${brandedSnapshot.scoreHistory.p2Score || brandedSnapshot.scoreHistory.p3Score}`,
+        `${resolvedSchool} · Toplu Karne Arşivi · Güncel Performans: %${activePct}`,
       savedAt: nowStr,
-      savedTimestamp: Date.now() - idx,
+      savedTimestamp: baseTs - idx,
+      createdDateIso: dateIso,
+      schoolName: resolvedSchool,
+      batchId,
+      batchGroupTitle: groupLabel,
+      sourceType: 'batch',
       reportSnapshot: brandedSnapshot,
     };
   });

@@ -24,6 +24,16 @@
           "type": "string",
           "enum": ["kulup_yoneticisi", "egitmen", "veli", "sporcu"]
         },
+        "trainerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clubOwnerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -147,6 +157,15 @@
           "type": "string",
           "minLength": 4,
           "maxLength": 32
+        },
+        "parentUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "veliEposta": {
+          "type": "string",
+          "maxLength": 160
         },
         "createdAt": {
           "type": "string",
@@ -503,6 +522,20 @@
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
+        "trainerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "parentUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "parentEmail": {
+          "type": "string",
+          "maxLength": 160
+        },
         "athleteCode": {
           "type": "string",
           "maxLength": 64,
@@ -644,7 +677,7 @@
         "athleteCount": { "type": "number" },
         "status": { "type": "string", "enum": ["Bekliyor", "İşlendi", "Onaylandı"] },
         "schoolName": { "type": "string", "maxLength": 255 },
-        "uploadDate": { "type": "string", "format": "date-time" },
+        "uploadDate": { "type": "string", "maxLength": 64 },
         "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" }
       },
       "required": ["id", "name", "athleteCount", "status", "schoolName", "uploadDate", "ownerId"]
@@ -654,20 +687,148 @@
       "description": "Company and sports school profile metadata and branding.",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "companyName": { "type": "string" },
-        "clubName": { "type": "string" },
-        "branchName": { "type": "string" },
-        "authorizedPerson": { "type": "string" },
-        "phone": { "type": "string" },
-        "email": { "type": "string" },
-        "city": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
+        "companyName": { "type": "string", "maxLength": 160 },
+        "clubName": { "type": "string", "maxLength": 160 },
+        "branchName": { "type": "string", "maxLength": 140 },
+        "authorizedPerson": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "email": { "type": "string", "maxLength": 160 },
+        "city": { "type": "string", "maxLength": 80 },
         "logoDataUrl": { "type": "string" },
-        "companyType": { "type": "string" },
-        "accessCode": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "companyType": { "type": "string", "maxLength": 64 },
+        "accessCode": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "companyName"]
+    },
+    "LabArchive": {
+      "title": "LabArchive",
+      "description": "Archived SportsFly Lab athlete performance report card tagged with calendar creation date, sports school name, and batch grouping.",
+      "type": "object",
+      "properties": {
+        "archiveId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "archiveTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 240
+        },
+        "archiveNote": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "savedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "savedTimestamp": {
+          "type": "number"
+        },
+        "createdDateIso": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "schoolName": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "batchId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "batchGroupTitle": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "sourceType": {
+          "type": "string",
+          "enum": ["batch", "single"]
+        },
+        "athleteName": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "sportBranch": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "trainerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        }
+      },
+      "required": ["archiveId", "archiveTitle", "savedAt", "savedTimestamp", "createdDateIso", "schoolName"]
+    },
+    "Karne": {
+      "title": "Karne",
+      "description": "Athlete 5-page scorecard record stored in /karneler/{karneId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "parentUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "veliEposta": { "type": "string", "maxLength": 160 },
+        "adSoyad": { "type": "string", "maxLength": 140 },
+        "brans": { "type": "string", "maxLength": 100 },
+        "tarih": { "type": "string", "maxLength": 64 },
+        "boy": { "type": "number" },
+        "kilo": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "adSoyad", "brans", "tarih", "boy", "kilo", "updatedAt"]
+    },
+    "SozlesmeOnayi": {
+      "title": "SozlesmeOnayi",
+      "description": "Signed legal/KVKK contract approval audit record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 160 },
+        "clubName": { "type": "string", "maxLength": 160 },
+        "managerName": { "type": "string", "maxLength": 140 },
+        "signedAt": { "type": "string", "maxLength": 64 },
+        "contracts": { "type": "array" },
+        "signature": { "type": "string", "maxLength": 200 },
+        "isDemo": { "type": "boolean" }
+      },
+      "required": ["id", "userId", "email", "clubName", "managerName", "signedAt", "contracts", "signature"]
+    },
+    "SystemSetting": {
+      "title": "SystemSetting",
+      "description": "Restricted admin-only system configuration documents (such as SMTP email settings).",
+      "type": "object",
+      "properties": {
+        "host": { "type": "string", "maxLength": 160 },
+        "port": { "type": "number" },
+        "secure": { "type": "boolean" },
+        "user": { "type": "string", "maxLength": 160 },
+        "fromName": { "type": "string", "maxLength": 140 },
+        "fromEmail": { "type": "string", "maxLength": 160 }
+      }
+    },
+    "ClubWebsite": {
+      "title": "ClubWebsite",
+      "description": "Public club landing page configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "subdomain": { "type": "string", "maxLength": 100 },
+        "siteTitle": { "type": "string", "maxLength": 200 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "subdomain", "siteTitle"]
     }
   },
   "firestore": {
@@ -703,6 +864,10 @@
       "schema": { "$ref": "#/entities/AthleteLabReport" },
       "description": "SportsFly Lab biometric and motor performance reports."
     },
+    "/karneler/{karneId}": {
+      "schema": { "$ref": "#/entities/Karne" },
+      "description": "Athlete 5-page scorecards."
+    },
     "/paymentIntents/{intentId}": {
       "schema": { "$ref": "#/entities/PaymentIntent" },
       "description": "PCI-DSS SAQ-A tokenized payment intents."
@@ -722,6 +887,22 @@
     "/company_profile/{docId}": {
       "schema": { "$ref": "#/entities/CompanyProfile" },
       "description": "Company profile and branding settings for analysis firm and sports schools."
+    },
+    "/labArchives/{archiveId}": {
+      "schema": { "$ref": "#/entities/LabArchive" },
+      "description": "SportsFly Lab archived report cards indexed by creation calendar date and sports school name."
+    },
+    "/sozlesme_onaylari/{approvalId}": {
+      "schema": { "$ref": "#/entities/SozlesmeOnayi" },
+      "description": "Contract and KVKK acceptance records."
+    },
+    "/system_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/SystemSetting" },
+      "description": "Admin-only SMTP and system configuration."
+    },
+    "/club_websites/{websiteId}": {
+      "schema": { "$ref": "#/entities/ClubWebsite" },
+      "description": "Club public landing page settings."
     }
   }
 }

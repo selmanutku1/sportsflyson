@@ -3,6 +3,8 @@ import {
   doc,
   getDocs,
   setDoc,
+  deleteDoc,
+  writeBatch,
   onSnapshot,
   query,
   where,
@@ -11,7 +13,12 @@ import {
 } from 'firebase/firestore';
 import { db, auth, OperationType, handleFirestoreError } from '../firebase';
 import { SporcuKarne } from '../data/mockKarneData';
-import { SportsFlyLabReport, ensureDataConsistency } from '../data/sportsFlyLabData';
+import {
+  SportsFlyLabReport,
+  SportsFlyLabArchivedReport,
+  ensureDataConsistency,
+  normalizeArchiveDateIso,
+} from '../data/sportsFlyLabData';
 import { FirestoreSporcuDoc } from './firestoreCollectionsSchema';
 
 /**
@@ -284,21 +291,69 @@ export async function saveKarneToFirestore(karne: SporcuKarne): Promise<void> {
  * Saves or updates a lab report (SportsFlyLabReport) in Firestore collection 'labReports'
  */
 export async function saveLabReportToFirestore(report: SportsFlyLabReport): Promise<void> {
-  const docId = report.id;
+  const docId = report.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
   const path = `labReports/${docId}`;
   try {
+    const cleanSnapshot: SportsFlyLabReport = JSON.parse(JSON.stringify(report));
+    if (cleanSnapshot.clubLogoUrl && cleanSnapshot.clubLogoUrl.startsWith('data:image/')) {
+      delete cleanSnapshot.clubLogoUrl;
+    }
     await setDoc(doc(db, 'labReports', docId), {
-      ...report,
-      reportId: report.id,
-      athleteName: report.athleteName,
-      athleteCode: report.athleteCode,
-      sportBranch: report.sportBranch,
-      overallScore: report.scoreHistory?.p2Score || report.scoreHistory?.p1Score || 80,
-      reportSnapshot: report,
+      ...cleanSnapshot,
+      reportId: docId,
+      athleteName: cleanSnapshot.athleteName,
+      athleteCode: cleanSnapshot.athleteCode,
+      sportBranch: cleanSnapshot.sportBranch,
+      overallScore:
+        cleanSnapshot.scoreHistory?.p3Score ||
+        cleanSnapshot.scoreHistory?.p1Score ||
+        cleanSnapshot.scoreHistory?.p2Score ||
+        80,
+      reportSnapshot: cleanSnapshot,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Batch saves multiple SportsFlyLabReport records to Firestore collection 'labReports'
+ */
+export async function saveLabReportsBatchToFirestore(
+  reports: SportsFlyLabReport[]
+): Promise<void> {
+  if (!reports || reports.length === 0) return;
+  const CHUNK_SIZE = 350;
+  try {
+    for (let i = 0; i < reports.length; i += CHUNK_SIZE) {
+      const chunk = reports.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach((report) => {
+        const docId = report.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+        const cleanSnapshot: SportsFlyLabReport = JSON.parse(JSON.stringify(report));
+        if (cleanSnapshot.clubLogoUrl && cleanSnapshot.clubLogoUrl.startsWith('data:image/')) {
+          delete cleanSnapshot.clubLogoUrl;
+        }
+        batch.set(doc(db, 'labReports', docId), {
+          ...cleanSnapshot,
+          reportId: docId,
+          athleteName: cleanSnapshot.athleteName,
+          athleteCode: cleanSnapshot.athleteCode,
+          sportBranch: cleanSnapshot.sportBranch,
+          overallScore:
+            cleanSnapshot.scoreHistory?.p3Score ||
+            cleanSnapshot.scoreHistory?.p1Score ||
+            cleanSnapshot.scoreHistory?.p2Score ||
+            80,
+          reportSnapshot: cleanSnapshot,
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    console.warn('[KarneFirestoreService] saveLabReportsBatchToFirestore warning:', error);
   }
 }
 export interface UploadedFileDoc {
@@ -388,6 +443,142 @@ export async function deleteUploadedFileFromFirestore(fileId: string): Promise<v
     await setDoc(doc(db, 'uploadedFiles', docId), { deleted: true }, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+function sanitizeArchiveEntryForFirestore(entry: SportsFlyLabArchivedReport): Record<string, any> {
+  const cleanSnapshot: SportsFlyLabReport = JSON.parse(JSON.stringify(entry.reportSnapshot));
+  if (cleanSnapshot.clubLogoUrl && cleanSnapshot.clubLogoUrl.startsWith('data:image/')) {
+    delete cleanSnapshot.clubLogoUrl;
+  }
+  const schoolName = (entry.schoolName || cleanSnapshot.clubName || 'SportsFly Spor Okulu').slice(0, 180);
+  cleanSnapshot.clubName = schoolName;
+
+  const createdDateIso = normalizeArchiveDateIso(entry);
+  const resolvedSavedAt =
+    entry.savedAt && entry.savedAt.trim().length >= 2
+      ? entry.savedAt.trim().slice(0, 64)
+      : createdDateIso;
+
+  const payload: Record<string, any> = {
+    archiveId: entry.archiveId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128),
+    archiveTitle: (entry.archiveTitle || `${cleanSnapshot.athleteName} Karnesi`).slice(0, 240),
+    savedAt: resolvedSavedAt,
+    savedTimestamp: Number(entry.savedTimestamp) || Date.now(),
+    createdDateIso,
+    schoolName,
+    sourceType: entry.sourceType === 'batch' ? 'batch' : 'single',
+    athleteName: (cleanSnapshot.athleteName || '').slice(0, 140),
+    sportBranch: (cleanSnapshot.sportBranch || '').slice(0, 100),
+    reportSnapshot: cleanSnapshot,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (entry.archiveNote) {
+    payload.archiveNote = entry.archiveNote.slice(0, 500);
+  }
+  if (entry.batchId) {
+    payload.batchId = entry.batchId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  }
+  if (entry.batchGroupTitle) {
+    payload.batchGroupTitle = entry.batchGroupTitle.slice(0, 200);
+  }
+  return payload;
+}
+
+/**
+ * Fetches all archived SportsFly Lab report cards from Firestore collection 'labArchives'
+ */
+export async function fetchFirestoreLabArchives(): Promise<SportsFlyLabArchivedReport[]> {
+  const path = 'labArchives';
+  try {
+    const snap = await getDocs(collection(db, path));
+    const list: SportsFlyLabArchivedReport[] = [];
+    snap.docs.forEach((d) => {
+      const data = d.data();
+      if (data && data.reportSnapshot) {
+        list.push({
+          archiveId: data.archiveId || d.id,
+          archiveTitle: data.archiveTitle || 'Kayıtlı Karne',
+          archiveNote: data.archiveNote,
+          savedAt: data.savedAt || '',
+          savedTimestamp: Number(data.savedTimestamp) || Date.now(),
+          createdDateIso: data.createdDateIso || normalizeArchiveDateIso(data),
+          schoolName: data.schoolName || data.reportSnapshot?.clubName || 'SportsFly Spor Okulu',
+          batchId: data.batchId,
+          batchGroupTitle: data.batchGroupTitle,
+          sourceType: data.sourceType || (data.batchId ? 'batch' : 'single'),
+          reportSnapshot: data.reportSnapshot as SportsFlyLabReport,
+        });
+      }
+    });
+    return list.sort((a, b) => (b.savedTimestamp || 0) - (a.savedTimestamp || 0));
+  } catch (error) {
+    console.warn('[KarneFirestoreService] fetchFirestoreLabArchives fallback:', error);
+    return [];
+  }
+}
+
+export async function saveLabArchiveToFirestore(entry: SportsFlyLabArchivedReport): Promise<void> {
+  const payload = sanitizeArchiveEntryForFirestore(entry);
+  const path = `labArchives/${payload.archiveId}`;
+  try {
+    await setDoc(doc(db, 'labArchives', payload.archiveId), payload);
+  } catch (error) {
+    console.warn('[KarneFirestoreService] saveLabArchiveToFirestore warning:', path, error);
+  }
+}
+
+export async function saveLabArchivesBatchToFirestore(
+  entries: SportsFlyLabArchivedReport[]
+): Promise<void> {
+  if (!entries || entries.length === 0) return;
+  const CHUNK_SIZE = 350;
+  try {
+    for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
+      const chunk = entries.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach((entry) => {
+        const payload = sanitizeArchiveEntryForFirestore(entry);
+        batch.set(doc(db, 'labArchives', payload.archiveId), payload);
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    console.warn('[KarneFirestoreService] saveLabArchivesBatchToFirestore warning:', error);
+  }
+}
+
+export async function updateLabArchiveMetaInFirestore(
+  entry: SportsFlyLabArchivedReport
+): Promise<void> {
+  return saveLabArchiveToFirestore(entry);
+}
+
+export async function deleteLabArchiveFromFirestore(archiveId: string): Promise<void> {
+  const safeId = archiveId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  try {
+    await deleteDoc(doc(db, 'labArchives', safeId));
+  } catch (error) {
+    console.warn('[KarneFirestoreService] deleteLabArchiveFromFirestore warning:', error);
+  }
+}
+
+export async function deleteLabArchivesBatchFromFirestore(archiveIds: string[]): Promise<void> {
+  if (!archiveIds || archiveIds.length === 0) return;
+  const CHUNK_SIZE = 350;
+  try {
+    for (let i = 0; i < archiveIds.length; i += CHUNK_SIZE) {
+      const chunk = archiveIds.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach((id) => {
+        const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+        batch.delete(doc(db, 'labArchives', safeId));
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    console.warn('[KarneFirestoreService] deleteLabArchivesBatchFromFirestore warning:', error);
   }
 }
 
