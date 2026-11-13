@@ -806,32 +806,58 @@ export async function generateReportPagesToPdfBlob(options: {
  * Bundles multiple athlete PDF report cards into a single ZIP archive named after the sports school.
  */
 export async function downloadReportsAsPdfZip(options: {
-  reports: { athleteName: string; pageIds: string[] }[];
+  reports: {
+    athleteName: string;
+    pageIds: string[] | (() => string[]);
+    onBeforeCapture?: () => Promise<void>;
+  }[];
   zipFileName: string;
   onProgress?: (current: number, total: number, athleteName: string, status: string) => void;
 }): Promise<void> {
   const { reports, zipFileName, onProgress } = options;
   const zip = new JSZip();
   let addedCount = 0;
+  const usedNames = new Map<string, number>();
 
   for (let i = 0; i < reports.length; i++) {
     const rep = reports[i];
     if (onProgress) {
-      onProgress(i + 1, reports.length, rep.athleteName, `Sporcu ${i + 1}/${reports.length}: ${rep.athleteName} PDF hazırlanıyor...`);
+      onProgress(
+        i + 1,
+        reports.length,
+        rep.athleteName,
+        `Sporcu ${i + 1}/${reports.length}: ${rep.athleteName} PDF hazırlanıyor...`
+      );
     }
 
     try {
+      if (rep.onBeforeCapture) {
+        await rep.onBeforeCapture();
+      }
+      const resolvedPageIds =
+        typeof rep.pageIds === 'function' ? rep.pageIds() : rep.pageIds;
+
       const pdfBlob = await generateReportPagesToPdfBlob({
-        pageIds: rep.pageIds,
+        pageIds: resolvedPageIds,
         onPageProgress: (pIdx, total) => {
           if (onProgress) {
-            onProgress(i + 1, reports.length, rep.athleteName, `${rep.athleteName} · Sayfa ${pIdx}/${total}`);
+            onProgress(
+              i + 1,
+              reports.length,
+              rep.athleteName,
+              `${rep.athleteName} · Sayfa ${pIdx}/${total}`
+            );
           }
         },
       });
 
-      const safeName = rep.athleteName.replace(/[\/\\?%*:|"<>]/g, '_').trim();
-      const pdfFileName = `${safeName}.pdf`;
+      const baseSafeName = (rep.athleteName || `Sporcu_${i + 1}`)
+        .replace(/[\/\\?%*:|"<>]/g, '_')
+        .trim();
+      const prevCount = usedNames.get(baseSafeName) || 0;
+      usedNames.set(baseSafeName, prevCount + 1);
+      const pdfFileName =
+        prevCount === 0 ? `${baseSafeName}.pdf` : `${baseSafeName} (${prevCount + 1}).pdf`;
       zip.file(pdfFileName, pdfBlob);
       addedCount++;
     } catch (err) {
