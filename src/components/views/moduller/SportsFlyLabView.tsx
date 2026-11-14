@@ -106,6 +106,7 @@ import {
   saveStoredLabReports,
   getStoredLabSchoolBranding,
   saveStoredLabSchoolBranding,
+  compressLabLogoFileToDataUrl,
   getStoredLabArchives,
   archiveLabReport,
   calculateBranchReferenceScore,
@@ -154,6 +155,8 @@ import {
   updateLabArchiveMetaInFirestore,
   deleteLabArchiveFromFirestore,
   deleteLabArchivesBatchFromFirestore,
+  fetchFirestoreLabSchoolBranding,
+  saveLabSchoolBrandingToFirestore,
 } from '../../../services/karneFirestoreService';
 import { DosyaHavuzuView } from '../DosyaHavuzuView';
 import {
@@ -444,13 +447,40 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     });
 
     if (reportsChanged) {
+      reportsRef.current = updatedReports;
       setReports(updatedReports);
-      saveStoredLabReports(updatedReports);
+      saveStoredLabReports(updatedReports, schoolBrandingRef.current);
     }
     if (archivesChanged) {
       setArchivedReports(updatedArchives);
       localStorage.setItem('sportsfly_lab_archive_v1', JSON.stringify(updatedArchives));
     }
+
+    // Sync SportsFly Lab school branding (school name, branch, logo) with Firestore 'company_profile/lab_school_branding'
+    fetchFirestoreLabSchoolBranding()
+      .then((remoteBranding) => {
+        const localBranding = schoolBrandingRef.current;
+        const localTs = localBranding?.updatedAt ? Date.parse(localBranding.updatedAt) || 0 : 0;
+        const remoteTs = remoteBranding?.updatedAt ? Date.parse(remoteBranding.updatedAt) || 0 : 0;
+
+        if (remoteBranding && (remoteTs > localTs || localTs === 0)) {
+          const synced = saveStoredLabSchoolBranding(remoteBranding);
+          schoolBrandingRef.current = synced;
+          setSchoolBranding(synced);
+          setReports((prev) => {
+            const next = applyBrandingToReports(prev, synced);
+            reportsRef.current = next;
+            saveStoredLabReports(next, synced);
+            return next;
+          });
+          setBatchReports((prev) => applyBrandingToReports(prev, synced));
+        } else if (localTs > remoteTs) {
+          void saveLabSchoolBrandingToFirestore(localBranding);
+        }
+      })
+      .catch((err) => {
+        console.warn('[SportsFlyLabView] Firestore school branding sync warning:', err);
+      });
 
     // Sync Karne Arşivi records with Firestore 'labArchives' collection on mount & backfill local items
     fetchFirestoreLabArchives()
@@ -508,8 +538,12 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               mergedMap.set(r.id, r);
             }
           });
-          const merged = Array.from(mergedMap.values());
-          saveStoredLabReports(merged);
+          const merged = applyBrandingToReports(
+            Array.from(mergedMap.values()),
+            schoolBrandingRef.current
+          );
+          reportsRef.current = merged;
+          saveStoredLabReports(merged, schoolBrandingRef.current);
           return merged;
         });
       })
@@ -797,7 +831,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         }
         return rep;
       });
-      saveStoredLabReports(updated);
+      saveStoredLabReports(updated, schoolBrandingRef.current);
       return updated;
     });
 
@@ -914,6 +948,11 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
   const [schoolBranding, setSchoolBranding] = useState<SportsFlyLabSchoolBranding>(() =>
     getStoredLabSchoolBranding()
   );
+  const schoolBrandingRef = useRef<SportsFlyLabSchoolBranding>(schoolBranding);
+  schoolBrandingRef.current = schoolBranding;
+  const reportsRef = useRef<SportsFlyLabReport[]>(reports);
+  reportsRef.current = reports;
+  const brandingFirestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const headerMenuContainerRef = useRef<HTMLDivElement>(null);
 
@@ -941,14 +980,39 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     };
     const handleStorageSync = () => {
       const latestBranding = getStoredLabSchoolBranding();
+      schoolBrandingRef.current = latestBranding;
       setSchoolBranding(latestBranding);
       const latestReports = getStoredLabReports();
+      reportsRef.current = latestReports;
       setReports(latestReports);
       setArchivedReports(getStoredLabArchives());
     };
 
+    const handleLabBrandingEvent = (e: Event) => {
+      const detail = (e as CustomEvent<SportsFlyLabSchoolBranding>)?.detail;
+      if (!detail) return;
+      const cur = schoolBrandingRef.current;
+      if (
+        detail.schoolName === cur.schoolName &&
+        detail.branchName === cur.branchName &&
+        detail.logoDataUrl === cur.logoDataUrl
+      ) {
+        return;
+      }
+      schoolBrandingRef.current = detail;
+      setSchoolBranding(detail);
+      setReports((prev) => {
+        const next = applyBrandingToReports(prev, detail);
+        reportsRef.current = next;
+        saveStoredLabReports(next, detail);
+        return next;
+      });
+      setBatchReports((prev) => applyBrandingToReports(prev, detail));
+    };
+
     const handleCustomReportsUpdate = (e: any) => {
       const latest = getStoredLabReports();
+      reportsRef.current = latest;
       setReports(latest);
       if (e?.detail?.reportId) {
         setSelectedReportId(e.detail.reportId);
@@ -957,10 +1021,12 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
     window.addEventListener('beforeprint', handleBeforePrint);
     window.addEventListener('storage', handleStorageSync);
+    window.addEventListener('sportsfly_lab_branding_updated', handleLabBrandingEvent);
     window.addEventListener('sportsfly_reports_updated', handleCustomReportsUpdate);
     return () => {
       window.removeEventListener('beforeprint', handleBeforePrint);
       window.removeEventListener('storage', handleStorageSync);
+      window.removeEventListener('sportsfly_lab_branding_updated', handleLabBrandingEvent);
       window.removeEventListener('sportsfly_reports_updated', handleCustomReportsUpdate);
     };
   }, []);
@@ -1033,7 +1099,10 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     schoolBranding.schoolName.trim() || currentReport.clubName || 'SPOR OKULU AKADEMİSİ';
   const effectiveBranchName =
     schoolBranding.branchName.trim() || currentReport.branchName || 'Merkez Kampüs';
-  const effectiveSchoolLogo = schoolBranding.logoDataUrl || currentReport.clubLogoUrl || '';
+  const effectiveSchoolLogo =
+    typeof schoolBranding.logoDataUrl === 'string'
+      ? schoolBranding.logoDataUrl
+      : currentReport.clubLogoUrl || '';
   const effectiveAnalysisFirmLogo =
     activeCompanyProfile?.logoDataUrl ||
     (activeCompanyProfile?.companyName?.toLowerCase().includes('rota')
@@ -1051,27 +1120,66 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     setTimeout(() => setLocalToast(null), 3500);
   };
 
-  // Update Sport School Name / Branch / Logo in localStorage and automatically sync all reports
+  // Update Sport School Name / Branch / Logo in localStorage, sessionStorage & Firestore and automatically sync all reports
   const handleSchoolBrandingChange = (patch: Partial<SportsFlyLabSchoolBranding>) => {
-    const merged: SportsFlyLabSchoolBranding = { ...schoolBranding, ...patch };
+    const merged: SportsFlyLabSchoolBranding = {
+      ...schoolBrandingRef.current,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
     const savedBranding = saveStoredLabSchoolBranding(merged);
+    schoolBrandingRef.current = savedBranding;
     setSchoolBranding(savedBranding);
 
-    // Automatically apply the updated branding to all loaded reports so any switched or newly created report reflects it
-    const nextList = applyBrandingToReports(reports, savedBranding);
+    // Use reportsRef so async handlers (e.g. image decode) never overwrite newer report edits
+    const nextList = applyBrandingToReports(reportsRef.current, savedBranding);
+    reportsRef.current = nextList;
     setReports(nextList);
-    saveStoredLabReports(nextList);
+    saveStoredLabReports(nextList, savedBranding);
+    setBatchReports((prevBatch) => applyBrandingToReports(prevBatch, savedBranding));
+
+    if (patch.logoDataUrl !== undefined) {
+      if (brandingFirestoreTimerRef.current) {
+        clearTimeout(brandingFirestoreTimerRef.current);
+        brandingFirestoreTimerRef.current = null;
+      }
+      void saveLabSchoolBrandingToFirestore(savedBranding);
+    } else {
+      if (brandingFirestoreTimerRef.current) {
+        clearTimeout(brandingFirestoreTimerRef.current);
+      }
+      brandingFirestoreTimerRef.current = setTimeout(() => {
+        void saveLabSchoolBrandingToFirestore(schoolBrandingRef.current);
+      }, 450);
+    }
   };
 
   // Explicitly confirm & apply Sport School Name & Logo to all loaded and future athlete report cards
   const handleApplyBrandingToAllReports = () => {
-    const savedBranding = saveStoredLabSchoolBranding(schoolBranding);
+    if (brandingFirestoreTimerRef.current) {
+      clearTimeout(brandingFirestoreTimerRef.current);
+      brandingFirestoreTimerRef.current = null;
+    }
+    const latestBranding: SportsFlyLabSchoolBranding = {
+      ...schoolBrandingRef.current,
+      updatedAt: new Date().toISOString(),
+    };
+    const savedBranding = saveStoredLabSchoolBranding(latestBranding);
+    schoolBrandingRef.current = savedBranding;
     setSchoolBranding(savedBranding);
-    const nextList = applyBrandingToReports(reports, savedBranding);
+
+    const nextList = applyBrandingToReports(reportsRef.current, savedBranding);
+    reportsRef.current = nextList;
     setReports(nextList);
-    saveStoredLabReports(nextList);
+    saveStoredLabReports(nextList, savedBranding);
+    setBatchReports((prevBatch) => applyBrandingToReports(prevBatch, savedBranding));
+
+    void saveLabSchoolBrandingToFirestore(savedBranding);
+    if (nextList.length > 0) {
+      void saveLabReportsBatchToFirestore(nextList);
+    }
     notify(
-      `"${savedBranding.schoolName}" karne tasarım ayarları tarayıcıda kalıcı hale getirildi ve tüm karnelere uygulandı.`
+      `"${savedBranding.schoolName}" karne tasarım ayarları ve logosu kalıcı hale getirildi, tüm karnelere uygulandı.`
     );
   };
 
@@ -1710,56 +1818,34 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     notify(`${filteredArchivedReports.length} arşiv kaydı Excel/CSV veritabanı olarak indirildi.`);
   };
 
-  // Handle Sport School Logo Upload (converts to compact Base64 Data URL for persistence & A4 PDF export)
-  const handleSchoolLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle Sport School Logo Upload (compresses to compact Data URL for localStorage & Firestore persistence + A4 PDF export)
+  const handleSchoolLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const resultUrl = typeof reader.result === 'string' ? reader.result : '';
-      if (!resultUrl) return;
+    if (!file.type.startsWith('image/')) {
+      notify('Lütfen geçerli bir görsel dosyası (PNG, JPG, WebP veya SVG) seçiniz.');
+      if (schoolLogoInputRef.current) schoolLogoInputRef.current.value = '';
+      return;
+    }
 
-      // Resize large raster images on an offscreen canvas so localStorage and PDF export stay fast
-      const img = new Image();
-      img.onload = () => {
-        const maxDim = 320;
-        let w = img.width;
-        let h = img.height;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
-          }
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = w || 200;
-        canvas.height = h || 200;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          const optimizedDataUrl = canvas.toDataURL('image/png', 0.92);
-          handleSchoolBrandingChange({ logoDataUrl: optimizedDataUrl });
-          notify('Spor okulu logosu yüklendi ve karne üst başlığına eklendi.');
-        } else {
-          handleSchoolBrandingChange({ logoDataUrl: resultUrl });
-          notify('Spor okulu logosu yüklendi.');
-        }
-      };
-      img.onerror = () => {
-        handleSchoolBrandingChange({ logoDataUrl: resultUrl });
-        notify('Spor okulu logosu yüklendi.');
-      };
-      img.src = resultUrl;
-    };
-    reader.readAsDataURL(file);
+    if (file.size > 5 * 1024 * 1024) {
+      notify('Logo dosyası en fazla 5 MB boyutunda olabilir.');
+      if (schoolLogoInputRef.current) schoolLogoInputRef.current.value = '';
+      return;
+    }
 
-    if (schoolLogoInputRef.current) {
-      schoolLogoInputRef.current.value = '';
+    try {
+      const optimizedDataUrl = await compressLabLogoFileToDataUrl(file);
+      handleSchoolBrandingChange({ logoDataUrl: optimizedDataUrl });
+      notify('Spor okulu logosu yüklendi ve tüm karnelere kalıcı olarak uygulandı.');
+    } catch (err) {
+      console.error('Spor okulu logosu yükleme hatası:', err);
+      notify('Logo yüklenirken bir hata oluştu, lütfen tekrar deneyin.');
+    } finally {
+      if (schoolLogoInputRef.current) {
+        schoolLogoInputRef.current.value = '';
+      }
     }
   };
 
@@ -2349,11 +2435,17 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       batchArchiveDateIso && /^\d{4}-\d{2}-\d{2}$/.test(batchArchiveDateIso)
         ? batchArchiveDateIso
         : getLocalIsoDateString();
-    const brandingForBatch = { ...persistedBranding, schoolName: resolvedSchool };
-    setSchoolBranding(brandingForBatch);
+    const brandingForBatch = {
+      ...persistedBranding,
+      schoolName: resolvedSchool,
+      updatedAt: new Date().toISOString(),
+    };
+    const savedBatchBranding = saveStoredLabSchoolBranding(brandingForBatch);
+    schoolBrandingRef.current = savedBatchBranding;
+    setSchoolBranding(savedBatchBranding);
 
     const brandedBatch = selectedBatchReports.map((rep) => {
-      const branded = applyBrandingToReport(rep, brandingForBatch);
+      const branded = applyBrandingToReport(rep, savedBatchBranding);
       branded.clubName = resolvedSchool;
       if (!branded.aiRecommendations) {
         branded.aiRecommendations = analyzeLabPerformanceMetrics(branded);
@@ -2368,9 +2460,10 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     );
     const nextReports = isIntraGroupComparisonEnabled
       ? [...intraComputedBatch, ...existingWithoutBatch]
-      : applyBrandingToReports([...brandedBatch, ...existingWithoutBatch], brandingForBatch);
+      : applyBrandingToReports([...brandedBatch, ...existingWithoutBatch], savedBatchBranding);
+    reportsRef.current = nextReports;
     setReports(nextReports);
-    saveStoredLabReports(nextReports);
+    saveStoredLabReports(nextReports, savedBatchBranding);
     void saveLabReportsBatchToFirestore(intraComputedBatch);
     setSelectedReportId(intraComputedBatch[0].id);
     setActiveLabTab('studio');
@@ -2403,14 +2496,15 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     rep: SportsFlyLabReport,
     mode: 'view' | 'pdf-preview' | 'download-pdf' = 'view'
   ) => {
-    const branded = applyBrandingToReport(rep, schoolBranding);
+    const branded = applyBrandingToReport(rep, schoolBrandingRef.current);
     const exists = reports.some((r) => r.id === branded.id);
     const nextReports = exists
       ? reports.map((r) => (r.id === branded.id ? branded : r))
       : [branded, ...reports];
 
+    reportsRef.current = nextReports;
     setReports(nextReports);
-    saveStoredLabReports(nextReports);
+    saveStoredLabReports(nextReports, schoolBrandingRef.current);
     setSelectedReportId(branded.id);
     setActiveLabTab('studio');
     setViewMode('all');

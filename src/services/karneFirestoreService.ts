@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   setDoc,
   deleteDoc,
@@ -16,6 +17,7 @@ import { SporcuKarne } from '../data/mockKarneData';
 import {
   SportsFlyLabReport,
   SportsFlyLabArchivedReport,
+  SportsFlyLabSchoolBranding,
   ensureDataConsistency,
   normalizeArchiveDateIso,
 } from '../data/sportsFlyLabData';
@@ -579,6 +581,79 @@ export async function deleteLabArchivesBatchFromFirestore(archiveIds: string[]):
     }
   } catch (error) {
     console.warn('[KarneFirestoreService] deleteLabArchivesBatchFromFirestore warning:', error);
+  }
+}
+
+const LAB_SCHOOL_BRANDING_DOC_ID = 'lab_school_branding';
+
+/**
+ * Fetches persisted SportsFly Lab school branding (school name, branch, and logo)
+ * from Firestore 'company_profile/lab_school_branding'.
+ */
+export async function fetchFirestoreLabSchoolBranding(): Promise<SportsFlyLabSchoolBranding | null> {
+  try {
+    const snap = await getDoc(doc(db, 'company_profile', LAB_SCHOOL_BRANDING_DOC_ID));
+    if (!snap.exists()) return null;
+    const data = snap.data() as Record<string, any>;
+    const schoolName =
+      typeof data.clubName === 'string' && data.clubName.trim()
+        ? data.clubName.trim()
+        : typeof data.companyName === 'string' && data.companyName.trim()
+        ? data.companyName.trim()
+        : '';
+    if (!schoolName) return null;
+
+    const branchName = typeof data.branchName === 'string' ? data.branchName.trim() : '';
+    const logoDataUrl = typeof data.logoDataUrl === 'string' ? data.logoDataUrl.trim() : '';
+    const updatedAt = typeof data.updatedAt === 'string' ? data.updatedAt : undefined;
+
+    return {
+      schoolName,
+      branchName,
+      logoDataUrl,
+      updatedAt,
+    };
+  } catch (error) {
+    console.warn('[KarneFirestoreService] fetchFirestoreLabSchoolBranding warning:', error);
+    return null;
+  }
+}
+
+/**
+ * Persists SportsFly Lab school branding (name, branch, and logo Data URL)
+ * to Firestore 'company_profile/lab_school_branding'.
+ */
+export async function saveLabSchoolBrandingToFirestore(
+  branding: SportsFlyLabSchoolBranding
+): Promise<void> {
+  try {
+    const cleanSchoolName = (branding.schoolName || 'SPOR OKULU AKADEMİSİ').trim().slice(0, 160);
+    const cleanBranchName = (branding.branchName || '').trim().slice(0, 140);
+    const cleanLogo =
+      typeof branding.logoDataUrl === 'string' ? branding.logoDataUrl.trim() : '';
+
+    if (cleanLogo.length > 899000) {
+      console.warn('[KarneFirestoreService] Logo boyutu Firestore sınırını aşıyor, sadece tarayıcıda saklandı.');
+      return;
+    }
+
+    const updatedAt = (branding.updatedAt || new Date().toISOString()).slice(0, 64);
+
+    await setDoc(
+      doc(db, 'company_profile', LAB_SCHOOL_BRANDING_DOC_ID),
+      {
+        id: LAB_SCHOOL_BRANDING_DOC_ID,
+        companyName: cleanSchoolName,
+        clubName: cleanSchoolName,
+        branchName: cleanBranchName,
+        logoDataUrl: cleanLogo,
+        updatedAt,
+        serverUpdatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    console.warn('[KarneFirestoreService] saveLabSchoolBrandingToFirestore warning:', error);
   }
 }
 

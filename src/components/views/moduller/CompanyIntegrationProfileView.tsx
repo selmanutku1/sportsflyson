@@ -44,6 +44,7 @@ import {
   SportsFlyLabArchivedReport,
   UploadedExcelFileRecord,
   SportsFlyLabSchoolBranding,
+  compressLabLogoFileToDataUrl,
   getStoredLabExcelHistory,
   getStoredLabArchives,
   downloadBatchSportsFlyLabExcelTemplate,
@@ -229,30 +230,33 @@ export const CompanyIntegrationProfileView: React.FC<CompanyIntegrationProfileVi
   };
 
   // Upload Sport School Logo
-  const handleUploadTargetSchoolLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadTargetSchoolLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('Lütfen geçerli bir görsel dosyası (PNG, JPG, SVG, WebP) seçiniz.');
+      if (onToast) onToast('Lütfen geçerli bir görsel dosyası (PNG, JPG, SVG, WebP) seçiniz.');
       return;
     }
 
-    if (file.size > 2 * 1024 * 1024) {
-      alert('Logo görsel boyutu en fazla 2MB olmalıdır.');
+    if (file.size > 5 * 1024 * 1024) {
+      if (onToast) onToast('Logo görsel boyutu en fazla 5MB olmalıdır.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      setTargetSchoolLogo(result);
+    try {
+      const optimizedLogo = await compressLabLogoFileToDataUrl(file);
+      setTargetSchoolLogo(optimizedLogo);
       if (onUpdateSchoolBranding) {
-        onUpdateSchoolBranding({ logoDataUrl: result });
+        onUpdateSchoolBranding({ logoDataUrl: optimizedLogo });
       }
       if (onToast) onToast('Spor okulu logosu yüklendi ve karne üst başlığına uygulandı.');
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('[CompanyIntegrationProfileView] Logo sıkıştırma hatası:', err);
+      if (onToast) onToast('Logo dosyası işlenirken bir hata oluştu.');
+    } finally {
+      if (schoolLogoFileInputRef.current) schoolLogoFileInputRef.current.value = '';
+    }
   };
 
   // Remove Sport School Logo

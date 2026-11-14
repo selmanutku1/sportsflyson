@@ -234,10 +234,10 @@ export async function fetchCompanyProfileFromFirestore(
       return merged;
     }
 
-    // 4. If primary doesn't exist, check any document in company_profile collection
+    // 4. If primary doesn't exist, check any document in company_profile collection (excluding lab_school_branding)
     const querySnapshot = await getDocs(collection(db, 'company_profile'));
-    if (!querySnapshot.empty) {
-      const firstDoc = querySnapshot.docs[0];
+    const firstDoc = querySnapshot.docs.find((d) => d.id !== 'lab_school_branding');
+    if (firstDoc) {
       const data = firstDoc.data() as Partial<CompanyIntegrationProfile>;
       let logo = data.logoDataUrl || localProf.logoDataUrl || '';
       if (!logo && (data.companyName?.toLowerCase().includes('rota') || localProf.companyName?.toLowerCase().includes('rota'))) {

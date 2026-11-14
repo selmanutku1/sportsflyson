@@ -949,37 +949,145 @@ export const DEFAULT_LAB_SCHOOL_BRANDING: SportsFlyLabSchoolBranding = {
   logoDataUrl: '/assets/aistudio/WhatsApp_Image_2026-11-07_at_23.02.49_58552d87.jpeg',
 };
 
+function parseBrandingRecord(raw: string | null): SportsFlyLabSchoolBranding | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    const schoolName =
+      typeof parsed.schoolName === 'string' &&
+      parsed.schoolName.trim() &&
+      !parsed.schoolName.includes('ATAŞEHİR')
+        ? parsed.schoolName
+        : DEFAULT_LAB_SCHOOL_BRANDING.schoolName;
+    const branchName =
+      typeof parsed.branchName === 'string' &&
+      parsed.branchName.trim() &&
+      !parsed.branchName.includes('Ataşehir')
+        ? parsed.branchName
+        : DEFAULT_LAB_SCHOOL_BRANDING.branchName;
+
+    // Preserve explicit empty string ('') when user deliberately clicked "Logoyu Kaldır"
+    const hasLogoField = typeof parsed.logoDataUrl === 'string';
+    const logoDataUrl = hasLogoField
+      ? parsed.logoDataUrl.trim()
+      : DEFAULT_LAB_SCHOOL_BRANDING.logoDataUrl;
+
+    return {
+      schoolName,
+      branchName,
+      logoDataUrl,
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function getStoredLabSchoolBranding(): SportsFlyLabSchoolBranding {
   try {
-    const raw = localStorage.getItem(LAB_SCHOOL_BRANDING_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        const schoolName =
-          typeof parsed.schoolName === 'string' && parsed.schoolName.trim() && !parsed.schoolName.includes('ATAŞEHİR')
-            ? parsed.schoolName
-            : DEFAULT_LAB_SCHOOL_BRANDING.schoolName;
-        const branchName =
-          typeof parsed.branchName === 'string' && parsed.branchName.trim() && !parsed.branchName.includes('Ataşehir')
-            ? parsed.branchName
-            : DEFAULT_LAB_SCHOOL_BRANDING.branchName;
-        const logoDataUrl =
-          typeof parsed.logoDataUrl === 'string' && parsed.logoDataUrl.trim()
-            ? parsed.logoDataUrl
-            : DEFAULT_LAB_SCHOOL_BRANDING.logoDataUrl;
+    const localRec = parseBrandingRecord(
+      typeof localStorage !== 'undefined' ? localStorage.getItem(LAB_SCHOOL_BRANDING_KEY) : null
+    );
+    const sessionRec = parseBrandingRecord(
+      typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(LAB_SCHOOL_BRANDING_KEY) : null
+    );
 
-        return {
-          schoolName,
-          branchName,
-          logoDataUrl,
-          updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
-        };
-      }
+    if (localRec && sessionRec) {
+      const tLocal = localRec.updatedAt ? Date.parse(localRec.updatedAt) || 0 : 0;
+      const tSession = sessionRec.updatedAt ? Date.parse(sessionRec.updatedAt) || 0 : 0;
+      return tSession > tLocal ? sessionRec : localRec;
     }
+    if (sessionRec) return sessionRec;
+    if (localRec) return localRec;
   } catch (e) {
     console.error('Spor okulu kurumsal kimlik ayarları okunamadı:', e);
   }
   return DEFAULT_LAB_SCHOOL_BRANDING;
+}
+
+/**
+ * Compresses an uploaded school logo image (PNG/JPG/WebP/SVG) to a compact Data URL
+ * (~10-45 KB) so it fits cleanly inside both localStorage and Firestore limits.
+ */
+export function compressLabLogoFileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Logo dosyası okunamadı.'));
+    reader.onload = () => {
+      const rawUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!rawUrl) {
+        reject(new Error('Boş görsel verisi.'));
+        return;
+      }
+
+      // Keep crisp SVG vectors intact if compact
+      if (file.type === 'image/svg+xml' && rawUrl.length <= 120000) {
+        resolve(rawUrl);
+        return;
+      }
+
+      const img = new Image();
+      img.onerror = () => resolve(rawUrl);
+      img.onload = () => {
+        try {
+          const tryEncode = (maxDim: number): string => {
+            let w = img.width || 220;
+            let h = img.height || 220;
+            if (w > maxDim || h > maxDim) {
+              if (w > h) {
+                h = Math.max(1, Math.round((h * maxDim) / w));
+                w = maxDim;
+              } else {
+                w = Math.max(1, Math.round((w * maxDim) / h));
+                h = maxDim;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return rawUrl;
+            ctx.clearRect(0, 0, w, h);
+            ctx.drawImage(img, 0, 0, w, h);
+
+            // WebP preserves transparency and is 5-15x smaller than PNG
+            const webp = canvas.toDataURL('image/webp', 0.88);
+            const png = canvas.toDataURL('image/png', 0.9);
+            if (webp.startsWith('data:image/webp') && webp.length < png.length) {
+              return webp;
+            }
+            return png;
+          };
+
+          let best = tryEncode(220);
+          if (best.length > 90000) {
+            best = tryEncode(160);
+          }
+          if (best.length > 140000) {
+            // Last resort compact JPEG if PNG/WebP was unexpectedly huge
+            const canvas = document.createElement('canvas');
+            const scale = Math.min(1, 180 / Math.max(img.width || 180, img.height || 180));
+            canvas.width = Math.max(1, Math.round((img.width || 180) * scale));
+            canvas.height = Math.max(1, Math.round((img.height || 180) * scale));
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              best = canvas.toDataURL('image/jpeg', 0.85);
+            }
+          }
+          resolve(best);
+        } catch {
+          resolve(rawUrl);
+        }
+      };
+      img.src = rawUrl;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 /**
@@ -994,7 +1102,10 @@ export function applyBrandingToReport(
   const activeBranding = branding || getStoredLabSchoolBranding();
   const cleanSchool = activeBranding.schoolName.trim() || safeReport.clubName || DEFAULT_LAB_SCHOOL_BRANDING.schoolName;
   const cleanBranch = activeBranding.branchName.trim() || safeReport.branchName || DEFAULT_LAB_SCHOOL_BRANDING.branchName;
-  const cleanLogo = activeBranding.logoDataUrl?.trim() || safeReport.clubLogoUrl || DEFAULT_LAB_SCHOOL_BRANDING.logoDataUrl;
+  const hasExplicitLogo = typeof activeBranding.logoDataUrl === 'string';
+  const cleanLogo = hasExplicitLogo
+    ? activeBranding.logoDataUrl.trim()
+    : safeReport.clubLogoUrl || DEFAULT_LAB_SCHOOL_BRANDING.logoDataUrl;
 
   const isLegacyDefaultGroup =
     (safeReport.id === 'lab-rep-1' || safeReport.id === 'lab-rep-2') &&
@@ -1209,13 +1320,45 @@ export function saveStoredLabSchoolBranding(branding: SportsFlyLabSchoolBranding
   const stamped: SportsFlyLabSchoolBranding = {
     schoolName: branding.schoolName,
     branchName: branding.branchName,
-    logoDataUrl: branding.logoDataUrl || '',
-    updatedAt:
-      branding.updatedAt ||
-      new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
+    logoDataUrl: typeof branding.logoDataUrl === 'string' ? branding.logoDataUrl.trim() : '',
+    updatedAt: branding.updatedAt || new Date().toISOString(),
   };
+  const serialized = JSON.stringify(stamped);
+
   try {
-    safeSetItem(LAB_SCHOOL_BRANDING_KEY, JSON.stringify(stamped));
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(LAB_SCHOOL_BRANDING_KEY, serialized);
+    }
+  } catch {
+    // ignore sessionStorage quota
+  }
+
+  try {
+    let savedToLocal = safeSetItem(LAB_SCHOOL_BRANDING_KEY, serialized);
+
+    // If localStorage quota is full (e.g. 71+ reports stored), compact heavy report AI fields to guarantee branding persists
+    if (!savedToLocal) {
+      try {
+        const rawReports = localStorage.getItem(LAB_REPORTS_STORAGE_KEY);
+        if (rawReports) {
+          const parsedReports = JSON.parse(rawReports);
+          if (Array.isArray(parsedReports)) {
+            const minimalReports = sanitizeReportsForStorage(parsedReports, stamped.logoDataUrl).map(
+              (r) => ({ ...r, aiRecommendations: undefined })
+            );
+            localStorage.setItem(LAB_REPORTS_STORAGE_KEY, JSON.stringify(minimalReports));
+          }
+        }
+      } catch {
+        // If compacting reports didn't free enough space, clear temp report cache so tiny branding key succeeds
+        try {
+          localStorage.removeItem(LAB_REPORTS_STORAGE_KEY);
+        } catch {
+          // ignore
+        }
+      }
+      savedToLocal = safeSetItem(LAB_SCHOOL_BRANDING_KEY, serialized);
+    }
 
     // Automatically sync persisted reports in localStorage so every existing & future report carries this branding
     const rawReports = localStorage.getItem(LAB_REPORTS_STORAGE_KEY);
@@ -1267,9 +1410,12 @@ export function getStoredLabReports(): SportsFlyLabReport[] {
   return applyBrandingToReports(DEFAULT_LAB_REPORTS, activeBranding);
 }
 
-export function saveStoredLabReports(reports: SportsFlyLabReport[]): void {
+export function saveStoredLabReports(
+  reports: SportsFlyLabReport[],
+  explicitBranding?: SportsFlyLabSchoolBranding
+): void {
   try {
-    const activeBranding = getStoredLabSchoolBranding();
+    const activeBranding = explicitBranding || getStoredLabSchoolBranding();
     const brandedReports = applyBrandingToReports(reports, activeBranding);
     const sanitizedReports = sanitizeReportsForStorage(brandedReports, activeBranding.logoDataUrl);
     const success = safeSetItem(LAB_REPORTS_STORAGE_KEY, JSON.stringify(sanitizedReports));

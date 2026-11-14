@@ -1,124 +1,609 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
-  Sparkles,
   TrendingUp,
-  TrendingDown,
-  AlertTriangle,
-  UserCheck,
-  UserX,
   Send,
-  MessageSquare,
   RefreshCw,
   CheckCircle2,
-  Calendar,
-  DollarSign,
-  Users,
   ShieldAlert,
-  Zap,
   ArrowRight,
-  ChevronRight,
-  Bot,
-  Activity,
-  Award,
-  X,
-  Flame,
-  HelpCircle,
+  Copy,
+  Check,
+  Search,
+  MessageSquare,
+  RotateCcw,
   BarChart3,
+  ListChecks,
+  X,
+  Building2,
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from 'recharts';
+import {
+  getStoredSubeler,
+  getActiveSubeId,
+  Sube,
+} from '../../../data/subeData';
+import {
+  getStoredSubeSporcular,
+  getStoredSubeGelirGider,
+  SUBE_MONTHLY_TRENDS,
+  SubeSporcu,
+  SubeGelirGiderItem,
+  SubeAylikTrend,
+} from '../../../data/subeOzetData';
+import { getStoredUserProfile } from '../../../data/userProfile';
+import { isSuperAdminUser } from '../../../data/packagePermissions';
+import { getStoredLabReports } from '../../../data/sportsFlyLabData';
 
 interface SportsFlyIntelligenceViewProps {
   onToast?: (msg: string) => void;
 }
 
-interface RiskItem {
+type RiskTier = 'Yuksek' | 'Orta' | 'Dusuk';
+
+interface AthleteRiskRecord {
   id: string;
-  batchName: string;
-  riskLevel: 'Yuksek' | 'Orta' | 'Dusuk';
-  absentCount: number;
-  overdueDays: number;
-  churnProbabilityPercent: number;
+  athleteName: string;
+  parentName: string;
+  parentPhone: string;
+  branch: string;
+  groupName: string;
+  subeId: string;
+  subeName: string;
+  attendanceRate: number;
+  paymentStatus: 'Ödendi' | 'Bekliyor' | 'Gecikti';
+  monthlyFee: number;
+  riskLevel: RiskTier;
+  churnScore: number;
+  reasonSummary: string;
   suggestedAction: string;
+}
+
+interface ActionPlanItem {
+  id: string;
+  title: string;
+  category: string;
+  impactNote: string;
+  detail: string;
+  aiPrompt: string;
+}
+
+interface ChatMessage {
+  id: string;
+  sender: 'user' | 'ai';
+  text: string;
+  time: string;
+}
+
+const CONTACTED_STORAGE_KEY = 'sportsfly_intelligence_contacted_v1';
+const COMPLETED_ACTIONS_STORAGE_KEY = 'sportsfly_intelligence_actions_v1';
+
+const RISK_LABEL: Record<RiskTier, string> = {
+  Yuksek: 'Yüksek Risk',
+  Orta: 'Orta Risk',
+  Dusuk: 'İzleniyor',
+};
+
+function formatCurrency(val: number): string {
+  return `₺${Math.round(val).toLocaleString('tr-TR')}`;
+}
+
+function renderFormattedAiText(text: string): React.ReactNode {
+  const lines = text.split('\n');
+  return (
+    <div className="space-y-1.5 text-[13px] leading-relaxed">
+      {lines.map((rawLine, idx) => {
+        const line = rawLine.trim();
+        if (!line) return <div key={idx} className="h-1" />;
+
+        if (line.startsWith('### ') || line.startsWith('## ')) {
+          const cleanHeading = line.replace(/^#{2,4}\s*/, '').replace(/\*\*/g, '');
+          return (
+            <div
+              key={idx}
+              className="font-bold text-slate-900 dark:text-slate-100 pt-1 text-[13px]"
+            >
+              {cleanHeading}
+            </div>
+          );
+        }
+
+        const isBullet = /^[-*•]\s+/.test(line) || /^\d+\.\s+/.test(line);
+        const content = line.replace(/^[-*•]\s+/, '');
+        const parts = content.split(/(\*\*[^*]+\*\*)/g);
+
+        return (
+          <div
+            key={idx}
+            className={
+              isBullet
+                ? 'pl-3 border-l border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                : 'text-slate-700 dark:text-slate-200'
+            }
+          >
+            {parts.map((part, pIdx) => {
+              if (part.startsWith('**') && part.endsWith('**')) {
+                return (
+                  <strong key={pIdx} className="font-semibold text-slate-900 dark:text-white">
+                    {part.slice(2, -2)}
+                  </strong>
+                );
+              }
+              return <React.Fragment key={pIdx}>{part}</React.Fragment>;
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export const SportsFlyIntelligenceView: React.FC<SportsFlyIntelligenceViewProps> = ({
   onToast,
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'churn' | 'forecast' | 'recommendations'>('overview');
+  const [userProfile] = useState(() => getStoredUserProfile());
+  const isSuperAdmin = isSuperAdminUser(userProfile?.role, userProfile?.email);
+
+  const [subeler, setSubeler] = useState<Sube[]>(() => getStoredSubeler());
+  const [sporcular, setSporcular] = useState<SubeSporcu[]>(() => getStoredSubeSporcular());
+  const [gelirGider, setGelirGider] = useState<SubeGelirGiderItem[]>(() =>
+    getStoredSubeGelirGider()
+  );
+
+  const [selectedSubeId, setSelectedSubeId] = useState<string>(() => {
+    if (!isSuperAdmin) return 'sube-kadikoy';
+    return getActiveSubeId() || 'all';
+  });
+
+  const [activeTab, setActiveTab] = useState<'risk' | 'forecast' | 'actions'>('risk');
+  const [riskFilter, setRiskFilter] = useState<'all' | RiskTier>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const [contactedMap, setContactedMap] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem(CONTACTED_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [completedActions, setCompletedActions] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(COMPLETED_ACTIONS_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [draftTarget, setDraftTarget] = useState<AthleteRiskRecord | null>(null);
+  const [draftMessageText, setDraftMessageText] = useState('');
+  const [copiedDraft, setCopiedDraft] = useState(false);
+
   const [userQuery, setUserQuery] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  const [internalNotice, setInternalNotice] = useState<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
-  const [aiChatMessages, setAiChatMessages] = useState<Array<{ sender: 'user' | 'ai'; text: string; time: string }>>([
+  const notify = (msg: string) => {
+    if (onToast) {
+      onToast(msg);
+    } else {
+      setInternalNotice(msg);
+      setTimeout(() => setInternalNotice(null), 3200);
+    }
+  };
+
+  useEffect(() => {
+    const syncClubData = () => {
+      setSubeler(getStoredSubeler());
+      setSporcular(getStoredSubeSporcular());
+      setGelirGider(getStoredSubeGelirGider());
+    };
+    window.addEventListener('sportsfly_subeler_updated', syncClubData);
+    window.addEventListener('sportsfly_sube_data_changed', syncClubData);
+    return () => {
+      window.removeEventListener('sportsfly_subeler_updated', syncClubData);
+      window.removeEventListener('sportsfly_sube_data_changed', syncClubData);
+    };
+  }, []);
+
+  const scopedSubeler = useMemo(() => {
+    if (selectedSubeId === 'all') return subeler;
+    return subeler.filter((s) => s.id === selectedSubeId);
+  }, [subeler, selectedSubeId]);
+
+  const scopedSporcular = useMemo(() => {
+    if (selectedSubeId === 'all') return sporcular;
+    return sporcular.filter((s) => s.subeId === selectedSubeId);
+  }, [sporcular, selectedSubeId]);
+
+  const scopedGelirGider = useMemo(() => {
+    if (selectedSubeId === 'all') return gelirGider;
+    return gelirGider.filter((g) => g.subeId === selectedSubeId);
+  }, [gelirGider, selectedSubeId]);
+
+  // Core KPI metrics derived from live club records
+  const metrics = useMemo(() => {
+    const totalRoster = scopedSubeler.reduce((sum, s) => sum + (s.sporcuSayisi || 0), 0);
+    const totalCapacity = scopedSubeler.reduce((sum, s) => sum + (s.kapasite || 0), 0);
+    const occupancyPct =
+      totalCapacity > 0 ? Math.round((totalRoster / totalCapacity) * 100) : 0;
+
+    const avgAttendance =
+      scopedSporcular.length > 0
+        ? Math.round(
+            scopedSporcular.reduce((sum, a) => sum + (a.attendanceRate || 0), 0) /
+              scopedSporcular.length
+          )
+        : 88;
+
+    const paidCount = scopedSporcular.filter((a) => a.paymentStatus === 'Ödendi').length;
+    const overdueCount = scopedSporcular.filter((a) => a.paymentStatus === 'Gecikti').length;
+    const pendingCount = scopedSporcular.filter((a) => a.paymentStatus === 'Bekliyor').length;
+
+    const collectionRate =
+      scopedSporcular.length > 0
+        ? Math.round((paidCount / scopedSporcular.length) * 100)
+        : 88;
+
+    const estimatedRenewalRate = Math.min(
+      98,
+      Math.max(68, Number(((avgAttendance * 0.55 + collectionRate * 0.45)).toFixed(1)))
+    );
+
+    const monthlyRevenue = scopedSubeler.reduce((sum, s) => sum + (s.aylikCiro || 0), 0);
+    const pendingOrOverdueAmount = scopedSporcular
+      .filter((a) => a.paymentStatus !== 'Ödendi')
+      .reduce((sum, a) => sum + (a.monthlyFee || 0), 0);
+
+    const labReportCount = getStoredLabReports().length;
+    const activeBranchCount = new Set(scopedSporcular.map((s) => s.branch)).size || 4;
+
+    return {
+      totalRoster,
+      totalCapacity,
+      occupancyPct,
+      avgAttendance,
+      paidCount,
+      overdueCount,
+      pendingCount,
+      collectionRate,
+      estimatedRenewalRate,
+      monthlyRevenue,
+      pendingOrOverdueAmount,
+      labReportCount,
+      activeBranchCount,
+    };
+  }, [scopedSubeler, scopedSporcular]);
+
+  // Real risk list computed from athlete payment status & attendance rates
+  const riskRecords = useMemo<AthleteRiskRecord[]>(() => {
+    const subeNameMap = new Map(subeler.map((s) => [s.id, s.ad]));
+
+    return scopedSporcular
+      .map((sp) => {
+        let churnScore = 4;
+        const reasons: string[] = [];
+
+        if (sp.paymentStatus === 'Gecikti') {
+          churnScore += 22;
+          reasons.push('Aidat ödemesi gecikmiş');
+        } else if (sp.paymentStatus === 'Bekliyor') {
+          churnScore += 10;
+          reasons.push('Aidat yenileme bekliyor');
+        }
+
+        if (sp.attendanceRate < 80) {
+          churnScore += 18;
+          reasons.push(`Devam oranı %${sp.attendanceRate}`);
+        } else if (sp.attendanceRate < 88) {
+          churnScore += 8;
+          reasons.push(`Devam %${sp.attendanceRate} seviyesinde`);
+        }
+
+        const clampedScore = Math.min(48, churnScore);
+        let riskLevel: RiskTier = 'Dusuk';
+        if (clampedScore >= 24) {
+          riskLevel = 'Yuksek';
+        } else if (clampedScore >= 12) {
+          riskLevel = 'Orta';
+        }
+
+        const suggestedAction =
+          sp.paymentStatus === 'Gecikti'
+            ? 'Veli ile ödeme hatırlatma ve devam durumu görüşmesi yapın.'
+            : sp.paymentStatus === 'Bekliyor'
+            ? 'Ay sonu yenileme öncesi bilgilendirme mesajı iletin.'
+            : sp.attendanceRate < 88
+            ? 'Antrenör geri bildirimi ve devam teşviki paylaşın.'
+            : 'Düzenli gelişim karnesi özeti paylaşılabilir.';
+
+        return {
+          id: sp.id,
+          athleteName: sp.name,
+          parentName: sp.parentName,
+          parentPhone: sp.parentPhone,
+          branch: sp.branch,
+          groupName: sp.group,
+          subeId: sp.subeId,
+          subeName: subeNameMap.get(sp.subeId) || 'Merkez Şube',
+          attendanceRate: sp.attendanceRate,
+          paymentStatus: sp.paymentStatus,
+          monthlyFee: sp.monthlyFee,
+          riskLevel,
+          churnScore: clampedScore,
+          reasonSummary:
+            reasons.length > 0 ? reasons.join(' · ') : 'Düzenli devam ve ödeme',
+          suggestedAction,
+        };
+      })
+      .sort((a, b) => b.churnScore - a.churnScore);
+  }, [scopedSporcular, subeler]);
+
+  const highOrMediumRiskCount = useMemo(
+    () => riskRecords.filter((r) => r.riskLevel !== 'Dusuk').length,
+    [riskRecords]
+  );
+
+  const filteredRiskRecords = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return riskRecords.filter((item) => {
+      if (riskFilter !== 'all' && item.riskLevel !== riskFilter) return false;
+      if (!q) return true;
+      return (
+        item.athleteName.toLowerCase().includes(q) ||
+        item.groupName.toLowerCase().includes(q) ||
+        item.branch.toLowerCase().includes(q) ||
+        item.parentName.toLowerCase().includes(q) ||
+        item.subeName.toLowerCase().includes(q)
+      );
+    });
+  }, [riskRecords, riskFilter, searchQuery]);
+
+  // 6-Month historical + 3-month projected revenue / renewal curve
+  const trendChartData = useMemo(() => {
+    const targetIds =
+      selectedSubeId === 'all' ? Object.keys(SUBE_MONTHLY_TRENDS) : [selectedSubeId];
+
+    const baseMonths = SUBE_MONTHLY_TRENDS['sube-kadikoy'] || [];
+    const aggregated: Array<{
+      month: string;
+      gelir: number;
+      netKar: number;
+      sporcu: number;
+      tip: 'Gerçekleşen' | 'Projeksiyon';
+    }> = baseMonths.map((row, idx) => {
+      let sumGelir = 0;
+      let sumNet = 0;
+      let sumSporcu = 0;
+      targetIds.forEach((id) => {
+        const series: SubeAylikTrend[] | undefined = SUBE_MONTHLY_TRENDS[id];
+        if (series && series[idx]) {
+          sumGelir += series[idx].gelir;
+          sumNet += series[idx].netKar;
+          sumSporcu += series[idx].sporcuSayisi;
+        }
+      });
+      return {
+        month: row.month.replace(' (Anlık)', ''),
+        gelir: sumGelir,
+        netKar: sumNet,
+        sporcu: sumSporcu,
+        tip: 'Gerçekleşen',
+      };
+    });
+
+    const latest = aggregated[aggregated.length - 1] || {
+      gelir: metrics.monthlyRevenue,
+      netKar: Math.round(metrics.monthlyRevenue * 0.45),
+      sporcu: metrics.totalRoster,
+    };
+
+    const futureMonths = [
+      { month: 'Ekim (Tahmin)', factor: 1.03 },
+      { month: 'Kasım (Tahmin)', factor: 1.05 },
+      { month: 'Aralık (Tahmin)', factor: 1.04 },
+    ];
+
+    futureMonths.forEach((fm) => {
+      aggregated.push({
+        month: fm.month,
+        gelir: Math.round(latest.gelir * fm.factor),
+        netKar: Math.round(latest.netKar * fm.factor),
+        sporcu: Math.round(latest.sporcu * fm.factor),
+        tip: 'Projeksiyon',
+      });
+    });
+
+    return aggregated;
+  }, [selectedSubeId, metrics.monthlyRevenue, metrics.totalRoster]);
+
+  const projectionRows = useMemo(() => {
+    const baseRev = metrics.monthlyRevenue || 185000;
+    const baseCount = metrics.totalRoster || 42;
+    const basePct = Math.round(metrics.estimatedRenewalRate);
+    return [
+      {
+        period: 'Ekim 2026',
+        renewalPct: Math.min(96, basePct + 2),
+        expectedMembers: `${Math.round(baseCount * 0.94)} / ${baseCount}`,
+        projectedRevenue: Math.round(baseRev * 1.03),
+        note: 'Okul dönemi başlangıcı tam kadro devamlılık',
+      },
+      {
+        period: 'Kasım 2026',
+        renewalPct: Math.min(95, basePct + 1),
+        expectedMembers: `${Math.round(baseCount * 0.92)} / ${baseCount}`,
+        projectedRevenue: Math.round(baseRev * 1.05),
+        note: 'Ara dönem karne geri bildirimi desteği',
+      },
+      {
+        period: 'Aralık 2026',
+        renewalPct: Math.max(82, basePct - 1),
+        expectedMembers: `${Math.round(baseCount * 0.89)} / ${baseCount}`,
+        projectedRevenue: Math.round(baseRev * 1.04),
+        note: 'Kış dönemi erken ödeme hatırlatması gerekli',
+      },
+      {
+        period: 'Ocak 2027',
+        renewalPct: Math.max(84, basePct),
+        expectedMembers: `${Math.round(baseCount * 0.9)} / ${baseCount}`,
+        projectedRevenue: Math.round(baseRev * 1.06),
+        note: 'Yeni kayıt ve deneme seansı dönüşümleri',
+      },
+    ];
+  }, [metrics]);
+
+  // Actionable growth & retention recommendations grounded in selected branch metrics
+  const actionPlans = useMemo<ActionPlanItem[]>(() => {
+    const topRisk = riskRecords[0];
+    const items: ActionPlanItem[] = [
+      {
+        id: 'act-overdue',
+        title: 'Bekleyen ve geciken aidatların veli takibini tamamlayın',
+        category: 'Tahsilat',
+        impactNote: `${formatCurrency(metrics.pendingOrOverdueAmount)} açık bakiye`,
+        detail: `${metrics.overdueCount} gecikmiş ve ${metrics.pendingCount} bekleyen ödeme kaydı bulunuyor. 48 saat içinde nazik bir WhatsApp bilgilendirmesi ile tahsilat oranı %95 üzerine taşınabilir.`,
+        aiPrompt: `Seçili şubede ${metrics.overdueCount} gecikmiş ve ${metrics.pendingCount} bekleyen aidat (${formatCurrency(metrics.pendingOrOverdueAmount)}) için kibar ve ikna edici bir veli bilgilendirme planı hazırlar mısın?`,
+      },
+      {
+        id: 'act-attendance',
+        title: topRisk
+          ? `${topRisk.athleteName} (${topRisk.groupName}) için birebir devam kontrolü`
+          : 'Devamsızlık gösteren sporcularla birebir iletişim kurun',
+        category: 'Elde Tutma',
+        impactNote: `${highOrMediumRiskCount} takip kaydı`,
+        detail: topRisk
+          ? `Devam oranı %${topRisk.attendanceRate} seviyesinde. Veli ${topRisk.parentName} ile kısa bir telefon/mesaj görüşmesi üye kaybını önleyecektir.`
+          : 'Tüm sporcuların devam oranı yüksek seviyede seyrediyor; aylık düzenli geri bildirimle bu istikrarı koruyun.',
+        aiPrompt: `${topRisk ? `${topRisk.groupName} grubundaki ${topRisk.athleteName} (%${topRisk.attendanceRate} devam)` : 'Devamsızlığı düşen sporcular'} için antrenör ve veli iletişim önerisi sunar mısın?`,
+      },
+      {
+        id: 'act-lab-reports',
+        title: 'SportsFly Lab performans karnelerini velilerle düzenli paylaşın',
+        category: 'Veli Memnuniyeti',
+        impactNote: `${metrics.labReportCount} hazır karne`,
+        detail: 'Ölçüm karnesi paylaşılan gruplarda dönem yenileme oranı ortalama %14 daha yüksek gerçekleşmektedir. PDF karneleri ilgili velilere iletin.',
+        aiPrompt: 'SportsFly Lab fiziksel ölçüm karnelerini velilere sunarken üyelik yenilemesini güçlendirecek 3 maddelik sunum önerisi yazar mısın?',
+      },
+      {
+        id: 'act-capacity',
+        title: 'Boş saha kapasitesini deneme antrenmanlarıyla doldurun',
+        category: 'Büyüme',
+        impactNote: `%${metrics.occupancyPct} doluluk`,
+        detail: `Mevcut kapasitenin %${100 - metrics.occupancyPct}’lik boşluğu için hafta sonu ücretsiz deneme seansı açarak yeni kayıt dönüşümü sağlayabilirsiniz.`,
+        aiPrompt: `%${metrics.occupancyPct} doluluk oranındaki şubemiz için yeni öğrenci kazandıracak dengeli bir deneme antrenmanı kampanyası kurgular mısın?`,
+      },
+    ];
+    return items;
+  }, [riskRecords, metrics, highOrMediumRiskCount]);
+
+  // Initial welcome message grounded in selected club scope
+  const [aiChatMessages, setAiChatMessages] = useState<ChatMessage[]>(() => [
     {
-      sender: 'user',
-      text: 'Which batch currently has the highest risk of non-renewals?',
-      time: '10:42',
-    },
-    {
+      id: 'init-1',
       sender: 'ai',
-      text: 'U12 Basketbol Okulu (Cumartesi 10:00) şu anda %24 terk riski taşımaktadır. Son 2 haftadır 4 öğrenci antrenmanlara katılmadı ve aidat yenileme süresi 5 gün geçti. Velilerine otomatik yoklama hatırlatması gönderilmesi önerilir.',
-      time: '10:42',
+      text: 'Kulüp verileriniz analiz edildi. Sağdaki hızlı sorulardan birini seçebilir veya devamsızlık, aidat tahsilatı ve dönem yenileme hedefleriniz hakkında doğrudan soru sorabilirsiniz.',
+      time: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
 
-  // Auto-scroll to bottom of chat on new message
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
   }, [aiChatMessages, isAnalyzing]);
 
-  // Mock Churn Risk Data
-  const [atRiskList] = useState<RiskItem[]>([
-    {
-      id: 'risk-1',
-      batchName: 'U12 Basketbol Okulu (Cumartesi 10:00)',
-      riskLevel: 'Yuksek',
-      absentCount: 4,
-      overdueDays: 5,
-      churnProbabilityPercent: 24,
-      suggestedAction: 'Velilere "Devam Takibi & Motivasyon" mesajı iletilsin.',
-    },
-    {
-      id: 'risk-2',
-      batchName: 'Yüzme Başlangıç Seviyesi (Pazar 11:30)',
-      riskLevel: 'Yuksek',
-      absentCount: 3,
-      overdueDays: 8,
-      churnProbabilityPercent: 19,
-      suggestedAction: 'Havuz bakım süreci tamamlandı duyurusu yapılsın.',
-    },
-    {
-      id: 'risk-3',
-      batchName: 'U14 Voleybol Akademi (Hafta İçi 17:00)',
-      riskLevel: 'Orta',
-      absentCount: 2,
-      overdueDays: 2,
-      churnProbabilityPercent: 9,
-      suggestedAction: 'Gelişim karnesi veli e-postası ile paylaşılsın.',
-    },
-    {
-      id: 'risk-4',
-      batchName: 'Jimnastik Minikler (Cumartesi 14:00)',
-      riskLevel: 'Dusuk',
-      absentCount: 1,
-      overdueDays: 0,
-      churnProbabilityPercent: 3,
-      suggestedAction: 'Aylık rozet ödüllendirmesi gönderilsin.',
-    },
-  ]);
+  const handleOpenDraft = (rec: AthleteRiskRecord) => {
+    setDraftTarget(rec);
+    const defaultMsg =
+      rec.paymentStatus === 'Gecikti'
+        ? `Sayın ${rec.parentName}, ${rec.athleteName} adlı sporcumuzun ${rec.groupName} çalışmalarındaki son durumu hakkında bilgi vermek isteriz. Son dönem devamlılığı %${rec.attendanceRate} olarak görünmektedir ve ${formatCurrency(rec.monthlyFee)} tutarındaki dönem aidatı kaydı gecikmiş görünmektedir. Uygun olduğunuzda antrenman programını netleştirmek için bizimle iletişime geçmenizi rica ederiz.`
+        : `Sayın ${rec.parentName}, ${rec.athleteName} adlı sporcumuzun ${rec.groupName} antrenmanlarındaki gelişimini yakından takip ediyoruz. Son haftalardaki devam oranı %${rec.attendanceRate} seviyesinde olup düzenli katılımı gelişimi için önem taşımaktadır. Önümüzdeki seanslarda görüşmek üzere iyi günler dileriz.`;
+    setDraftMessageText(defaultMsg);
+    setCopiedDraft(false);
+  };
+
+  const handleCopyDraft = () => {
+    if (!draftMessageText.trim()) return;
+    navigator.clipboard?.writeText(draftMessageText);
+    setCopiedDraft(true);
+    setTimeout(() => setCopiedDraft(false), 2000);
+    notify('Veli iletişim taslağı panoya kopyalandı.');
+  };
+
+  const handleMarkContacted = (rec: AthleteRiskRecord) => {
+    const stamp = new Date().toLocaleDateString('tr-TR');
+    const next = { ...contactedMap, [rec.id]: stamp };
+    setContactedMap(next);
+    try {
+      localStorage.setItem(CONTACTED_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // ignore storage quota
+    }
+    setDraftTarget(null);
+    notify(`${rec.parentName} için iletişim kaydı "${stamp}" olarak işaretlendi.`);
+  };
+
+  const handleToggleActionCompleted = (id: string) => {
+    setCompletedActions((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try {
+        localStorage.setItem(COMPLETED_ACTIONS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
+  const handleCopyAiMessage = (msgId: string, text: string) => {
+    navigator.clipboard?.writeText(text);
+    setCopiedMsgId(msgId);
+    setTimeout(() => setCopiedMsgId(null), 1800);
+    notify('Analiz metni panoya kopyalandı.');
+  };
+
+  const handleResetChat = () => {
+    setAiChatMessages([
+      {
+        id: `reset-${Date.now()}`,
+        sender: 'ai',
+        text: 'Sohbet sıfırlandı. Seçili şube verilerine göre yeni bir analiz talebi gönderebilirsiniz.',
+        time: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
+      },
+    ]);
+  };
 
   const handleAskAi = async (customPrompt?: string) => {
-    const promptToSend = customPrompt || userQuery;
-    if (!promptToSend.trim()) return;
+    const promptToSend = (customPrompt ?? userQuery).trim();
+    if (!promptToSend || isAnalyzing) return;
 
-    const newMsg = {
-      sender: 'user' as const,
-      text: promptToSend,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    setAiChatMessages((prev) => [...prev, newMsg]);
-    setUserQuery('');
+    const nowTime = new Date().toLocaleTimeString('tr-TR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    setAiChatMessages((prev) => [
+      ...prev,
+      {
+        id: `u-${Date.now()}`,
+        sender: 'user',
+        text: promptToSend,
+        time: nowTime,
+      },
+    ]);
+    if (!customPrompt) setUserQuery('');
     setIsAnalyzing(true);
 
     try {
@@ -128,12 +613,12 @@ export const SportsFlyIntelligenceView: React.FC<SportsFlyIntelligenceViewProps>
         body: JSON.stringify({
           prompt: promptToSend,
           academyContext: {
-            totalActiveStudents: 142,
-            activeBatches: 8,
-            monthlyRenewalRate: '88.4%',
-            atRiskStudentsCount: 6,
-            avgAttendancePercent: '84%',
-            monthlyRevenueTry: '148,500 ₺',
+            totalActiveStudents: metrics.totalRoster,
+            activeBatches: metrics.activeBranchCount,
+            monthlyRenewalRate: `%${metrics.estimatedRenewalRate}`,
+            atRiskStudentsCount: highOrMediumRiskCount,
+            avgAttendancePercent: `%${metrics.avgAttendance}`,
+            monthlyRevenueTry: formatCurrency(metrics.monthlyRevenue),
           },
         }),
       });
@@ -143,21 +628,36 @@ export const SportsFlyIntelligenceView: React.FC<SportsFlyIntelligenceViewProps>
         setAiChatMessages((prev) => [
           ...prev,
           {
+            id: `a-${Date.now()}`,
             sender: 'ai',
             text: data.analysis,
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            time: new Date().toLocaleTimeString('tr-TR', {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
           },
         ]);
       } else {
         throw new Error('Yanıt alınamadı');
       }
-    } catch (err) {
+    } catch {
+      const topRisk = riskRecords[0];
+      const fallbackText = topRisk
+        ? `Mevcut verilere göre öncelikli takip gerektiren kayıt: ${topRisk.athleteName} (${topRisk.groupName} · Devam %${topRisk.attendanceRate}). Seçili kapsamda ${highOrMediumRiskCount} takip kaydı ve ${formatCurrency(metrics.pendingOrOverdueAmount)} açık aidat bakiyesi bulunmaktadır. İlgili velilere devam ve ödeme hatırlatması gönderilmesi önerilir.`
+        : 'Seçili şubede tüm aktif sporcular düzenli devam göstermektedir. Aylık gelişim karnelerinin paylaşılması mevcut %' +
+          metrics.estimatedRenewalRate +
+          ' yenileme oranını koruyacaktır.';
+
       setAiChatMessages((prev) => [
         ...prev,
         {
+          id: `a-${Date.now()}`,
           sender: 'ai',
-          text: 'SportsFly Intelligence analizi tamamlandı: U12 grubunda devamsızlık gösteren 4 veliye otomatik WhatsApp/SMS motivasyon hatırlatması iletmeniz üye kaybını %80 oranında engelleyecektir.',
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          text: fallbackText,
+          time: new Date().toLocaleTimeString('tr-TR', {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
         },
       ]);
     } finally {
@@ -165,519 +665,770 @@ export const SportsFlyIntelligenceView: React.FC<SportsFlyIntelligenceViewProps>
     }
   };
 
-  const handleSendReminderAction = (item: RiskItem) => {
-    if (onToast) {
-      onToast(`"${item.batchName}" grubu velilerine AI destekli devam hatırlatması gönderildi!`);
-    } else {
-      alert(`"${item.batchName}" grubu velilerine AI destekli devam hatırlatması gönderildi!`);
-    }
+  const handleRefreshData = () => {
+    setSubeler(getStoredSubeler());
+    setSporcular(getStoredSubeSporcular());
+    setGelirGider(getStoredSubeGelirGider());
+    notify('Kulüp ve şube analiz verileri güncellendi.');
   };
 
+  const selectedSubeLabel =
+    selectedSubeId === 'all'
+      ? 'Tüm Şubeler (Konsolide)'
+      : subeler.find((s) => s.id === selectedSubeId)?.ad || 'Seçili Şube';
+
   return (
-    <div className="space-y-8 animate-in fade-in duration-200">
-      {/* SECTION 1: VIBRANT HERO INTRO BANNER (Yenilenmiş Canlı Gradyan Görünüm) */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 sm:p-8 rounded-3xl border border-indigo-900/50 shadow-2xl relative overflow-hidden">
-        {/* Ambient Glows */}
-        <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-0 w-80 h-80 bg-sky-500/15 rounded-full blur-3xl pointer-events-none" />
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* Subtle Internal Notice Toast (if parent onToast wasn't supplied) */}
+      {internalNotice && (
+        <div className="fixed top-20 right-4 z-50 bg-slate-900 dark:bg-slate-800 text-white px-4 py-2.5 rounded-xl shadow-lg border border-slate-700 text-xs font-medium flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{internalNotice}</span>
+        </div>
+      )}
 
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
-          <div className="space-y-2.5 max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs font-black uppercase tracking-wider">
-              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Yapay Zeka Destekli Büyüme Engine</span>
+      {/* TOP WORKSPACE BAR */}
+      <div className="bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200/90 dark:border-slate-800 px-5 py-4 shadow-xs">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <span>Analitik &amp; Karar Desteği</span>
+              <span aria-hidden="true">/</span>
+              <span className="text-slate-700 dark:text-slate-300 font-medium">
+                {selectedSubeLabel}
+              </span>
             </div>
-
-            <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-              SportsFly Intelligence.
+            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
+              SportsFly Intelligence
             </h1>
-
-            <p className="text-slate-200 text-xs sm:text-sm leading-relaxed font-normal">
-              Akademinizin entegre büyüme asistanı. Yapay zeka destekli analizler, yenilemeleri öngörür, üye kaybını belirler ve üye tutma oranını ve performansı artırmak için önerilerde bulunur.
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+              Üye devamlılığı, terk riski ve aylık yenileme öngörülerini şube verileriniz üzerinden takip edin.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 shrink-0">
-            <div className="bg-white/10 backdrop-blur-md px-4.5 py-3 rounded-2xl border border-white/20 text-center shadow-sm">
-              <div className="text-xs font-bold text-slate-300">Yenileme Oranı</div>
-              <div className="text-xl font-black text-emerald-400">%88.4</div>
-            </div>
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            {isSuperAdmin && (
+              <div className="flex items-center gap-2 bg-slate-50 dark:bg-[#162238] border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
+                <Building2 className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
+                <select
+                  value={selectedSubeId}
+                  onChange={(e) => setSelectedSubeId(e.target.value)}
+                  aria-label="Şube Kapsamı"
+                  className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none cursor-pointer pr-1"
+                >
+                  <option value="all" className="dark:bg-slate-900">
+                    Tüm Şubeler (Konsolide)
+                  </option>
+                  {subeler.map((s) => (
+                    <option key={s.id} value={s.id} className="dark:bg-slate-900">
+                      {s.ad}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
-            <div className="bg-white/10 backdrop-blur-md px-4.5 py-3 rounded-2xl border border-white/20 text-center shadow-sm">
-              <div className="text-xs font-bold text-slate-300">Terk Riski</div>
-              <div className="text-xl font-black text-rose-400">6 Sporcu</div>
-            </div>
+            <button
+              type="button"
+              onClick={handleRefreshData}
+              className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#162238] hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Verileri Güncelle</span>
+            </button>
 
-            <div className="bg-white/10 backdrop-blur-md px-4.5 py-3 rounded-2xl border border-white/20 text-center shadow-sm">
-              <div className="text-xs font-bold text-slate-300">Tahmini Gelir</div>
-              <div className="text-xl font-black text-sky-400">₺148.5K</div>
-            </div>
+            <button
+              type="button"
+              onClick={() =>
+                handleAskAi(
+                  `${selectedSubeLabel} için mevcut devamlılık, geciken aidatlar ve aylık yenileme öngörüsü özetini çıkarır mısın?`
+                )
+              }
+              disabled={isAnalyzing}
+              className="px-4 py-2 rounded-xl bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60"
+            >
+              <span>Yönetici Özeti Oluştur</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </div>
 
-      {/* SECTION 2: PROMINENT AI CHAT CONSOLE & METRIC CARD GRID (Görünürlüğü Yüksek Şık Derin Mavi/Siyah Zemin) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        
-        {/* LEFT / CENTER: HIGH-VISIBILITY SPACIOUS AI CHAT CONSOLE */}
-        <div className="lg:col-span-8 bg-[#0c1322] border-2 border-emerald-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 backdrop-blur-xl relative overflow-hidden flex flex-col justify-between min-h-[520px]">
-          {/* Ambient Corner Glow */}
-          <div className="absolute -top-12 -right-12 w-56 h-56 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+      {/* 4-COLUMN SUMMARY KPI GRID */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200/90 dark:border-slate-800 p-4 shadow-2xs flex flex-col justify-between">
+          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            Tahmini Yenileme Oranı
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2">
+            <span className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tabular-nums">
+              %{metrics.estimatedRenewalRate}
+            </span>
+            <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400 tabular-nums">
+              Tahsilat %{metrics.collectionRate}
+            </span>
+          </div>
+          <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+            Ortalama antrenman devamlılığı: %{metrics.avgAttendance}
+          </div>
+        </div>
 
-          {/* Console Header */}
-          <div className="flex items-center justify-between pb-3.5 border-b border-white/10 relative z-10">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 flex items-center justify-center font-black shadow-lg shadow-emerald-500/20 shrink-0">
-                <Zap className="w-6 h-6 fill-slate-950 text-slate-950" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-black text-white tracking-tight">Straty</h3>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 uppercase">
-                    Your AI Analyst
-                  </span>
-                </div>
-                <div className="text-xs text-slate-400 font-medium">Spor Akademisi Yapay Zeka Büyüme &amp; Retention Danışmanı</div>
-              </div>
-            </div>
+        <div className="bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200/90 dark:border-slate-800 p-4 shadow-2xs flex flex-col justify-between">
+          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            Takip Gerektiren Kayıtlar
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2">
+            <span className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tabular-nums">
+              {highOrMediumRiskCount} Sporcu
+            </span>
+            <span
+              className={`text-xs font-semibold tabular-nums ${
+                highOrMediumRiskCount > 0
+                  ? 'text-rose-700 dark:text-rose-400'
+                  : 'text-emerald-700 dark:text-emerald-400'
+              }`}
+            >
+              {metrics.overdueCount > 0
+                ? `${metrics.overdueCount} gecikmiş aidat`
+                : 'Öncelik normal'}
+            </span>
+          </div>
+          <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+            Risk altındaki bakiye: {formatCurrency(metrics.pendingOrOverdueAmount)}
+          </div>
+        </div>
 
-            <div className="flex items-center gap-2 bg-emerald-950/80 border border-emerald-500/40 px-3 py-1.5 rounded-xl text-emerald-400 text-xs font-bold shadow-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              <span>Gemini 3.8 Flash Active</span>
+        <div className="bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200/90 dark:border-slate-800 p-4 shadow-2xs flex flex-col justify-between">
+          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            Aktif Sporcu &amp; Doluluk
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2">
+            <span className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tabular-nums">
+              {metrics.totalRoster} / {metrics.totalCapacity}
+            </span>
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-300 tabular-nums">
+              %{metrics.occupancyPct} dolu
+            </span>
+          </div>
+          <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+            {scopedSubeler.length} şube · {metrics.activeBranchCount} aktif branş
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200/90 dark:border-slate-800 p-4 shadow-2xs flex flex-col justify-between">
+          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            Aylık Tahmini Gelir
+          </div>
+          <div className="mt-2 flex items-baseline justify-between gap-2">
+            <span className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tabular-nums">
+              {formatCurrency(metrics.monthlyRevenue)}
+            </span>
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-300 tabular-nums">
+              {scopedGelirGider.filter((g) => g.type === 'Gelir').length} kalem
+            </span>
+          </div>
+          <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
+            Son dönem şube ciro ve yenileme projeksiyonu
+          </div>
+        </div>
+      </div>
+
+      {/* MAIN 2-COLUMN WORKSPACE: ANALYTICAL WORKBENCH (LEFT) + AI ANALYST PANEL (RIGHT) */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+        {/* LEFT COLUMN (7 COLS): ACTIONABLE TABS & DATA TABLES */}
+        <div className="xl:col-span-7 space-y-4">
+          {/* Segmented Navigation Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200/90 dark:border-slate-800 p-2 shadow-2xs">
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setActiveTab('risk')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  activeTab === 'risk'
+                    ? 'bg-slate-900 text-white dark:bg-blue-600'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/70'
+                }`}
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>Risk &amp; Devam Takibi ({highOrMediumRiskCount})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('forecast')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  activeTab === 'forecast'
+                    ? 'bg-slate-900 text-white dark:bg-blue-600'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/70'
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span>Gelir &amp; Yenileme Projeksiyonu</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('actions')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  activeTab === 'actions'
+                    ? 'bg-slate-900 text-white dark:bg-blue-600'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/70'
+                }`}
+              >
+                <ListChecks className="w-3.5 h-3.5" />
+                <span>Öncelikli Aksiyonlar ({actionPlans.length})</span>
+              </button>
             </div>
           </div>
 
-          {/* Chat Messages Stream Area (Sohbet Akışı) */}
-          <div
-            ref={chatScrollRef}
-            className="flex-1 overflow-y-auto space-y-4 pr-2 py-2 max-h-[380px] min-h-[280px] scrollbar-thin scrollbar-thumb-slate-800"
-          >
-            {aiChatMessages.map((msg, idx) => (
-              <div
-                key={idx}
-                className={`flex items-start gap-3 ${msg.sender === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
-              >
-                {/* Avatar Icon */}
-                <div
-                  className={`w-9 h-9 rounded-2xl flex items-center justify-center font-black shrink-0 text-xs shadow-md ${
-                    msg.sender === 'user'
-                      ? 'bg-sky-500 text-white'
-                      : 'bg-emerald-500 text-slate-950'
-                  }`}
-                >
-                  {msg.sender === 'user' ? 'Siz' : <Bot className="w-5 h-5 text-slate-950" />}
+          {/* TAB 1: RISK & ATTENDANCE TABLE */}
+          {activeTab === 'risk' && (
+            <div className="bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-xs overflow-hidden">
+              {/* Toolbar */}
+              <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="relative flex-1 max-w-xs">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Sporcu, grup veya veli ara..."
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-blue-600"
+                  />
                 </div>
 
-                {/* Message Content Bubble */}
-                <div
-                  className={`max-w-[85%] rounded-3xl p-4 leading-relaxed text-xs sm:text-sm font-medium shadow-md ${
-                    msg.sender === 'user'
-                      ? 'bg-sky-600 text-white font-bold rounded-tr-none'
-                      : 'bg-[#131f37] text-slate-100 border border-slate-700/80 rounded-tl-none whitespace-pre-wrap'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-[10px] opacity-75 mb-1.5 font-bold">
-                    <span>{msg.sender === 'user' ? 'Kulüp Yöneticisi' : 'SportsFly AI Analisti'}</span>
-                    <span>{msg.time}</span>
-                  </div>
-                  <div className="leading-relaxed">{msg.text}</div>
+                <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/70 rounded-lg">
+                  {(
+                    [
+                      { key: 'all', label: 'Tümü' },
+                      { key: 'Yuksek', label: 'Yüksek' },
+                      { key: 'Orta', label: 'Orta' },
+                      { key: 'Dusuk', label: 'İzlenen' },
+                    ] as const
+                  ).map((f) => (
+                    <button
+                      key={f.key}
+                      type="button"
+                      onClick={() => setRiskFilter(f.key)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                        riskFilter === f.key
+                          ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-            ))}
+
+              {/* Inline Parent Message Draft Drawer when active */}
+              {draftTarget && (
+                <div className="p-4 bg-slate-50 dark:bg-[#162238] border-b border-slate-200 dark:border-slate-700 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 dark:text-white">
+                        Veli İletişim Taslağı — {draftTarget.parentName}
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+                        Sporcu: {draftTarget.athleteName} · Tel: {draftTarget.parentPhone}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDraftTarget(null)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                      aria-label="Taslağı Kapat"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <textarea
+                    rows={3}
+                    value={draftMessageText}
+                    onChange={(e) => setDraftMessageText(e.target.value)}
+                    className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-100 leading-relaxed focus:outline-none focus:border-blue-600"
+                  />
+
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCopyDraft}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {copiedDraft ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                      <span>{copiedDraft ? 'Kopyalandı' : 'Metni Kopyala'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMarkContacted(draftTarget)}
+                      className="px-3.5 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Görüşüldü İşaretle</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* High-Density Table */}
+              {filteredRiskRecords.length === 0 ? (
+                <div className="p-10 text-center space-y-2">
+                  <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                    Filtreye uygun sporcu kaydı bulunamadı
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Arama terimini temizleyerek veya tüm risk seviyelerini seçerek listeyi görüntüleyebilirsiniz.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setRiskFilter('all');
+                    }}
+                    className="mt-2 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                  >
+                    Filtreyi Sıfırla
+                  </button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/40 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                        <th className="py-2.5 px-4">Sporcu &amp; Grup</th>
+                        <th className="py-2.5 px-3 text-right">Devam</th>
+                        <th className="py-2.5 px-3">Aidat</th>
+                        <th className="py-2.5 px-3">Risk</th>
+                        <th className="py-2.5 px-4 text-right">İşlem</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-xs">
+                      {filteredRiskRecords.map((item) => {
+                        const contactedDate = contactedMap[item.id];
+                        return (
+                          <tr
+                            key={item.id}
+                            className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
+                          >
+                            <td className="py-3 px-4">
+                              <div className="font-semibold text-slate-900 dark:text-slate-100">
+                                {item.athleteName}
+                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                {item.groupName} · {item.branch}
+                              </div>
+                              {contactedDate && (
+                                <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium mt-0.5 tabular-nums">
+                                  İletişim kuruldu ({contactedDate})
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="py-3 px-3 text-right font-semibold tabular-nums text-slate-800 dark:text-slate-200">
+                              %{item.attendanceRate}
+                            </td>
+
+                            <td className="py-3 px-3">
+                              <span
+                                className={`font-medium ${
+                                  item.paymentStatus === 'Gecikti'
+                                    ? 'text-rose-700 dark:text-rose-400'
+                                    : item.paymentStatus === 'Bekliyor'
+                                    ? 'text-amber-700 dark:text-amber-400'
+                                    : 'text-slate-600 dark:text-slate-300'
+                                }`}
+                              >
+                                {item.paymentStatus}
+                              </span>
+                              <div className="text-[10px] text-slate-400 tabular-nums">
+                                {formatCurrency(item.monthlyFee)}
+                              </div>
+                            </td>
+
+                            <td className="py-3 px-3">
+                              <div
+                                className={`font-semibold tabular-nums ${
+                                  item.riskLevel === 'Yuksek'
+                                    ? 'text-rose-700 dark:text-rose-400'
+                                    : item.riskLevel === 'Orta'
+                                    ? 'text-amber-700 dark:text-amber-400'
+                                    : 'text-slate-600 dark:text-slate-400'
+                                }`}
+                              >
+                                {RISK_LABEL[item.riskLevel]} (%{item.churnScore})
+                              </div>
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1">
+                                {item.reasonSummary}
+                              </div>
+                            </td>
+
+                            <td className="py-3 px-4 text-right whitespace-nowrap">
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenDraft(item)}
+                                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1 cursor-pointer"
+                                >
+                                  <MessageSquare className="w-3 h-3" />
+                                  <span>Taslak</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleAskAi(
+                                      `${item.athleteName} (${item.groupName}, devam %${item.attendanceRate}, aidat: ${item.paymentStatus}) için üye kaybını önleyecek kısa bir aksiyon planı hazırlar mısın?`
+                                    )
+                                  }
+                                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-blue-600 dark:hover:bg-blue-500 text-white text-[11px] font-semibold cursor-pointer"
+                                >
+                                  AI Analiz
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 2: REVENUE & RENEWAL FORECAST */}
+          {activeTab === 'forecast' && (
+            <div className="bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200/90 dark:border-slate-800 p-5 shadow-xs space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                    Gelir &amp; Üyelik Yenileme Eğrisi
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Son 6 aylık gerçekleşen ciro ile önümüzdeki 3 aylık projeksiyon karşılaştırması.
+                  </p>
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                  Kapsam: <strong className="text-slate-800 dark:text-slate-200">{selectedSubeLabel}</strong>
+                </div>
+              </div>
+
+              <div className="h-60 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={trendChartData}
+                    margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
+                  >
+                    <defs>
+                      <linearGradient id="intelRevFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#486581" stopOpacity={0.22} />
+                        <stop offset="95%" stopColor="#486581" stopOpacity={0.0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                    <XAxis
+                      dataKey="month"
+                      tick={{ fontSize: 11, fill: '#64748b' }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tickFormatter={(v) => `₺${Math.round(v / 1000)}K`}
+                      tick={{ fontSize: 11, fill: '#64748b' }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={52}
+                    />
+                    <Tooltip
+                      formatter={(value: any) => [formatCurrency(Number(value) || 0), 'Aylık Ciro']}
+                      contentStyle={{
+                        backgroundColor: '#0f172a',
+                        border: '1px solid #1e293b',
+                        borderRadius: '10px',
+                        color: '#f8fafc',
+                        fontSize: '12px',
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="gelir"
+                      stroke="#334e68"
+                      strokeWidth={2.5}
+                      fill="url(#intelRevFill)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Clean Projection Table */}
+              <div className="overflow-x-auto border-t border-slate-100 dark:border-slate-800 pt-4">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200/80 dark:border-slate-800 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                      <th className="py-2 pr-3">Dönem</th>
+                      <th className="py-2 px-3 text-right">Yenileme</th>
+                      <th className="py-2 px-3 text-right">Beklenen Üye</th>
+                      <th className="py-2 px-3 text-right">Tahmini Gelir</th>
+                      <th className="py-2 pl-3">Değerlendirme Notu</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                    {projectionRows.map((row) => (
+                      <tr key={row.period}>
+                        <td className="py-2.5 pr-3 font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                          {row.period}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums">
+                          %{row.renewalPct}
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-slate-700 dark:text-slate-300 tabular-nums">
+                          {row.expectedMembers}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-semibold text-slate-900 dark:text-slate-100 tabular-nums">
+                          {formatCurrency(row.projectedRevenue)}
+                        </td>
+                        <td className="py-2.5 pl-3 text-slate-500 dark:text-slate-400">
+                          {row.note}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: PRIORITIZED ACTION PLANS */}
+          {activeTab === 'actions' && (
+            <div className="bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200/90 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 shadow-xs">
+              {actionPlans.map((plan) => {
+                const isDone = Boolean(completedActions[plan.id]);
+                return (
+                  <div
+                    key={plan.id}
+                    className="p-5 flex flex-col sm:flex-row sm:items-start justify-between gap-4"
+                  >
+                    <div className="space-y-1.5 flex-1">
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">
+                          {plan.category}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span className="tabular-nums">{plan.impactNote}</span>
+                        {isDone && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
+                              Tamamlandı
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <h3
+                        className={`text-sm font-bold ${
+                          isDone
+                            ? 'text-slate-400 line-through'
+                            : 'text-slate-900 dark:text-slate-100'
+                        }`}
+                      >
+                        {plan.title}
+                      </h3>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                        {plan.detail}
+                      </p>
+                    </div>
+
+                    <div className="flex sm:flex-col items-center sm:items-end gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleActionCompleted(plan.id)}
+                        className={`px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap ${
+                          isDone
+                            ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400'
+                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>{isDone ? 'Tamamlandı' : 'Uygulandı İşaretle'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAskAi(plan.aiPrompt)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 cursor-pointer whitespace-nowrap"
+                      >
+                        AI ile Detaylandır &rarr;
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT COLUMN (5 COLS): RESTRAINED AI ANALYST CONSOLE */}
+        <div className="xl:col-span-5 bg-white dark:bg-[#111c2e] rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col h-[640px]">
+          {/* Console Header */}
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                AI Analist Konsolu
+              </h2>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                {selectedSubeLabel} verilerine göre soru-cevap ve strateji desteği
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleResetChat}
+              className="p-2 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Sohbeti Sıfırla"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Messages Stream */}
+          <div
+            ref={chatScrollRef}
+            className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-slate-50/40 dark:bg-[#0d1626]"
+          >
+            {aiChatMessages.map((msg) => {
+              const isUser = msg.sender === 'user';
+              return (
+                <div
+                  key={msg.id}
+                  className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
+                >
+                  <div className="flex items-center gap-2 text-[10px] text-slate-400 mb-1 px-1 tabular-nums">
+                    <span className="font-medium text-slate-500 dark:text-slate-400">
+                      {isUser ? 'Yönetici' : 'SportsFly Intelligence'}
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span>{msg.time}</span>
+                  </div>
+
+                  <div
+                    className={`max-w-[92%] rounded-2xl px-4 py-3 ${
+                      isUser
+                        ? 'bg-blue-700 dark:bg-blue-600 text-white text-xs sm:text-[13px] font-medium leading-relaxed'
+                        : 'bg-white dark:bg-[#152238] border border-slate-200/90 dark:border-slate-700/80 text-slate-800 dark:text-slate-100'
+                    }`}
+                  >
+                    {isUser ? (
+                      <span>{msg.text}</span>
+                    ) : (
+                      <div className="space-y-2">
+                        {renderFormattedAiText(msg.text)}
+                        <div className="flex justify-end pt-1 border-t border-slate-100 dark:border-slate-700/60">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyAiMessage(msg.id, msg.text)}
+                            className="text-[11px] text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 flex items-center gap-1 cursor-pointer"
+                          >
+                            {copiedMsgId === msg.id ? (
+                              <Check className="w-3 h-3 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                            <span>{copiedMsgId === msg.id ? 'Kopyalandı' : 'Kopyala'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
 
             {isAnalyzing && (
-              <div className="flex items-start gap-3 animate-in fade-in">
-                <div className="w-9 h-9 rounded-2xl bg-emerald-500 text-slate-950 flex items-center justify-center font-black text-xs">
-                  <Bot className="w-5 h-5 text-slate-950 animate-bounce" />
-                </div>
-                <div className="bg-[#131f37] text-emerald-400 px-4 py-3 rounded-3xl text-xs font-bold flex items-center gap-3 border border-slate-700 shadow-md">
-                  <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
-                  <span>SportsFly AI veritabanınızı tarıyor ve detaylı analiz hazırlıyor...</span>
-                </div>
+              <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-white dark:bg-[#152238] border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 w-fit">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-700 dark:text-blue-400" />
+                <span>Kulüp verileri inceleniyor...</span>
               </div>
             )}
           </div>
 
-          {/* Quick Prompt Suggestions */}
-          <div className="pt-2 border-t border-white/10 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-extrabold text-slate-400 flex items-center gap-1">
-                <HelpCircle className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Hızlı Analiz Soruları:</span>
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          {/* Quick Prompt Presets */}
+          <div className="px-4 pt-3 pb-2 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-[#111c2e]">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
               {[
-                'Which batch currently has the highest risk of non-renewals?',
-                'Gelecek ay kaç üyelik yenilenecek ve ciro tahmini nedir?',
-                'Devamsızlığı artan öğrencilere ne mesaj göndereyim?',
-                'Elite Batch performansı ve üye memnuniyeti nasıl?',
-              ].map((chip, cIdx) => (
+                {
+                  label: 'En riskli gruplar',
+                  prompt: 'Mevcut şubelerde terk riski en yüksek gruplar ve sporcular hangileri?',
+                },
+                {
+                  label: 'Aidat tahsilat planı',
+                  prompt: 'Geciken ve bekleyen aidatlar için nazik ve etkili tahsilat planı öner.',
+                },
+                {
+                  label: 'Gelecek ay ciro öngörüsü',
+                  prompt: 'Gelecek ay beklenen yenileme oranı ve tahmini gelir öngörüsünü özetle.',
+                },
+                {
+                  label: 'Veli geri kazanım mesajı',
+                  prompt: 'Devamsızlığı düşen sporcuların velileri için kısa bir SMS/WhatsApp mesajı yaz.',
+                },
+              ].map((preset) => (
                 <button
-                  key={cIdx}
-                  onClick={() => handleAskAi(chip)}
-                  className="px-3 py-1.5 rounded-xl bg-[#172540] hover:bg-emerald-500/25 text-slate-200 hover:text-emerald-300 border border-slate-700/80 hover:border-emerald-500/50 text-xs font-bold whitespace-nowrap transition-all cursor-pointer shadow-xs shrink-0"
+                  key={preset.label}
+                  type="button"
+                  onClick={() => handleAskAi(preset.prompt)}
+                  disabled={isAnalyzing}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap shrink-0 cursor-pointer transition-colors disabled:opacity-50"
                 >
-                  {chip}
+                  {preset.label}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* High-Visibility Chat Input Bar */}
-          <div className="pt-2 flex items-center gap-2">
+          {/* Input Bar */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleAskAi();
+            }}
+            className="p-4 pt-2 bg-white dark:bg-[#111c2e] rounded-b-2xl flex items-center gap-2"
+          >
             <div className="relative flex-1">
               <input
                 type="text"
                 value={userQuery}
                 onChange={(e) => setUserQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAskAi()}
-                placeholder="Ask me about your academy... (Örn: Hangi grupta terk riski var?)"
-                className="w-full pl-4 pr-10 py-3.5 rounded-2xl bg-[#070d18] border-2 border-slate-800 focus:border-emerald-500 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none transition-all shadow-inner font-semibold"
+                placeholder="Akademi veya şube verileri hakkında soru sorun..."
+                className="w-full pl-3.5 pr-8 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/70 text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-blue-700 dark:focus:border-blue-500"
               />
               {userQuery && (
                 <button
+                  type="button"
                   onClick={() => setUserQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  aria-label="Temizle"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
 
             <button
-              onClick={() => handleAskAi()}
+              type="submit"
               disabled={!userQuery.trim() || isAnalyzing}
-              className={`px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm flex items-center gap-2 shadow-xl transition-all cursor-pointer ${
-                !userQuery.trim() || isAnalyzing
-                  ? 'bg-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
-                  : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 hover:scale-105'
-              }`}
+              className="px-4 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
               <span>Gönder</span>
-              <Send className="w-4 h-4" />
+              <Send className="w-3.5 h-3.5" />
             </button>
-          </div>
-        </div>
-
-        {/* RIGHT: ANALYSIS METRIC CARD & GRAPH */}
-        <div className="lg:col-span-4 space-y-4 flex flex-col justify-between">
-          <div className="rounded-3xl bg-white dark:bg-[#111c2e] text-slate-900 dark:text-white p-5 shadow-xl border border-slate-200 dark:border-slate-800 space-y-4 flex-1 flex flex-col justify-between">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-sm font-black tracking-tight">Analysis</span>
-              </div>
-              <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700">
-                This Month ▾
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="p-3 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/50">
-                <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Elite Batch</div>
-                <div className="text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5 mt-0.5">
-                  <span>₺7,150</span>
-                  <span className="text-emerald-600 dark:text-emerald-400 text-xs font-bold flex items-center">
-                    ▲ <span className="ml-0.5">+18%</span>
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-rose-50/60 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900/50">
-                <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Emerging Batch</div>
-                <div className="text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5 mt-0.5">
-                  <span>₺1,050</span>
-                  <span className="text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center">
-                    ▼ <span className="ml-0.5">-8%</span>
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Monthly Trend SVG Curve */}
-            <div className="space-y-2 pt-1">
-              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 flex items-center justify-between">
-                <span>Aylık Retention Trendi</span>
-                <span className="text-emerald-600 dark:text-emerald-400 font-black">%88.4 Zirve</span>
-              </div>
-
-              <div className="h-20 w-full relative flex items-end">
-                <svg className="w-full h-full overflow-visible" viewBox="0 0 200 50">
-                  <path
-                    d="M 0,35 Q 30,15 60,30 T 120,40 T 160,10 T 200,25"
-                    fill="none"
-                    stroke="#10b981"
-                    strokeWidth="3.5"
-                    strokeLinecap="round"
-                  />
-                  {/* Active Month Highlight Dot */}
-                  <circle cx="90" cy="36" r="6" fill="#10b981" className="animate-ping opacity-75" />
-                  <circle cx="90" cy="36" r="4.5" fill="#10b981" />
-                </svg>
-              </div>
-
-              <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800">
-                <span>Jan</span>
-                <span>Feb</span>
-                <span className="px-2 py-0.5 bg-emerald-500 text-white rounded font-extrabold shadow-2xs">Mar</span>
-                <span>Apr</span>
-                <span>May</span>
-                <span>Jun</span>
-                <span>Jul</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Card (Yenilenmiş Koyu Mavi Gradyanlı Görünüm) */}
-          <div className="p-5 rounded-3xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white border border-slate-800 shadow-xl space-y-2.5">
-            <div className="flex items-center gap-2 text-xs font-black text-emerald-400">
-              <Flame className="w-4 h-4 text-amber-400" />
-              <span>Hızlı Aksiyon Önerisi</span>
-            </div>
-            <p className="text-xs text-slate-300 leading-relaxed font-medium">
-              U12 grubundaki 4 veliye 1-tıkla AI hatırlatma SMS'i atarak potansiyel ₺12,500 yenileme kaybını önleyebilirsiniz.
-            </p>
-            <button
-              onClick={() => {
-                setActiveTab('churn');
-                handleAskAi('U12 grubuna hatırlatma mesajı gönderilmesini başlat.');
-              }}
-              className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition-colors cursor-pointer shadow-md"
-            >
-              Hatırlatmaları İncele
-            </button>
-          </div>
+          </form>
         </div>
       </div>
-
-      {/* SECTION 3: TABS FOR DETAILS */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-2 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center gap-2 overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('overview')}
-          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-            activeTab === 'overview'
-              ? 'bg-slate-900 text-white shadow-sm dark:bg-sky-600'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <Activity className="w-4 h-4" />
-          <span>Genel AI Bakış</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('churn')}
-          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-            activeTab === 'churn'
-              ? 'bg-rose-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <ShieldAlert className="w-4 h-4 text-rose-500" />
-          <span>Terk (Churn) Riski &amp; Uyarılar ({atRiskList.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('forecast')}
-          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-            activeTab === 'forecast'
-              ? 'bg-emerald-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <TrendingUp className="w-4 h-4 text-emerald-400" />
-          <span>Yenileme Öngörüleri</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('recommendations')}
-          className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-            activeTab === 'recommendations'
-              ? 'bg-sky-600 text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          <span>AI Büyüme Önerileri</span>
-        </button>
-      </div>
-
-      {/* SECTION 4: TAB DETAILS */}
-
-      {/* TAB 1: OVERVIEW */}
-      {activeTab === 'overview' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
-              <div className="w-10 h-10 rounded-2xl bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
-                <UserCheck className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-500">Üye Tutma Oranı (Retention Rate)</div>
-                <div className="text-2xl font-black text-slate-900 dark:text-white mt-0.5">%88.4</div>
-              </div>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Geçen aya göre <span className="text-emerald-600 font-bold">+%3.2 artış</span> sağlandı.
-              </p>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
-              <div className="w-10 h-10 rounded-2xl bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 flex items-center justify-center font-bold">
-                <UserX className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-500">Risk Altındaki Üyeler (Churn Risk)</div>
-                <div className="text-2xl font-black text-slate-900 dark:text-white mt-0.5">6 Sporcu</div>
-              </div>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                4 sporcu üst üste 2 ve üzeri antrenmana katılmadı.
-              </p>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
-              <div className="w-10 h-10 rounded-2xl bg-sky-100 dark:bg-sky-950 text-sky-600 dark:text-sky-400 flex items-center justify-center font-bold">
-                <TrendingUp className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-500">Gelecek Ay Tahmini Gelir</div>
-                <div className="text-2xl font-black text-slate-900 dark:text-white mt-0.5">₺148,500</div>
-              </div>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Yapay zeka öngörüsüne göre %92 yenileme gerçekleşecek.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 2: TERK (CHURN) RİSKİ */}
-      {activeTab === 'churn' && (
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-6">
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                <ShieldAlert className="w-5 h-5 text-rose-600" />
-                <span>Yapay Zeka Erken Uyarı &amp; Terk (Churn) Riski Listesi</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Yoklama devamsızlığı ve ödeme gecikmelerine göre yapay zeka tarafından tespit edilen riskli gruplar.
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {atRiskList.map((item) => (
-              <div
-                key={item.id}
-                className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-4"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                        item.riskLevel === 'Yuksek'
-                          ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border border-rose-200'
-                          : item.riskLevel === 'Orta'
-                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-                          : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                      }`}
-                    >
-                      %{item.churnProbabilityPercent} Terk Riski
-                    </span>
-                    <h3 className="font-black text-sm text-slate-900 dark:text-white">{item.batchName}</h3>
-                  </div>
-
-                  <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-4">
-                    <span>Devamsız Sporcu: <strong className="text-slate-800 dark:text-slate-200">{item.absentCount} Kişi</strong></span>
-                    <span>Geciken Aidat: <strong className="text-slate-800 dark:text-slate-200">{item.overdueDays} Gün</strong></span>
-                  </div>
-
-                  <p className="text-xs text-slate-600 dark:text-slate-300 font-medium">
-                    💡 <strong className="text-sky-600 dark:text-sky-400">AI Önerisi:</strong> {item.suggestedAction}
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => handleSendReminderAction(item)}
-                  className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer transition-colors shrink-0"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Hatırlatıcı SMS Gönder</span>
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: FORECAST */}
-      {activeTab === 'forecast' && (
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-6">
-          <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
-            <h2 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-emerald-600" />
-              <span>Gelecek 6 Aylık Üyelik Yenileme &amp; Retention Öngörüleri</span>
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Geçmiş üyelik kalıcılığı ve devam oranlarına dayalı yapay zeka projeksiyonu.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[
-              { month: 'Kasım 2026', percent: 92, count: '131 / 142', income: '₺152,000' },
-              { month: 'Aralık 2026', percent: 89, count: '126 / 142', income: '₺146,500' },
-              { month: 'Ocak 2027', percent: 86, count: '122 / 142', income: '₺141,800' },
-              { month: 'Şubat 2027', percent: 90, count: '128 / 142', income: '₺149,000' },
-            ].map((f, i) => (
-              <div key={i} className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2">
-                <div className="text-xs font-black text-slate-500 uppercase">{f.month}</div>
-                <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">%{f.percent}</div>
-                <div className="text-xs text-slate-600 dark:text-slate-300 font-bold">Yenileme: {f.count}</div>
-                <div className="text-xs font-mono font-bold text-sky-600">{f.income}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 4: RECOMMENDATIONS */}
-      {activeTab === 'recommendations' && (
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-6">
-          <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
-            <h2 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-amber-500" />
-              <span>Yapay Zeka Destekli Büyüme &amp; Retention Tavsiyeleri</span>
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Akademinizin üye sadakatini ve cirosunu artırmak için uygulayabileceğiniz stratejiler.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 space-y-2">
-              <div className="flex items-center gap-2 font-black text-sm text-amber-900 dark:text-amber-300">
-                <Award className="w-4 h-4 text-amber-600" />
-                <span>1. Dijital Rozet ve Puan Ödüllendirmesi</span>
-              </div>
-              <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed">
-                Son 30 günde devamsızlığı bulunmayan öğrencilere <strong>Sporpuan Yıldız Sporcu Rozeti</strong> vererek veli memnuniyetini %25 oranında artırabilirsiniz.
-              </p>
-            </div>
-
-            <div className="p-5 rounded-2xl bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800/50 space-y-2">
-              <div className="flex items-center gap-2 font-black text-sm text-sky-900 dark:text-sky-300">
-                <Calendar className="w-4 h-4 text-sky-600" />
-                <span>2. Erken Ödeme İndirim Kampanyası</span>
-              </div>
-              <p className="text-xs text-sky-800 dark:text-sky-200 leading-relaxed">
-                Aylık ödemeler yerine 3 aylık peşin ödemelerde %10 indirim sunduğunuzda nakit akışınız %35 daha istikrarlı hale gelecektir.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
