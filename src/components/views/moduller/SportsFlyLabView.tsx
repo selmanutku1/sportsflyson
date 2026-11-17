@@ -611,6 +611,291 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
   >('all');
   const [mappingSearchQuery, setMappingSearchQuery] = useState<string>('');
 
+  // Dış Yazılım Webhook (POST) Entegrasyonu State
+  const [showWebhookPanel, setShowWebhookPanel] = useState<boolean>(false);
+  const [webhookCopied, setWebhookCopied] = useState<boolean>(false);
+  const [isSyncingWebhook, setIsSyncingWebhook] = useState<boolean>(false);
+  const [webhookReceivedCount, setWebhookReceivedCount] = useState<number>(0);
+  const [lastWebhookSyncAt, setLastWebhookSyncAt] = useState<string | null>(null);
+  const [externalSourceUrlInput, setExternalSourceUrlInput] = useState<string>('');
+  const [rawWebhookJsonInput, setRawWebhookJsonInput] = useState<string>('');
+  const [showRawJsonBox, setShowRawJsonBox] = useState<boolean>(false);
+  const processedWebhookBatchIdsRef = useRef<Set<string>>(new Set());
+
+  const activeWebhookPostUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/api/webhooks/sportsfly-lab`
+      : 'https://webapp.sportsfly.com.tr/api/webhooks/sportsfly-lab';
+
+  const ingestWebhookAthleteRows = (
+    rawRows: Record<string, any>[],
+    sourceLabel: string = 'Dış Yazılım Webhook (POST)',
+    silentIfEmpty: boolean = true
+  ) => {
+    const cleanRows = (Array.isArray(rawRows) ? rawRows : []).filter(
+      (r) =>
+        r &&
+        typeof r === 'object' &&
+        !String(r.Sporcu_Adi || r.adSoyad || r.athleteName || '').includes('(Webhook Test)')
+    );
+
+    if (cleanRows.length === 0) {
+      if (!silentIfEmpty) {
+        notify('Webhook kuyruğunda henüz gerçek sporcu verisi bulunmuyor.');
+      }
+      return;
+    }
+
+    const allKeysSet = new Set<string>();
+    cleanRows.forEach((r) => {
+      if (r && typeof r === 'object') {
+        Object.keys(r).forEach((k) => allKeysSet.add(k));
+      }
+    });
+    const headers = Array.from(allKeysSet);
+    const detectedMapping = autoDetectExcelColumnMapping(headers, false);
+    const baseTemplate = reportsRef.current[0] || EMPTY_LAB_REPORT_TEMPLATE;
+    const mappedReports = applyBrandingToReports(
+      buildBatchReportsFromMappedRows(cleanRows, detectedMapping, baseTemplate),
+      schoolBrandingRef.current
+    );
+
+    if (mappedReports.length === 0) return;
+
+    const assignedReports = mappedReports.map((rep, idx) => {
+      const whId = cleanRows[idx]?.Webhook_Row_ID || `wh-${idx}`;
+      return {
+        ...rep,
+        id: `lab-webhook-${String(whId).replace(/[^a-zA-Z0-9_-]/g, '_')}`,
+      };
+    });
+
+    setWebhookReceivedCount(assignedReports.length);
+    setLastWebhookSyncAt(
+      new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+    );
+    setBatchSourceFileName(`${sourceLabel} (${assignedReports.length} Sporcu)`);
+    setBatchGroupTitle(`${sourceLabel} — Sporcu Karneleri`);
+    setBatchReports(assignedReports);
+    setSelectedBatchIds(assignedReports.map((r) => r.id));
+
+    setReports((prev) => {
+      const map = new Map<string, SportsFlyLabReport>();
+      assignedReports.forEach((r) => map.set(r.id, r));
+      prev
+        .filter((r) => !String(r.athleteName || '').includes('(Webhook Test)'))
+        .forEach((r) => {
+          if (!map.has(r.id)) map.set(r.id, r);
+        });
+      const merged = applyBrandingToReports(Array.from(map.values()), schoolBrandingRef.current);
+      reportsRef.current = merged;
+      saveStoredLabReports(merged, schoolBrandingRef.current);
+      return merged;
+    });
+
+    setSelectedReportId(assignedReports[0].id);
+    void saveLabReportsBatchToFirestore(assignedReports);
+    notify(
+      `Dış yazılımdan ${assignedReports.length} gerçek sporcu verisi alındı ve 5 sayfalık karneleri otomatik oluşturuldu.`
+    );
+  };
+
+  const handleSyncWebhookAthletes = async (silentIfEmpty: boolean = false) => {
+    setIsSyncingWebhook(true);
+    try {
+      const res = await fetch('/api/webhooks/sportsfly-lab');
+      if (!res.ok) throw new Error('Webhook uç noktasına ulaşılamadı.');
+      const data = await res.json();
+      const athletes = (Array.isArray(data?.athletes) ? data.athletes : []).filter(
+        (r: any) => !String(r?.Sporcu_Adi || r?.adSoyad || '').includes('(Webhook Test)')
+      );
+      const batches = Array.isArray(data?.batches) ? data.batches : [];
+      batches.forEach((b: any) => {
+        if (b?.batchId) processedWebhookBatchIdsRef.current.add(String(b.batchId));
+      });
+      if (athletes.length > 0) {
+        const latestSchool = batches[0]?.schoolName || 'Dış Yazılım Webhook (POST)';
+        ingestWebhookAthleteRows(athletes, latestSchool, silentIfEmpty);
+      } else if (!silentIfEmpty) {
+        notify(
+          'Henüz dış yazılımdan ulaşan gerçek sporcu verisi yok. Aşağıdaki "Karşı Yazılımın URL\'sinden Çek" veya "JSON Verisi Yapıştır" alanını da kullanabilirsiniz.'
+        );
+      }
+    } catch (err: any) {
+      if (!silentIfEmpty) {
+        notify(err?.message || 'Webhook verileri kontrol edilirken bir hata oluştu.');
+      }
+    } finally {
+      setIsSyncingWebhook(false);
+    }
+  };
+
+  const handlePullFromExternalSoftwareUrl = async () => {
+    const trimmedUrl = externalSourceUrlInput.trim();
+    if (!trimmedUrl) {
+      notify('Lütfen diğer yazılımda görünen API / Webhook URL adresini kutuya yapıştırın.');
+      return;
+    }
+    setIsSyncingWebhook(true);
+    try {
+      // 1. Try direct browser fetch first (carries browser session if same browser)
+      let directSuccess = false;
+      try {
+        const directRes = await fetch(trimmedUrl, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+        if (directRes.ok) {
+          const directJson = await directRes.json();
+          const postRes = await fetch('/api/webhooks/sportsfly-lab', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(directJson),
+          });
+          const postData = await postRes.json();
+          if (postData?.success && Array.isArray(postData.athletes) && postData.athletes.length > 0) {
+            ingestWebhookAthleteRows(
+              postData.athletes,
+              postData.schoolName || 'Dış Yazılım URL Aktarımı',
+              false
+            );
+            directSuccess = true;
+          }
+        }
+      } catch {
+        // Fallback to server-side proxy pull
+      }
+
+      if (!directSuccess) {
+        const proxyRes = await fetch('/api/webhooks/sportsfly-lab/pull', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourceUrl: trimmedUrl }),
+        });
+        const proxyData = await proxyRes.json();
+        if (proxyData?.success && Array.isArray(proxyData.athletes)) {
+          ingestWebhookAthleteRows(
+            proxyData.athletes,
+            proxyData.schoolName || 'Dış Yazılım URL Aktarımı',
+            false
+          );
+        } else {
+          notify(proxyData?.error || 'Karşı URL adresinden sporcu verisi çekilemedi.');
+        }
+      }
+    } catch (err: any) {
+      notify(err?.message || 'Karşı yazılım URL adresinden veri çekilirken hata oluştu.');
+    } finally {
+      setIsSyncingWebhook(false);
+    }
+  };
+
+  const handleImportRawWebhookJson = async () => {
+    const raw = rawWebhookJsonInput.trim();
+    if (!raw) {
+      notify('Lütfen diğer yazılımdan kopyaladığınız JSON sporcu verisini yapıştırın.');
+      return;
+    }
+    setIsSyncingWebhook(true);
+    try {
+      const parsed = JSON.parse(raw);
+      const res = await fetch('/api/webhooks/sportsfly-lab', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed),
+      });
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.athletes)) {
+        ingestWebhookAthleteRows(
+          data.athletes,
+          data.schoolName || 'Dış Yazılım JSON Aktarımı',
+          false
+        );
+        setRawWebhookJsonInput('');
+        setShowRawJsonBox(false);
+      } else {
+        notify(data?.error || 'JSON verisinde sporcu bilgisi bulunamadı.');
+      }
+    } catch {
+      notify('Geçersiz JSON formatı. Lütfen kopyaladığınız veriyi kontrol edin.');
+    } finally {
+      setIsSyncingWebhook(false);
+    }
+  };
+
+  const handleClearWebhookQueue = async () => {
+    setIsSyncingWebhook(true);
+    try {
+      await fetch('/api/webhooks/sportsfly-lab', { method: 'DELETE' });
+      setWebhookReceivedCount(0);
+      setLastWebhookSyncAt(null);
+      setReports((prev) => {
+        const cleaned = prev.filter(
+          (r) => !String(r.athleteName || '').includes('(Webhook Test)')
+        );
+        reportsRef.current = cleaned;
+        saveStoredLabReports(cleaned, schoolBrandingRef.current);
+        return cleaned;
+      });
+      setBatchReports((prev) =>
+        prev.filter((r) => !String(r.athleteName || '').includes('(Webhook Test)'))
+      );
+      notify('Test verileri ve webhook kuyruğu temizlendi.');
+    } catch {
+      notify('Webhook kuyruğu temizlenirken hata oluştu.');
+    } finally {
+      setIsSyncingWebhook(false);
+    }
+  };
+
+  useEffect(() => {
+    // Clean any leftover '(Webhook Test)' reports from local storage on mount
+    setReports((prev) => {
+      const hasTest = prev.some((r) => String(r.athleteName || '').includes('(Webhook Test)'));
+      if (!hasTest) return prev;
+      const cleaned = prev.filter((r) => !String(r.athleteName || '').includes('(Webhook Test)'));
+      const next = cleaned.length > 0 ? cleaned : DEFAULT_LAB_REPORTS;
+      reportsRef.current = next;
+      saveStoredLabReports(next, schoolBrandingRef.current);
+      return next;
+    });
+
+    void handleSyncWebhookAthletes(true);
+
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource('/api/webhooks/sportsfly-lab/stream');
+      es.addEventListener('webhook_athletes', (event: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(event.data || '{}');
+          if (parsed?.action === 'created' && parsed?.latestBatch) {
+            const bId = String(parsed.latestBatch.batchId || '');
+            if (bId && processedWebhookBatchIdsRef.current.has(bId)) return;
+            if (bId) processedWebhookBatchIdsRef.current.add(bId);
+            const rows = Array.isArray(parsed.latestBatch.athletes)
+              ? parsed.latestBatch.athletes
+              : [];
+            if (rows.length > 0) {
+              ingestWebhookAthleteRows(
+                rows,
+                parsed.latestBatch.schoolName || 'Dış Yazılım Webhook (POST)',
+                true
+              );
+            }
+          }
+        } catch {
+          // ignore parse error
+        }
+      });
+    } catch {
+      // ignore SSE error
+    }
+
+    return () => {
+      if (es) es.close();
+    };
+  }, []);
+
   // Karne Arşivi state
   const [archivedReports, setArchivedReports] = useState<SportsFlyLabArchivedReport[]>(() =>
     getStoredLabArchives()
@@ -9111,6 +9396,25 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
               <button
                 type="button"
+                onClick={() => setShowWebhookPanel((prev) => !prev)}
+                className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                  showWebhookPanel
+                    ? 'border-indigo-600 bg-indigo-600 text-white shadow-xs'
+                    : 'border-indigo-200 dark:border-indigo-800 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-200'
+                }`}
+                title="Farklı bir yazılımdan SportsFly Lab karne sistemine POST ile otomatik sporcu verisi çekmek için Webhook URL adresini görüntüle"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5 shrink-0" />
+                <span>Dış Yazılım Webhook URL (POST)</span>
+                {webhookReceivedCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-emerald-500 text-white">
+                    {webhookReceivedCount}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setActiveLabTab('studio')}
                 className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
               >
@@ -9119,6 +9423,156 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               </button>
             </div>
           </div>
+
+          {/* DIŞ YAZILIM WEBHOOK (POST) BAĞLANTI VE ÇİFT YÖNLÜ VERİ AKTARIM PANELİ */}
+          {showWebhookPanel && (
+            <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800/80 bg-indigo-50/50 dark:bg-indigo-950/25 p-4 sm:p-5 space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-indigo-600 text-white">
+                      GERÇEK VERİ MODU AKTİF
+                    </span>
+                    <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                      Dış Yazılım Webhook &amp; Veri Senkronizasyon Merkezi
+                    </h3>
+                    {lastWebhookSyncAt && (
+                      <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                        · Son Veri Alımı: {lastWebhookSyncAt} ({webhookReceivedCount} Sporcu)
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+                    Diğer yazılımdan gerçek sporcu verilerini çekmek için aşağıdaki 3 yöntemden birini kullanabilirsiniz.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleSyncWebhookAthletes(false)}
+                    disabled={isSyncingWebhook}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingWebhook ? 'animate-spin' : ''}`} />
+                    <span>Gelen Gerçek Verileri Kontrol Et</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowRawJsonBox((prev) => !prev)}
+                    className="px-3 py-1.5 rounded-xl border border-indigo-300 dark:border-indigo-700 bg-white hover:bg-indigo-50 dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>JSON Veri Yapıştır</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleClearWebhookQueue}
+                    disabled={isSyncingWebhook}
+                    className="px-3 py-1.5 rounded-xl border border-rose-200 dark:border-rose-800 bg-white hover:bg-rose-50 dark:bg-slate-800 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    title="Test verilerini ve webhook kuyruğunu sıfırla"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Kuyruğu Temizle</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* YÖNTEM 1: SportsFly Lab Webhook URL (Diğer Yazılıma Yapıştırılacak Adres) */}
+              <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="text-xs font-extrabold text-slate-800 dark:text-slate-100">
+                  1. Yöntem: SportsFly Lab Webhook URL&apos;sini Diğer Yazılıma Yapıştırın (POST)
+                </div>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="flex-1 flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 font-mono text-xs text-slate-800 dark:text-slate-100 select-all overflow-x-auto">
+                    <span className="px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-sans font-extrabold text-[10px] shrink-0">
+                      POST
+                    </span>
+                    <span className="truncate">{activeWebhookPostUrl}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(activeWebhookPostUrl);
+                      setWebhookCopied(true);
+                      notify('Hedef Yazılım Webhook URL adresi panoya kopyalandı.');
+                      setTimeout(() => setWebhookCopied(false), 2500);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    {webhookCopied ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-400 dark:text-emerald-600" />
+                        <span>Kopyalandı!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Files className="w-4 h-4" />
+                        <span>Webhook URL&apos;yi Kopyala</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  <strong>Önemli Bilgi:</strong> Diğer yazılımda <em>&quot;Bağlantıyı Test Et&quot;</em> butonuna bastığınızda diğer yazılım yalnızca 1-2 kişilik <strong>test/örnek veri</strong> gönderir. Gerçek sporcuların gelmesi için diğer yazılımda sporcu/ölçüm listesini seçip <strong>&quot;Verileri Gönder / Aktar&quot;</strong> butonuna basmanız veya aşağıdaki 2. Yöntemi kullanmanız gerekir.
+                </p>
+              </div>
+
+              {/* YÖNTEM 2: Diğer Yazılımdaki URL'yi Buraya Yapıştırıp Çek */}
+              <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="text-xs font-extrabold text-slate-800 dark:text-slate-100">
+                  2. Yöntem: Diğer Yazılımdaki API / Webhook URL Adresini Buraya Yapıştırıp Çekin
+                </div>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <input
+                    type="url"
+                    value={externalSourceUrlInput}
+                    onChange={(e) => setExternalSourceUrlInput(e.target.value)}
+                    placeholder="Diğer yazılımda görünen URL adresini buraya yapıştırın (https://...)"
+                    className="flex-1 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handlePullFromExternalSoftwareUrl}
+                    disabled={isSyncingWebhook}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Diğer Yazılımdan Verileri Çek</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* YÖNTEM 3: Ham JSON Veri Yapıştır */}
+              {showRawJsonBox && (
+                <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-300 dark:border-indigo-700 space-y-2">
+                  <div className="text-xs font-extrabold text-slate-800 dark:text-slate-100">
+                    3. Yöntem: Diğer Yazılımdan Kopyaladığınız JSON Verisini Doğrudan Yapıştırın
+                  </div>
+                  <textarea
+                    rows={4}
+                    value={rawWebhookJsonInput}
+                    onChange={(e) => setRawWebhookJsonInput(e.target.value)}
+                    placeholder='[{"adSoyad": "Sporcu Adı", "brans": "Futbol", "boy": 160, "kilo": 50, ...}]'
+                    className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 font-mono text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleImportRawWebhookJson}
+                      disabled={isSyncingWebhook}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>JSON Verisinden Karneleri Oluştur</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Step 1: Drag & Drop Excel Uploader + Batch Group Naming & Archive Settings */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">

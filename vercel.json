@@ -28,6 +28,18 @@
       "destination": "/api/demo-requests?id=:id"
     },
     {
+      "source": "/api/webhooks/sportsfly-lab/stream",
+      "destination": "/api/webhooks-sportsfly-lab?stream=1"
+    },
+    {
+      "source": "/api/webhooks/sportsfly-lab",
+      "destination": "/api/webhooks-sportsfly-lab"
+    },
+    {
+      "source": "/api/sportsfly-lab/webhook",
+      "destination": "/api/webhooks-sportsfly-lab"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
