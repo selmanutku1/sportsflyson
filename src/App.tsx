@@ -212,8 +212,23 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Authentication State: Force true to ensure immediate access for admin users
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
+  // Check if user explicitly logged out in this session or persisted browser storage
+  const isExplicitlyLoggedOut = () => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return (
+        sessionStorage.getItem('sportsfly_auth_active') === 'false' ||
+        localStorage.getItem('sportsfly_auth_active') === 'false'
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  const isExplicitLogoutRef = useRef<boolean>(isExplicitlyLoggedOut());
+
+  // Authentication State: Respect explicit logout; default to true for instant preview access otherwise
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !isExplicitlyLoggedOut());
 
   const [isIntegrationActive, setIsIntegrationActive] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -226,6 +241,12 @@ export default function App() {
   const handleLoginSuccess = async (
     userData: { email?: string; name?: string; photoURL?: string; uid?: string; role?: string } | string
   ) => {
+    isExplicitLogoutRef.current = false;
+    try {
+      sessionStorage.setItem('sportsfly_auth_active', 'true');
+      localStorage.setItem('sportsfly_auth_active', 'true');
+    } catch (e) {}
+
     const userObj =
       typeof userData === 'string'
         ? { role: userData, email: '', name: userData, uid: '', photoURL: undefined }
@@ -250,7 +271,6 @@ export default function App() {
       );
     }
     try {
-      sessionStorage.setItem('sportsfly_auth_active', 'true');
       const isIntegration = userObj.role === 'Entegrasyon Kullanıcısı' || userObj.role === 'LAB Kullanıcısı';
       if (isIntegration) {
         setIsIntegrationActive(true);
@@ -264,13 +284,11 @@ export default function App() {
     } catch (e) {}
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setIsIntegrationActive(false);
-    setSelectedIntegrationId(null);
-    signOut(auth).catch(() => {});
+  const handleLogout = async () => {
+    isExplicitLogoutRef.current = true;
     try {
       sessionStorage.setItem('sportsfly_auth_active', 'false');
+      localStorage.setItem('sportsfly_auth_active', 'false');
       sessionStorage.removeItem('sportsfly_active_page');
       sessionStorage.removeItem('sportsfly_integration_active');
       sessionStorage.removeItem('sportsfly_integration_entry_source');
@@ -283,7 +301,20 @@ export default function App() {
         ch.close();
       }
     } catch (e) {}
-    window.location.reload();
+
+    setIsAuthenticated(false);
+    setIsIntegrationActive(false);
+    setSelectedIntegrationId(null);
+    setCurrentPage('anasayfa');
+
+    try {
+      await Promise.race([
+        signOut(auth),
+        new Promise((resolve) => setTimeout(resolve, 600)),
+      ]);
+    } catch {
+      // ignore signOut errors
+    }
   };
 
   const mainScrollRef = useRef<HTMLElement | null>(null);
@@ -359,16 +390,22 @@ export default function App() {
         authChannel = new BroadcastChannel('sportsfly_auth_channel');
         authChannel.onmessage = (ev) => {
           if (ev.data?.type === 'LOGOUT') {
+            isExplicitLogoutRef.current = true;
             setIsAuthenticated(false);
+            setIsIntegrationActive(false);
+            setSelectedIntegrationId(null);
             try {
               sessionStorage.setItem('sportsfly_auth_active', 'false');
+              localStorage.setItem('sportsfly_auth_active', 'false');
               sessionStorage.removeItem('sportsfly_active_page');
             } catch (e) {}
           } else if (ev.data?.type === 'LOGIN') {
+            isExplicitLogoutRef.current = false;
             setUserProfile(getStoredUserProfile());
             setIsAuthenticated(true);
             try {
               sessionStorage.setItem('sportsfly_auth_active', 'true');
+              localStorage.setItem('sportsfly_auth_active', 'true');
             } catch (e) {}
           }
         };
@@ -392,6 +429,10 @@ export default function App() {
 
     // Firebase Auth session listener & Firestore sync
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      if (isExplicitLogoutRef.current || isExplicitlyLoggedOut()) {
+        setIsAuthenticated(false);
+        return;
+      }
       if (currentUser) {
         setIsAuthenticated(true);
         fetchAndMergeGoogleUsersFromFirestore().catch(() => {});

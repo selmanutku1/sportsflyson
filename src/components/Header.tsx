@@ -301,13 +301,10 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleLogout = () => {
     setShowProfileMenu(false);
-    setLogoutNotification('Güvenli Çıkış Yapıldı. Giriş ekranına yönlendiriliyorsunuz...');
-    setTimeout(() => {
-      setLogoutNotification(null);
-      if (onLogout) {
-        onLogout();
-      }
-    }, 600);
+    setLogoutNotification(null);
+    if (onLogout) {
+      onLogout();
+    }
   };
 
   const getBreadcrumb = (page: NavPage) => {
@@ -1238,6 +1235,20 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
           </div>
+
+          {onLogout && (
+            <button
+              id="header-quick-logout-btn"
+              type="button"
+              onClick={handleLogout}
+              className="w-9 h-9 sm:w-auto sm:px-2.5 sm:py-1.5 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200/70 dark:border-rose-900/50 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shrink-0 text-xs font-semibold"
+              title="Güvenli Çıkış Yap"
+              aria-label="Güvenli Çıkış Yap"
+            >
+              <LogOut className="w-4 h-4 shrink-0" />
+              <span className="hidden xl:inline">{t('header.logout')}</span>
+            </button>
+          )}
         </div>
       </div>
 

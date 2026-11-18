@@ -32,7 +32,6 @@ import {
   KeyRound,
   RefreshCw,
   ArrowLeft,
-  Sparkles,
   Clock,
   CreditCard,
   Zap,
@@ -1090,28 +1089,17 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       <div className="relative z-10 w-full max-w-[440px] bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-7 shadow-xl shadow-slate-200/60 border border-slate-200/80">
         
         {/* 1. Header: Minimal Welcoming Header */}
-        <div className="mb-5 sm:mb-6 text-left pb-3.5 sm:pb-4 border-b border-slate-100 flex items-start justify-between gap-2">
-          <div>
-            <h2 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">
-              {is2FAStepActive ? 'İki Faktörlü Doğrulama (2FA)' : 'Kulüp Girişi'}
-            </h2>
-            <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-relaxed">
-              {is2FAStepActive
-                ? twoFactorMethod === 'email'
-                  ? 'Hesap güvenliğiniz için e-posta adresinize gönderilen doğrulama kodunu girin.'
-                  : 'Hesap güvenliğiniz için SMS veya Authenticator kodunu doğrulayın.'
-                : 'Devam etmek için aşağıdaki adımları takip edin veya Hızlı Panel Girişi butonunu kullanın.'}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => onLoginSuccess('Süper Admin')}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition cursor-pointer shrink-0"
-            title="Yönetici Paneline Doğrudan Geç"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-            <span>Paneli Aç</span>
-          </button>
+        <div className="mb-5 sm:mb-6 text-left pb-3.5 sm:pb-4 border-b border-slate-100">
+          <h2 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">
+            {is2FAStepActive ? 'İki Faktörlü Doğrulama (2FA)' : 'Kulüp Girişi'}
+          </h2>
+          <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-relaxed">
+            {is2FAStepActive
+              ? twoFactorMethod === 'email'
+                ? 'Hesap güvenliğiniz için e-posta adresinize gönderilen doğrulama kodunu girin.'
+                : 'Hesap güvenliğiniz için SMS veya Authenticator kodunu doğrulayın.'
+              : 'Hesabınıza erişmek için aşağıdaki giriş yöntemlerinden birini kullanın.'}
+          </p>
         </div>
 
         {/* Tab Switcher */}
