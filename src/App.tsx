@@ -19,7 +19,14 @@ import {
   isGoogleRestrictedUser,
   isGoogleUserPageUnlocked,
 } from './data/packagePermissions';
-import { getStoredUserProfile, saveStoredUserProfile, UserProfileData, ADMIN_GOOGLE_EMAIL } from './data/userProfile';
+import {
+  getStoredUserProfile,
+  saveStoredUserProfile,
+  clearStoredUserProfile,
+  DEFAULT_USER_PROFILE,
+  UserProfileData,
+  ADMIN_GOOGLE_EMAIL,
+} from './data/userProfile';
 import { auth } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { fetchAndMergeGoogleUsersFromFirestore } from './data/googleUsersAccess';
@@ -212,36 +219,20 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Check if user explicitly logged out in this session or persisted browser storage
-  const isExplicitlyLoggedOut = () => {
-    if (typeof window === 'undefined') return false;
-    try {
-      return (
-        sessionStorage.getItem('sportsfly_auth_active') === 'false' ||
-        localStorage.getItem('sportsfly_auth_active') === 'false'
-      );
-    } catch {
-      return false;
-    }
-  };
+  const isExplicitLogoutRef = useRef<boolean>(false);
+  const manualSessionActiveRef = useRef<boolean>(false);
 
-  const isExplicitLogoutRef = useRef<boolean>(isExplicitlyLoggedOut());
+  // Authentication State: Always start unauthenticated so visitors land on LoginView
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
-  // Authentication State: Respect explicit logout; default to true for instant preview access otherwise
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !isExplicitlyLoggedOut());
-
-  const [isIntegrationActive, setIsIntegrationActive] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('sportsfly_integration_active') === 'true';
-    }
-    return false;
-  });
+  const [isIntegrationActive, setIsIntegrationActive] = useState<boolean>(false);
   const [selectedIntegrationId, setSelectedIntegrationId] = useState<string | null>(null);
 
   const handleLoginSuccess = async (
     userData: { email?: string; name?: string; photoURL?: string; uid?: string; role?: string } | string
   ) => {
     isExplicitLogoutRef.current = false;
+    manualSessionActiveRef.current = true;
     try {
       sessionStorage.setItem('sportsfly_auth_active', 'true');
       localStorage.setItem('sportsfly_auth_active', 'true');
@@ -271,9 +262,13 @@ export default function App() {
       );
     }
     try {
-      const isIntegration = userObj.role === 'Entegrasyon Kullanıcısı' || userObj.role === 'LAB Kullanıcısı';
+      const isIntegration =
+        userObj.role === 'Entegrasyon Kullanıcısı' ||
+        userObj.role === 'LAB Kullanıcısı' ||
+        sessionStorage.getItem('sportsfly_integration_active') === 'true';
       if (isIntegration) {
         setIsIntegrationActive(true);
+        setCurrentPage('entegrasyonlar');
         sessionStorage.setItem('sportsfly_integration_active', 'true');
       }
       if (typeof BroadcastChannel !== 'undefined') {
@@ -286,6 +281,7 @@ export default function App() {
 
   const handleLogout = async () => {
     isExplicitLogoutRef.current = true;
+    manualSessionActiveRef.current = false;
     try {
       sessionStorage.setItem('sportsfly_auth_active', 'false');
       localStorage.setItem('sportsfly_auth_active', 'false');
@@ -295,6 +291,7 @@ export default function App() {
       sessionStorage.removeItem('sportsfly_active_company_profile');
       localStorage.removeItem('sportsfly_integration_entry_source');
       localStorage.removeItem('sportsfly_active_company_profile');
+      clearStoredUserProfile();
       if (typeof BroadcastChannel !== 'undefined') {
         const ch = new BroadcastChannel('sportsfly_auth_channel');
         ch.postMessage({ type: 'LOGOUT' });
@@ -302,6 +299,7 @@ export default function App() {
       }
     } catch (e) {}
 
+    setUserProfile(DEFAULT_USER_PROFILE);
     setIsAuthenticated(false);
     setIsIntegrationActive(false);
     setSelectedIntegrationId(null);
@@ -326,33 +324,13 @@ export default function App() {
         if (activeSessionPage) {
           return activeSessionPage as NavPage;
         }
-        const stored = localStorage.getItem('sportsfly_user_profile_v1');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed?.preferences?.defaultPage) {
-            return parsed.preferences.defaultPage as NavPage;
-          }
-        }
       } catch (e) {}
     }
     return 'anasayfa';
   });
 
   const [currentPlan, setCurrentPlan] = useState<PackagePlanType>(() => getActiveSessionPlan());
-  const [userProfile, setUserProfile] = useState<UserProfileData>(() => {
-    const prof = getStoredUserProfile();
-    if (prof.email?.trim().toLowerCase() === ADMIN_GOOGLE_EMAIL) {
-      const upgraded: UserProfileData = {
-        ...prof,
-        email: ADMIN_GOOGLE_EMAIL,
-        role: 'Süper Admin',
-        hasActivePackage: true,
-      };
-      saveStoredUserProfile(upgraded);
-      return upgraded;
-    }
-    return prof;
-  });
+  const [userProfile, setUserProfile] = useState<UserProfileData>(() => getStoredUserProfile());
 
   // Listen for plan, profile, cross-tab auth, browser back/forward, and Escape key
   useEffect(() => {
@@ -391,9 +369,11 @@ export default function App() {
         authChannel.onmessage = (ev) => {
           if (ev.data?.type === 'LOGOUT') {
             isExplicitLogoutRef.current = true;
+            manualSessionActiveRef.current = false;
             setIsAuthenticated(false);
             setIsIntegrationActive(false);
             setSelectedIntegrationId(null);
+            setUserProfile(DEFAULT_USER_PROFILE);
             try {
               sessionStorage.setItem('sportsfly_auth_active', 'false');
               localStorage.setItem('sportsfly_auth_active', 'false');
@@ -401,6 +381,7 @@ export default function App() {
             } catch (e) {}
           } else if (ev.data?.type === 'LOGIN') {
             isExplicitLogoutRef.current = false;
+            manualSessionActiveRef.current = true;
             setUserProfile(getStoredUserProfile());
             setIsAuthenticated(true);
             try {
@@ -421,25 +402,45 @@ export default function App() {
     window.addEventListener('popstate', handlePopState);
     window.addEventListener('keydown', handleKeyDown);
 
-    // Initial sync of company profile from Firestore
-    fetchCompanyProfileFromFirestore().catch(() => {});
-
     // Subscribe to verified real user approval notifications from Firestore database
     const unsubscribeRealDbNotifs = subscribeToRealDatabaseUserNotifications();
 
     // Firebase Auth session listener & Firestore sync
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
-      if (isExplicitLogoutRef.current || isExplicitlyLoggedOut()) {
+      if (isExplicitLogoutRef.current) {
         setIsAuthenticated(false);
         return;
       }
-      if (currentUser) {
+      if (currentUser && !currentUser.isAnonymous && currentUser.email) {
+        const cleanEmail = currentUser.email.trim().toLowerCase();
+        const isSuperAdminAccount = cleanEmail === ADMIN_GOOGLE_EMAIL;
+        const currentProf = getStoredUserProfile();
+        const syncedProfile: UserProfileData = {
+          ...currentProf,
+          name:
+            currentUser.displayName ||
+            (isSuperAdminAccount
+              ? 'Selman Utku Marmara'
+              : currentProf.name && currentProf.name !== 'Misafir Kullanıcı'
+                ? currentProf.name
+                : 'Kullanıcı'),
+          email: cleanEmail,
+          avatarUrl: currentUser.photoURL || currentProf.avatarUrl,
+          role: isSuperAdminAccount
+            ? 'Süper Admin'
+            : currentProf.role === 'Misafir'
+              ? 'Google Kullanıcısı'
+              : currentProf.role,
+          authProvider: 'google',
+          hasActivePackage: isSuperAdminAccount ? true : currentProf.hasActivePackage,
+        };
+        saveStoredUserProfile(syncedProfile);
+        setUserProfile(syncedProfile);
         setIsAuthenticated(true);
         fetchAndMergeGoogleUsersFromFirestore().catch(() => {});
         fetchCompanyProfileFromFirestore().catch(() => {});
-      } else {
-        // Default to true for instant preview access unless explicitly logged out
-        setIsAuthenticated(true);
+      } else if (!manualSessionActiveRef.current) {
+        setIsAuthenticated(false);
       }
     });
 

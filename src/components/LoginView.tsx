@@ -573,9 +573,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
       const currentProf = getStoredUserProfile();
       const restoredRole =
-        currentProf.role && !currentProf.role.toLowerCase().includes('google')
+        pendingLoginRole ||
+        (currentProf.role && currentProf.role !== 'Misafir' && !currentProf.role.toLowerCase().includes('google')
           ? currentProf.role
-          : 'Süper Admin';
+          : 'Kulüp Yöneticisi');
       saveStoredUserProfile({
         ...currentProf,
         role: restoredRole,
@@ -846,7 +847,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         setUnauthorizedDomainHost(currentHost);
         setShowUnauthorizedDomainModal(true);
         setLoginError(
-          `Vercel / Canlı Alan Adı Yetkisi Eksik: '${currentHost}' adresi Firebase Console Authorized Domains listesinde kayıtlı değil. Aşağıdaki butondan doğrudan Süper Admin olarak giriş yapabilir veya alan adınızı Firebase'e ekleyebilirsiniz.`
+          `Canlı Alan Adı Yetkisi Eksik: '${currentHost}' adresi Firebase Console Authorized Domains listesinde kayıtlı değil. Lütfen alan adınızı Firebase Console'a ekleyin veya standart e-posta/şifre ile giriş yapın.`
         );
       } else if (err?.code === 'auth/popup-blocked') {
         setLoginError('Tarayıcınız Google açılır penceresini (popup) engelledi. Lütfen popuplara izin verin veya Hızlı Giriş seçeneğini kullanın.');
@@ -1141,14 +1142,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               <div className="flex flex-wrap gap-2 pt-1">
                 <button
                   type="button"
-                  onClick={() => handleDirectGoogleLogin(ADMIN_GOOGLE_EMAIL, 'Selman Utku Marmara')}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] shadow-xs cursor-pointer flex items-center gap-1.5 transition-all"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Süper Admin Olarak Anında Giriş Yap</span>
-                </button>
-                <button
-                  type="button"
                   onClick={() => setShowUnauthorizedDomainModal(true)}
                   className="px-3 py-1.5 rounded-lg bg-white border border-rose-200 hover:bg-rose-100/60 text-rose-800 font-bold text-[11px] cursor-pointer flex items-center gap-1.5 transition-all"
                 >
@@ -1298,7 +1291,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           </div>
         ) : loginType === 'integration' ? (
           <IntegrationLoginView
-            onSuccess={() => window.location.reload()}
+            onSuccess={() => {
+              onLoginSuccess({
+                role: 'Entegrasyon Kullanıcısı',
+                email: '',
+                name: 'Entegrasyon Kullanıcısı',
+              });
+            }}
             onError={(err) => setLoginError(err)}
             setIsLoading={setIsLoading}
             onBack={() => setLoginType('standard')}
@@ -3051,42 +3050,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               </div>
             )}
 
-            {/* Quick 1-Click Primary Super Admin Account */}
-            <div className="space-y-2">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                Yetkili Yönetici Hesabı (Önerilen)
-              </span>
-              <button
-                type="button"
-                onClick={() => handleDirectGoogleLogin(ADMIN_GOOGLE_EMAIL, 'Selman Utku Marmara')}
-                className="w-full p-3.5 rounded-2xl border-2 border-blue-500/40 bg-blue-50/40 hover:bg-blue-50 hover:border-blue-600 transition-all flex items-center justify-between group cursor-pointer text-left shadow-xs"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-black text-sm flex items-center justify-center shrink-0 shadow-xs">
-                    SU
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-slate-900 group-hover:text-blue-700 truncate">
-                        Selman Utku Marmara
-                      </span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-800 shrink-0 flex items-center gap-0.5">
-                        <ShieldCheck className="w-3 h-3 inline" /> Süper Admin
-                      </span>
-                    </div>
-                    <div className="text-xs text-slate-500 font-medium truncate">
-                      {ADMIN_GOOGLE_EMAIL}
-                    </div>
-                  </div>
-                </div>
-                <div className="shrink-0 pl-2">
-                  <span className="text-xs font-bold text-blue-600 group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
-                    Giriş <ArrowRight className="w-3.5 h-3.5" />
-                  </span>
-                </div>
-              </button>
-            </div>
-
             {/* Native Firebase OAuth Popup Button */}
             <div className="space-y-2">
               <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
@@ -3162,27 +3125,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               )}
             </div>
 
-            {/* Vercel Tip Note */}
-            {!sessionStorage.getItem('dismissedVercelWarning') && (
-              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200/80 text-[11px] text-amber-900 leading-relaxed flex items-start gap-2 relative">
-                <button 
-                  onClick={() => {
-                    sessionStorage.setItem('dismissedVercelWarning', 'true');
-                    // Force re-render to hide (not ideal but quick fix without state refactor)
-                    setShowGoogleAccountPicker(false);
-                    setTimeout(() => setShowGoogleAccountPicker(true), 0);
-                  }}
-                  className="absolute top-1 right-1 text-amber-600 hover:text-amber-800"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Vercel Kullanıcıları İçin:</strong> Canlı adresiniz Firebase'de yetkili değilse popup engellenebilir. Yukarıdaki <strong>Selman Utku Marmara</strong> kartını kullanabilirsiniz.
-                </span>
-              </div>
-            )}
-
             {/* Cancel Button */}
             <button
               type="button"
@@ -3216,25 +3158,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Quick Bypass Button */}
-            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-2">
-              <div className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>Beklemek İstemiyor Musunuz? Anında Giriş Yapın</span>
-              </div>
-              <p className="text-[11px] text-emerald-800 leading-relaxed">
-                Aşağıdaki butonla Firebase Console alan adı ayarını beklemeden tam Süper Admin yetkisiyle anında panele giriş yapabilirsiniz.
-              </p>
-              <button
-                type="button"
-                onClick={() => handleDirectGoogleLogin(ADMIN_GOOGLE_EMAIL, 'Selman Utku Marmara')}
-                className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md shadow-emerald-600/20 cursor-pointer flex items-center justify-center gap-2 transition-all"
-              >
-                <ShieldCheck className="w-4 h-4" />
-                <span>Süper Admin Olarak Anında Devam Et (Selman Utku Marmara)</span>
               </button>
             </div>
 

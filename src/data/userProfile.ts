@@ -46,32 +46,25 @@ export interface UserProfileData {
 }
 
 export const DEFAULT_USER_PROFILE: UserProfileData = {
-  name: 'Selman Utku',
-  email: 'selmanutkumarmara@gmail.com',
-  phone: '0216 850 1907',
-  role: 'Süper Admin',
-  title: 'SportsFly Kulüp Yöneticisi',
-  club: 'SportsFly Kadıköy Merkez Şube',
-  branch: 'Tüm Branşlar (Basketbol, Voleybol, Yüzme, Futbol)',
+  name: 'Misafir Kullanıcı',
+  email: '',
+  phone: '',
+  role: 'Misafir',
+  title: 'Kulüp Kullanıcısı',
+  club: 'SportsFly',
+  branch: 'Genel',
   avatarColor: 'from-blue-600 to-indigo-600',
-  bio: 'SportsFly Kulüp ve Spor Okulu Yönetim Koordinatörü.',
-  twoFactorEnabled: true,
+  bio: '',
+  twoFactorEnabled: false,
   authProvider: 'standard',
-  hasActivePackage: true,
-  companyName: 'Rota Performans & Sporcu Analiz LAB',
-  companyType: 'analiz_firmasi',
-  companyAuthorizedPerson: 'Selman Utku Marmara',
-  companyCity: 'İstanbul',
-  companyPhone: '0216 850 1907',
-  companyEmail: 'selmanutkumarmara@gmail.com',
-  companyAccessCode: 'LAB-2026',
+  hasActivePackage: false,
   notifications: {
     newRegistrationEmail: true,
-    newRegistrationSms: true,
+    newRegistrationSms: false,
     paymentEmail: true,
     paymentSms: false,
     reviewEmail: true,
-    dailyDigest: true,
+    dailyDigest: false,
   },
   preferences: {
     defaultPage: 'anasayfa',
@@ -84,6 +77,16 @@ export const DEFAULT_USER_PROFILE: UserProfileData = {
 const STORAGE_KEY = 'sportsfly_user_profile_v1';
 
 export const ADMIN_GOOGLE_EMAIL = 'selmanutkumarmara@gmail.com';
+
+export function clearStoredUserProfile(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    window.dispatchEvent(new CustomEvent('sportsfly_profile_updated', { detail: DEFAULT_USER_PROFILE }));
+  } catch (err) {
+    console.error('Failed to clear stored user profile:', err);
+  }
+}
 
 export function getStoredUserProfile(): UserProfileData {
   if (typeof window === 'undefined') {
@@ -103,7 +106,7 @@ export function getStoredUserProfile(): UserProfileData {
 
     const stored = secureStorageGet<Partial<UserProfileData> | null>(STORAGE_KEY, null);
     if (stored && typeof stored === 'object') {
-      const cleanEmail = sanitizeInputString(stored.email || DEFAULT_USER_PROFILE.email, 160);
+      const cleanEmail = sanitizeInputString(stored.email || '', 160);
       const isAdminEmail = cleanEmail.trim().toLowerCase() === ADMIN_GOOGLE_EMAIL;
       const rawRole = sanitizeInputString(stored.role || DEFAULT_USER_PROFILE.role, 60);
       const resolvedRole = isAdminEmail && (rawRole.toLowerCase().includes('google') || !rawRole)
@@ -115,13 +118,13 @@ export function getStoredUserProfile(): UserProfileData {
         ...stored,
         name: sanitizeInputString(stored.name || DEFAULT_USER_PROFILE.name, 100),
         email: cleanEmail,
-        phone: sanitizeInputString(stored.phone || DEFAULT_USER_PROFILE.phone, 32),
+        phone: sanitizeInputString(stored.phone || '', 32),
         role: resolvedRole,
         title: isAdminEmail && (stored.title || '').includes('Paket Seçilmedi')
-          ? DEFAULT_USER_PROFILE.title
+          ? 'SportsFly Kulüp Yöneticisi'
           : sanitizeInputString(stored.title || DEFAULT_USER_PROFILE.title, 100),
         club: isAdminEmail && (stored.club || '').includes('Paket Seçimi')
-          ? DEFAULT_USER_PROFILE.club
+          ? 'SportsFly Kadıköy Merkez Şube'
           : sanitizeInputString(stored.club || (companyData?.companyName || DEFAULT_USER_PROFILE.club), 140),
         hasActivePackage: isAdminEmail ? true : stored.hasActivePackage,
       };
@@ -138,22 +141,19 @@ export function getStoredUserProfile(): UserProfileData {
       }
 
       return baseResult;
-    } else {
-      // First visit on Vercel deployment: return default enriched with company profile
-      if (companyData) {
-        return {
-          ...DEFAULT_USER_PROFILE,
-          club: companyData.companyName || DEFAULT_USER_PROFILE.club,
-          companyName: companyData.companyName,
-          companyType: companyData.companyType,
-          companyLogoUrl: companyData.logoDataUrl,
-          companyAuthorizedPerson: companyData.authorizedPerson,
-          companyCity: companyData.city,
-          companyPhone: companyData.phone,
-          companyEmail: companyData.email,
-          companyAccessCode: companyData.accessCode,
-        };
-      }
+    } else if (companyData) {
+      return {
+        ...DEFAULT_USER_PROFILE,
+        club: companyData.companyName || DEFAULT_USER_PROFILE.club,
+        companyName: companyData.companyName,
+        companyType: companyData.companyType,
+        companyLogoUrl: companyData.logoDataUrl,
+        companyAuthorizedPerson: companyData.authorizedPerson,
+        companyCity: companyData.city,
+        companyPhone: companyData.phone,
+        companyEmail: companyData.email,
+        companyAccessCode: companyData.accessCode,
+      };
     }
   } catch (err) {
     console.error('Failed to parse stored user profile:', err);

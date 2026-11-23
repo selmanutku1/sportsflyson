@@ -3,8 +3,6 @@ import { Package, KeyRound, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getStoredIntegrations } from '../data/entegrasyonlarData';
-import { getStoredUserProfile } from '../data/userProfile';
-import { isSuperAdminUser } from '../data/packagePermissions';
 import { EntegrasyonItem } from '../types';
 import {
   getStoredLocalCompanyProfile,
@@ -22,9 +20,6 @@ interface IntegrationLoginViewProps {
 }
 
 export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSuccess, onError, setIsLoading, onBack }) => {
-  const userProfile = getStoredUserProfile();
-  const isSuperAdmin = isSuperAdminUser(userProfile?.role, userProfile?.email);
-
   const [integrations, setIntegrations] = useState<EntegrasyonItem[]>([]);
   const [selectedIntegrationId, setSelectedIntegrationId] = useState('');
   const [code, setCode] = useState('');
@@ -50,7 +45,7 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
       return;
     }
 
-    if (!isSuperAdmin && !trimmedCode) {
+    if (!trimmedCode) {
       onError('Lütfen geçiş kodunu giriniz.');
       return;
     }
@@ -120,7 +115,7 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
         }
       } catch (e) {}
 
-      const isMatch = isSuperAdmin || validCodes.includes(cleanInput) || cleanInput === '123456' || (selectedItem && cleanInput === selectedItem.name.toUpperCase()) || matchedAny;
+      const isMatch = validCodes.includes(cleanInput) || cleanInput === '123456' || (selectedItem && cleanInput === selectedItem.name.toUpperCase()) || matchedAny;
 
       if (!isMatch) {
         onError('Geçiş kodu hatalı! Lütfen geçerli bir kod giriniz.');
@@ -128,7 +123,7 @@ export const IntegrationLoginView: React.FC<IntegrationLoginViewProps> = ({ onSu
         return;
       }
 
-      if (!isSuperAdmin && !isAllowedForModule) {
+      if (!isAllowedForModule) {
         onError(`"${integrationName}" entegrasyonu için bu geçiş koduna yetki tanımlanmamış / entegrasyon aktif değil.`);
         setIsLoading(false);
         return;
