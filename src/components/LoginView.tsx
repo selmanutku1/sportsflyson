@@ -47,6 +47,7 @@ import { basvurularService } from '../services/firestoreService';
 import {
   registerNewUser,
   authenticateWithEmailPassword,
+  authenticateWithPhonePassword,
   getStoredRegisteredUsers,
   fetchRegisteredUsersFromFirestore,
   saveContractApproval,
@@ -54,8 +55,6 @@ import {
 import { LEGAL_TEXTS, LegalDoc } from '../data/legalTexts';
 import { useLanguage } from '../i18n/LanguageContext';
 import { getStoredUserProfile, saveStoredUserProfile, ADMIN_GOOGLE_EMAIL } from '../data/userProfile';
-import { SporcuItem } from '../types';
-import { INITIAL_SPORCULAR, INITIAL_YONETICILER } from '../data/mockData';
 import { setActiveSessionPlan } from '../data/packagePermissions';
 import {
   ensureFirebaseAuthSession,
@@ -90,8 +89,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   // Inputs
   const [countryCode, setCountryCode] = useState('+90');
   const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('demo@sportsfly.com');
-  const [password, setPassword] = useState('••••••••');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   // Checkboxes
@@ -128,8 +127,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     return typeof window !== 'undefined' ? window.location.hostname : '';
   });
   const [copiedHost, setCopiedHost] = useState<boolean>(false);
-  const [customGoogleEmailInput, setCustomGoogleEmailInput] = useState<string>('');
-  const [showCustomGoogleInput, setShowCustomGoogleInput] = useState<boolean>(false);
   const otpInputRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   // Modals
@@ -293,55 +290,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       console.warn('fetchRegisteredUsersFromFirestore error:', err)
     );
   }, []);
-
-  // Check if phone or email exists in registered database (Registered Users, Sporcular, Yöneticiler, Eğitmenler)
-  const isIdentifierRegisteredInDb = (idVal: string, mode: 'phone' | 'email') => {
-    const rawVal = idVal.trim().toLowerCase();
-    const digits = idVal.replace(/\D/g, '');
-
-    if (!rawVal || rawVal === '+90' || rawVal === '+90 ') return false;
-
-    // 0. Check Persistent Registered Users (Firestore + Local)
-    try {
-      const regList = getStoredRegisteredUsers();
-      const matchedReg = regList.some((u) => {
-        if (mode === 'email') return u.email?.toLowerCase() === rawVal;
-        const uPhoneDigits = (u.phone || '').replace(/\D/g, '');
-        return digits.length >= 7 && (uPhoneDigits.includes(digits.slice(-7)) || digits.includes(uPhoneDigits.slice(-7)));
-      });
-      if (matchedReg) return true;
-    } catch (e) {}
-
-    // 1. Check Sporcular (localStorage & INITIAL_SPORCULAR)
-    try {
-      const saved = localStorage.getItem('sportsfly_sporcular');
-      const list: SporcuItem[] = saved ? JSON.parse(saved) : INITIAL_SPORCULAR;
-      const matched = list.some((s) => {
-        if (mode === 'email') return s.email?.toLowerCase() === rawVal;
-        const sPhoneDigits = (s.phone || '').replace(/\D/g, '');
-        return digits.length >= 7 && (sPhoneDigits.includes(digits.slice(-7)) || digits.includes(sPhoneDigits.slice(-7)));
-      });
-      if (matched) return true;
-    } catch (e) {}
-
-    // 2. Check Yöneticiler
-    const matchedYonetici = INITIAL_YONETICILER.some((y) => {
-      if (mode === 'email') return y.email?.toLowerCase() === rawVal;
-      const yPhoneDigits = (y.phone || '').replace(/\D/g, '');
-      return digits.length >= 7 && (yPhoneDigits.includes(digits.slice(-7)) || digits.includes(yPhoneDigits.slice(-7)));
-    });
-    if (matchedYonetici) return true;
-
-    // 3. Check current stored user profile
-    const stored = getStoredUserProfile();
-    if (mode === 'email' && stored.email?.toLowerCase() === rawVal) return true;
-    if (mode === 'phone' && stored.phone && digits.length >= 7 && stored.phone.replace(/\D/g, '').includes(digits.slice(-7))) return true;
-
-    // Standard demo/test domain aliases
-    if (rawVal.includes('selman') || rawVal.includes('abdullah') || rawVal.includes('admin') || rawVal.includes('example') || rawVal.includes('sporokulu')) return true;
-
-    return false;
-  };
 
   const initiateTwoFactorChallenge = async (
     targetRole: string,
@@ -617,13 +565,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     }
   };
 
-  const [roleModalInfo, setRoleModalInfo] = useState<{
-    title: string;
-    description: string;
-    role: string;
-    badge: string;
-  } | null>(null);
-
   // Unified Google sign in processor (genuine Firebase Auth & Firestore sync)
   const syncGoogleProfileData = async (
     googleEmail: string,
@@ -759,41 +700,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     });
   };
 
-  // Direct Google Login (works 100% reliably on Vercel, localhost, and all preview domains)
-  const handleDirectGoogleLogin = async (
-    googleEmail: string,
-    displayName: string,
-    photoURL?: string,
-    uid?: string
-  ) => {
-    setLoginError(null);
-    setShowGoogleAccountPicker(false);
-    setShowUnauthorizedDomainModal(false);
-    setIsLoading(false);
-
-    const cleanEmail = (googleEmail || '').trim().toLowerCase();
-    const isAdminAccount = cleanEmail === ADMIN_GOOGLE_EMAIL;
-
-    try {
-      await syncGoogleProfileData(
-        cleanEmail,
-        displayName || (isAdminAccount ? 'Selman Utku Marmara' : 'Google Kullanıcısı'),
-        photoURL,
-        uid || (isAdminAccount ? 'admin-google-selman' : `google-${Date.now()}`)
-      );
-    } catch (err) {
-      console.warn('Direct Google login fallback:', err);
-      setIsLoading(false);
-      onLoginSuccess({
-        email: cleanEmail,
-        name: displayName || (isAdminAccount ? 'Selman Utku Marmara' : 'Google Kullanıcısı'),
-        photoURL: photoURL,
-        uid: uid || (isAdminAccount ? 'admin-google-selman' : `google-${Date.now()}`),
-        role: isAdminAccount ? 'Süper Admin' : 'Google Kullanıcısı',
-      });
-    }
-  };
-
   const handleCopyHost = (host: string) => {
     if (!navigator?.clipboard) return;
     navigator.clipboard.writeText(host);
@@ -817,11 +723,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
 
     try {
+      try {
+        sessionStorage.setItem('sportsfly_google_login_pending', 'true');
+      } catch (e) {}
+
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
-      
+
+      try {
+        sessionStorage.setItem('sportsfly_auth_active', 'true');
+      } catch (e) {}
+
       const cleanEmail = (user.email || '').trim().toLowerCase();
       await syncGoogleProfileData(
         cleanEmail,
@@ -850,13 +764,16 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           `Canlı Alan Adı Yetkisi Eksik: '${currentHost}' adresi Firebase Console Authorized Domains listesinde kayıtlı değil. Lütfen alan adınızı Firebase Console'a ekleyin veya standart e-posta/şifre ile giriş yapın.`
         );
       } else if (err?.code === 'auth/popup-blocked') {
-        setLoginError('Tarayıcınız Google açılır penceresini (popup) engelledi. Lütfen popuplara izin verin veya Hızlı Giriş seçeneğini kullanın.');
+        setLoginError('Tarayıcınız Google açılır penceresini (popup) engelledi. Lütfen popuplara izin verin.');
       } else if (err?.code === 'auth/popup-closed-by-user') {
         setLoginError('Google oturum açma penceresi kapatıldı.');
       } else {
-        setLoginError(`Google oturum açma hatası (${err?.code || 'hata'}): Lütfen tekrar deneyin veya Hızlı Giriş seçeneğini kullanın.`);
+        setLoginError(`Google oturum açma hatası (${err?.code || 'hata'}): Lütfen tekrar deneyin.`);
       }
     } finally {
+      try {
+        sessionStorage.removeItem('sportsfly_google_login_pending');
+      } catch (e) {}
       setIsLoading(false);
     }
   };
@@ -946,35 +863,57 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       }
     }
 
-    // 2. If Phone Login Mode -> Verify Phone registration
-    const isRegistered = isIdentifierRegisteredInDb(rawInput, 'phone');
-    if (!isRegistered) {
-      setLoginError(
-        `Girdiğiniz (${countryCode} ${phone}) telefon numarası kulüp veritabanımızda kayıtlı bulunamadı. Lütfen kulüp yöneticinizle iletişime geçin veya 'Hemen Kayıt Olun' seçeneğini kullanın.`
-      );
-      return;
-    }
-
-    if (require2FA) {
-      initiateTwoFactorChallenge('Kulüp Yöneticisi', sanitizeInputString(identifier, 80), 'sms');
-      return;
-    }
-
+    // 2. If Phone Login Mode -> Authenticate Phone & Password against registered users
     setIsLoading(true);
-    setLoadingText('Kullanıcı hesabı doğrulanıyor...');
+    setLoadingText('Telefon numarası ve şifre doğrulanıyor...');
     setLoginError(null);
 
-    recordSecurityAuditEvent(
-      'AUTH',
-      'INFO',
-      'Kullanıcı oturumu başarıyla doğrulandı',
-      sanitizeInputString(identifier, 80)
-    );
+    try {
+      const authResult = await authenticateWithPhonePassword(phone, password);
+      if (!authResult.ok) {
+        setIsLoading(false);
+        if (authResult.code === 'PENDING_APPROVAL') {
+          setPendingApprovalInfo({
+            clubName: authResult.user?.clubName || 'Spor Okulu',
+            email: authResult.user?.email || '',
+            phone: authResult.user?.phone || identifier,
+            applicationId: authResult.user?.id || 'reg_pending',
+          });
+        }
+        setLoginError(authResult.message || 'Telefon numarası veya şifre hatalı.');
+        return;
+      }
 
-    setTimeout(() => {
+      recordSecurityAuditEvent(
+        'AUTH',
+        'INFO',
+        'Kullanıcı oturumu telefon & şifre ile başarıyla doğrulandı',
+        sanitizeInputString(identifier, 80)
+      );
+
+      if (require2FA) {
+        setIsLoading(false);
+        initiateTwoFactorChallenge(
+          authResult.user?.role || 'Kulüp Yöneticisi',
+          sanitizeInputString(identifier, 80),
+          'sms'
+        );
+        return;
+      }
+
+      setTimeout(() => {
+        setIsLoading(false);
+        onLoginSuccess({
+          role: authResult.user?.role || 'Kulüp Yöneticisi',
+          email: authResult.user?.email || '',
+          name: authResult.user?.managerName || 'Kulüp Yöneticisi',
+          clubName: authResult.user?.clubName || 'Spor Kulübü',
+        });
+      }, 500);
+    } catch {
       setIsLoading(false);
-      onLoginSuccess('Kulüp Yöneticisi');
-    }, 600);
+      setLoginError('Oturum açma sırasında bir hata oluştu. Lütfen tekrar deneyiniz.');
+    }
   };
 
   // Role Quick Select Handlers
@@ -1790,62 +1729,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               </div>
             </div>
 
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL 2: Role Quick Select Demo Modal                                     */}
-      {/* ========================================================================= */}
-      {roleModalInfo && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 text-slate-800">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-extrabold uppercase px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">
-                {roleModalInfo.badge}
-              </span>
-              <button
-                onClick={() => setRoleModalInfo(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <h3 className="text-lg font-bold text-slate-900 mb-2">{roleModalInfo.title}</h3>
-            <p className="text-xs text-slate-600 mb-5 leading-relaxed">{roleModalInfo.description}</p>
-
-            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 mb-5 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500 font-medium">Hedef Rol:</span>
-                <span className="font-bold text-slate-900">{roleModalInfo.role}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500 font-medium">Doğrulama:</span>
-                <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> SMS / TC Kimlik Doğrulama
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5">
-              <button
-                onClick={() => setRoleModalInfo(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
-              >
-                Vazgeç
-              </button>
-              <button
-                onClick={() => {
-                  setRoleModalInfo(null);
-                  onLoginSuccess(roleModalInfo.role);
-                }}
-                className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
-              >
-                <span>{roleModalInfo.role} Olarak Giriş Yap</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
           </div>
         </div>
       )}
@@ -3080,49 +2963,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 </svg>
                 <span>Resmi Google Hesap Seçiciyi Aç (Popup)</span>
               </button>
-            </div>
-
-            {/* Custom Google Email Accordion */}
-            <div className="pt-1">
-              {!showCustomGoogleInput ? (
-                <button
-                  type="button"
-                  onClick={() => setShowCustomGoogleInput(true)}
-                  className="w-full text-center text-xs text-blue-600 hover:text-blue-800 font-semibold cursor-pointer py-1"
-                >
-                  + Başka bir Google e-postası ile hızlı bağlan
-                </button>
-              ) : (
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5 animate-in fade-in duration-150">
-                  <label className="text-xs font-bold text-slate-700 block">
-                    Farklı Google E-posta Adresi
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="email"
-                      value={customGoogleEmailInput}
-                      onChange={(e) => setCustomGoogleEmailInput(e.target.value)}
-                      placeholder="adiniz@gmail.com"
-                      className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-medium"
-                    />
-                    <button
-                      type="button"
-                      disabled={!customGoogleEmailInput.trim()}
-                      onClick={() => {
-                        if (customGoogleEmailInput.trim()) {
-                          handleDirectGoogleLogin(
-                            customGoogleEmailInput.trim(),
-                            customGoogleEmailInput.split('@')[0]
-                          );
-                        }
-                      }}
-                      className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs cursor-pointer"
-                    >
-                      Giriş Yap
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Cancel Button */}

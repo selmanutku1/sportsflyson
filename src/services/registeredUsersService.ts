@@ -468,9 +468,9 @@ export async function authenticateWithEmailPassword(
     foundUser = allUsers.find((u) => normalizeEmail(u.email) === cleanEmail);
   }
 
-  // 3. Fallback for built-in admin & demo accounts
+  // 3. Fallback for built-in registered accounts (exact email match only)
   if (!foundUser) {
-    if (cleanEmail === 'selmanutkumarmara@gmail.com' || cleanEmail.includes('selman')) {
+    if (cleanEmail === 'selmanutkumarmara@gmail.com') {
       foundUser = INITIAL_REGISTERED_USERS[0];
     } else if (cleanEmail === 'admin@sportsfly.com') {
       foundUser = INITIAL_REGISTERED_USERS[1];
@@ -488,10 +488,8 @@ export async function authenticateWithEmailPassword(
     };
   }
 
-  // 5. Verify Password
-  // If user has a registered password, check it (also allow demo bypass passwords in test environments)
-  const isDemoPassword = passwordInput === '123456' || passwordInput === 'sportsfly' || passwordInput === 'admin123';
-  if (foundUser.password && foundUser.password.trim() !== '' && foundUser.password !== passwordInput && !isDemoPassword) {
+  // 5. Verify Password strictly
+  if (!passwordInput || !passwordInput.trim() || !foundUser.password || foundUser.password !== passwordInput) {
     return {
       ok: false,
       code: 'WRONG_PASSWORD',
@@ -539,6 +537,96 @@ export async function authenticateWithEmailPassword(
     name: foundUser.managerName || currentProf.name,
     email: foundUser.email,
     phone: foundUser.phone || currentProf.phone,
+    role: foundUser.role || 'Kulüp Yöneticisi',
+    title: foundUser.role === 'Süper Admin' ? 'SportsFly Kulüp Yöneticisi' : `${foundUser.clubName} Yöneticisi`,
+    club: foundUser.clubName || currentProf.club,
+    hasActivePackage: true,
+    authProvider: 'standard',
+    preferences: {
+      ...currentProf.preferences,
+      defaultPage: foundUser.role === 'Süper Admin' ? 'on-kayit' : 'anasayfa',
+    },
+  });
+
+  return {
+    ok: true,
+    code: 'SUCCESS',
+    user: foundUser,
+  };
+}
+
+/**
+ * Authenticates a user by Phone Number and Password against registered users (Firestore + Local).
+ */
+export async function authenticateWithPhonePassword(
+  phoneInput: string,
+  passwordInput: string
+): Promise<AuthResult> {
+  const digits = (phoneInput || '').replace(/\D/g, '');
+  if (digits.length < 10) {
+    return { ok: false, code: 'NOT_FOUND', message: 'Lütfen geçerli bir telefon numarası giriniz.' };
+  }
+  const targetLast10 = digits.slice(-10);
+
+  // Fetch latest users from Firestore if available
+  const allUsers = await fetchRegisteredUsersFromFirestore().catch(() => getStoredRegisteredUsers());
+  const foundUser = allUsers.find((u) => {
+    const uDigits = (u.phone || '').replace(/\D/g, '');
+    return uDigits.length >= 10 && uDigits.slice(-10) === targetLast10;
+  });
+
+  if (!foundUser) {
+    return {
+      ok: false,
+      code: 'NOT_FOUND',
+      message: 'Girdiğiniz telefon numarası ile kayıtlı onaylı bir kulüp hesabı bulunamadı. Lütfen "Hemen Kayıt Olun" seçeneğini kullanın.',
+    };
+  }
+
+  if (!passwordInput || !passwordInput.trim() || !foundUser.password || foundUser.password !== passwordInput) {
+    return {
+      ok: false,
+      code: 'WRONG_PASSWORD',
+      message: 'Girdiğiniz şifre hatalı. Lütfen şifrenizi kontrol edip tekrar deneyiniz.',
+      user: foundUser,
+    };
+  }
+
+  if (foundUser.status === 'onay_bekliyor') {
+    return {
+      ok: false,
+      code: 'PENDING_APPROVAL',
+      user: foundUser,
+      message: `Sayın ${foundUser.managerName}, "${foundUser.clubName}" için oluşturduğunuz hesap başvurunuz onay aşamasındadır.`,
+    };
+  }
+
+  if (foundUser.status === 'reddedildi') {
+    return {
+      ok: false,
+      code: 'REJECTED',
+      user: foundUser,
+      message: `Hesap başvurunuz onaylanmamıştır: ${foundUser.rejectionReason || 'Kurumsal başvuru kriterleri sağlanamadı.'}`,
+    };
+  }
+
+  const nowStr = new Date().toISOString().slice(0, 16).replace('T', ' ');
+  foundUser.lastLoginAt = nowStr;
+
+  try {
+    const docRef = doc(db, 'registered_users', foundUser.id);
+    updateDoc(docRef, {
+      lastLoginAt: nowStr,
+      updatedAt: serverTimestamp(),
+    }).catch(() => {});
+  } catch {}
+
+  const currentProf = getStoredUserProfile();
+  saveStoredUserProfile({
+    ...currentProf,
+    name: foundUser.managerName || currentProf.name,
+    email: foundUser.email,
+    phone: foundUser.phone || phoneInput,
     role: foundUser.role || 'Kulüp Yöneticisi',
     title: foundUser.role === 'Süper Admin' ? 'SportsFly Kulüp Yöneticisi' : `${foundUser.clubName} Yöneticisi`,
     club: foundUser.clubName || currentProf.club,

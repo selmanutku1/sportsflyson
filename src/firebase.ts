@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, setPersistence, browserSessionPersistence } from 'firebase/auth';
 import {
   getFirestore,
   doc,
@@ -26,8 +26,9 @@ export const app = getApps().length > 0 ? getApp() : initializeApp(activeFirebas
 // Initialize Firestore with the provisioned database ID
 export const db = getFirestore(app, activeFirebaseConfig.firestoreDatabaseId);
 
-// Initialize Firebase Authentication
+// Initialize Firebase Authentication with tab-scoped session persistence
 export const auth = getAuth(app);
+setPersistence(auth, browserSessionPersistence).catch(() => {});
 
 export enum OperationType {
   CREATE = 'create',

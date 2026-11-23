@@ -284,6 +284,7 @@ export default function App() {
     manualSessionActiveRef.current = false;
     try {
       sessionStorage.setItem('sportsfly_auth_active', 'false');
+      sessionStorage.removeItem('sportsfly_google_login_pending');
       localStorage.setItem('sportsfly_auth_active', 'false');
       sessionStorage.removeItem('sportsfly_active_page');
       sessionStorage.removeItem('sportsfly_integration_active');
@@ -411,7 +412,22 @@ export default function App() {
         setIsAuthenticated(false);
         return;
       }
+      let hasActiveTabSession = false;
+      try {
+        hasActiveTabSession =
+          sessionStorage.getItem('sportsfly_auth_active') === 'true' ||
+          sessionStorage.getItem('sportsfly_google_login_pending') === 'true';
+      } catch (e) {}
+
       if (currentUser && !currentUser.isAnonymous && currentUser.email) {
+        if (!hasActiveTabSession) {
+          // Stale cached Firebase IndexedDB session from a closed session: require explicit login first
+          signOut(auth).catch(() => {});
+          clearStoredUserProfile();
+          setUserProfile(DEFAULT_USER_PROFILE);
+          setIsAuthenticated(false);
+          return;
+        }
         const cleanEmail = currentUser.email.trim().toLowerCase();
         const isSuperAdminAccount = cleanEmail === ADMIN_GOOGLE_EMAIL;
         const currentProf = getStoredUserProfile();
