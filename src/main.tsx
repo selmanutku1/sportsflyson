@@ -19,9 +19,6 @@ try {
 try {
   if (typeof window !== 'undefined') {
     sessionStorage.removeItem('sportsfly_chunk_reload_count');
-    if (typeof (window as any).__sportsfly_clear_preloader_timer === 'function') {
-      (window as any).__sportsfly_clear_preloader_timer();
-    }
   }
 } catch (_) {}
 
