@@ -552,30 +552,35 @@ export const ExcelDataAuditModal: React.FC<ExcelDataAuditModalProps> = ({
   const overallClean = liveSummary.errorAthletesCount === 0;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150">
-      <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-5 animate-in fade-in duration-150">
+      <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-4xl w-full max-h-[94dvh] sm:max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-150">
         
+        {/* Mobile Sheet Handle */}
+        <div className="sm:hidden flex justify-center pt-2.5 pb-1 bg-slate-50/80 shrink-0">
+          <div className="w-10 h-1 rounded-full bg-slate-300" />
+        </div>
+
         {/* Header */}
-        <div className="p-5 sm:p-6 border-b border-slate-200/90 bg-gradient-to-r from-slate-50 via-white to-slate-50 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+        <div className="px-4 py-3.5 sm:p-6 border-b border-slate-200/90 bg-gradient-to-r from-slate-50 via-white to-slate-50 flex items-start sm:items-center justify-between gap-3 shrink-0">
+          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+            <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 ${
               overallClean ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-amber-50 text-amber-600 border border-amber-200'
             }`}>
-              {overallClean ? <ShieldCheck className="w-6 h-6" /> : <ShieldAlert className="w-6 h-6" />}
+              {overallClean ? <ShieldCheck className="w-5 h-5 sm:w-6 sm:h-6" /> : <ShieldAlert className="w-5 h-5 sm:w-6 sm:h-6" />}
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="text-[9.5px] sm:text-[10px] font-extrabold uppercase tracking-wider sm:tracking-widest text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200 whitespace-nowrap">
                   Otomatik Veri Doğrulama Katmanı
                 </span>
                 {fileName && (
-                  <span className="text-[11px] font-semibold text-slate-500 truncate max-w-[220px]">
+                  <span className="text-[11px] font-semibold text-slate-500 truncate max-w-full sm:max-w-[220px]">
                     • {fileName}
                   </span>
                 )}
               </div>
-              <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight mt-0.5 flex items-center gap-2">
-                <span>Excel Yükleme Ön-Denetim Raporu</span>
+              <h2 className="text-base sm:text-xl font-black text-slate-900 tracking-tight mt-1 sm:mt-0.5 leading-snug">
+                Excel Yükleme Ön-Denetim Raporu
               </h2>
             </div>
           </div>
@@ -583,335 +588,344 @@ export const ExcelDataAuditModal: React.FC<ExcelDataAuditModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-sm font-bold transition cursor-pointer"
+            aria-label="Kapat"
+            className="w-10 h-10 sm:w-9 sm:h-9 rounded-xl bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-600 flex items-center justify-center text-sm font-bold transition cursor-pointer shrink-0"
           >
             ✕
           </button>
         </div>
 
-        {/* Stats Summary Cards */}
-        <div className="p-5 bg-slate-50/60 border-b border-slate-200/80">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs">
-              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Toplam Sporcu</div>
-              <div className="text-2xl font-black text-slate-900 mt-0.5">{liveSummary.totalAthletes}</div>
-              <div className="text-[11px] text-slate-400 mt-0.5">Taranan satır sayısı</div>
-            </div>
-
-            <div className="bg-white p-3.5 rounded-2xl border border-emerald-200/80 shadow-2xs">
-              <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                <span>Kusursuz Veri</span>
+        {/* Unified Scrollable Body on Mobile / Flex Column on Desktop */}
+        <div className="flex-1 min-h-0 overflow-y-auto sm:overflow-hidden sm:flex sm:flex-col overscroll-contain">
+          {/* Stats Summary Cards */}
+          <div className="p-3.5 sm:p-5 bg-slate-50/60 border-b border-slate-200/80 sm:shrink-0">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+              <div className="bg-white p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-2xs">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider leading-tight">Toplam Sporcu</div>
+                <div className="text-xl sm:text-2xl font-black text-slate-900 mt-1 tabular-nums">{liveSummary.totalAthletes}</div>
+                <div className="text-[10.5px] sm:text-[11px] text-slate-400 mt-0.5 leading-snug">Taranan satır sayısı</div>
               </div>
-              <div className="text-2xl font-black text-emerald-600 mt-0.5">{liveSummary.cleanAthletesCount}</div>
-              <div className="text-[11px] text-emerald-700/80 mt-0.5">Hata veya uyarı yok</div>
-            </div>
 
-            <div className="bg-white p-3.5 rounded-2xl border border-amber-200/80 shadow-2xs">
-              <div className="text-[10px] font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1">
-                <AlertTriangle className="w-3 h-3 text-amber-600" />
-                <span>Düzeltilen / Uyarı</span>
+              <div className="bg-white p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-emerald-200/80 shadow-2xs">
+                <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1 leading-tight">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                  <span className="truncate">Kusursuz Veri</span>
+                </div>
+                <div className="text-xl sm:text-2xl font-black text-emerald-600 mt-1 tabular-nums">{liveSummary.cleanAthletesCount}</div>
+                <div className="text-[10.5px] sm:text-[11px] text-emerald-700/80 mt-0.5 leading-snug">Hata veya uyarı yok</div>
               </div>
-              <div className="text-2xl font-black text-amber-600 mt-0.5">{liveSummary.warningAthletesCount}</div>
-              <div className="text-[11px] text-amber-700/80 mt-0.5">Uyarıları aşağıdan düzenleyebilirsiniz</div>
-            </div>
 
-            <div className="bg-white p-3.5 rounded-2xl border border-rose-200/80 shadow-2xs">
-              <div className="text-[10px] font-bold text-rose-700 uppercase tracking-wider flex items-center gap-1">
-                <XCircle className="w-3 h-3 text-rose-600" />
-                <span>Kritik Eksik</span>
+              <div className="bg-white p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-amber-200/80 shadow-2xs">
+                <div className="text-[10px] font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1 leading-tight">
+                  <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                  <span className="truncate">Düzeltilen / Uyarı</span>
+                </div>
+                <div className="text-xl sm:text-2xl font-black text-amber-600 mt-1 tabular-nums">{liveSummary.warningAthletesCount}</div>
+                <div className="text-[10.5px] sm:text-[11px] text-amber-700/80 mt-0.5 leading-snug">Aşağıdan düzenlenebilir</div>
               </div>
-              <div className="text-2xl font-black text-rose-600 mt-0.5">{liveSummary.errorAthletesCount}</div>
-              <div className="text-[11px] text-rose-700/80 mt-0.5">Eksik boy / kilo vb.</div>
+
+              <div className="bg-white p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-rose-200/80 shadow-2xs">
+                <div className="text-[10px] font-bold text-rose-700 uppercase tracking-wider flex items-center gap-1 leading-tight">
+                  <XCircle className="w-3 h-3 text-rose-600 shrink-0" />
+                  <span className="truncate">Kritik Eksik</span>
+                </div>
+                <div className="text-xl sm:text-2xl font-black text-rose-600 mt-1 tabular-nums">{liveSummary.errorAthletesCount}</div>
+                <div className="text-[10.5px] sm:text-[11px] text-rose-700/80 mt-0.5 leading-snug">Eksik boy / kilo vb.</div>
+              </div>
+            </div>
+
+            {/* Quick Notice */}
+            <div className="mt-3 sm:mt-3.5 p-2.5 sm:p-3 rounded-xl bg-indigo-50/70 border border-indigo-100 flex items-start gap-2 sm:gap-2.5 text-[11px] sm:text-xs text-indigo-950 font-medium leading-relaxed">
+              <Sparkles className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+              <div>
+                <strong>Akıllı Veri Koruma &amp; Yerinde Düzeltme Aktif:</strong> Uyarı veya eksik veri tespit edilen satırları açarak <strong>&ldquo;İşlenen Veri&rdquo;</strong> alanından doğrudan düzeltebilir ve <strong>&ldquo;Düzelt&rdquo;</strong> butonuyla karneye yansıtabilirsiniz.
+              </div>
             </div>
           </div>
 
-          {/* Quick Notice */}
-          <div className="mt-3.5 p-3 rounded-xl bg-indigo-50/70 border border-indigo-100 flex items-start gap-2.5 text-xs text-indigo-950 font-medium leading-relaxed">
-            <Sparkles className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
-            <div>
-              <strong>Akıllı Veri Koruma &amp; Yerinde Düzeltme Aktif:</strong> Uyarı veya eksik veri tespit edilen satırları açarak <strong>&ldquo;İşlenen Veri&rdquo;</strong> alanından doğrudan düzeltebilir ve <strong>&ldquo;Düzelt&rdquo;</strong> butonuyla karneye yansıtabilirsiniz.
+          {/* Filters and Search Bar */}
+          <div className="sticky top-0 z-10 sm:static px-3.5 py-3 sm:px-5 sm:py-3 border-b border-slate-200 bg-white/95 backdrop-blur-xs sm:bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 sm:shrink-0">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <span className="text-xs font-bold text-slate-500 mr-0.5 flex items-center gap-1 shrink-0">
+                <Filter className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Filtre:</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setFilterSeverity('all')}
+                className={`px-3 py-1.5 sm:py-1 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap shrink-0 min-h-[36px] sm:min-h-0 tabular-nums ${
+                  filterSeverity === 'all'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
+              >
+                Tümü ({liveSummary.totalAthletes})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterSeverity('error')}
+                className={`px-3 py-1.5 sm:py-1 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0 min-h-[36px] sm:min-h-0 tabular-nums ${
+                  filterSeverity === 'error'
+                    ? 'bg-rose-600 text-white shadow-xs'
+                    : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                }`}
+              >
+                <XCircle className="w-3 h-3 shrink-0" />
+                <span>Kritik ({liveSummary.errorAthletesCount})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterSeverity('warning')}
+                className={`px-3 py-1.5 sm:py-1 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0 min-h-[36px] sm:min-h-0 tabular-nums ${
+                  filterSeverity === 'warning'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200'
+                }`}
+              >
+                <AlertTriangle className="w-3 h-3 shrink-0" />
+                <span>Uyarılar ({liveSummary.warningAthletesCount})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterSeverity('clean')}
+                className={`px-3 py-1.5 sm:py-1 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0 min-h-[36px] sm:min-h-0 tabular-nums ${
+                  filterSeverity === 'clean'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
+                }`}
+              >
+                <CheckCircle2 className="w-3 h-3 shrink-0" />
+                <span>Temiz ({liveSummary.cleanAthletesCount})</span>
+              </button>
+            </div>
+
+            <div className="relative w-full sm:w-64 shrink-0">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchAthlete}
+                onChange={(e) => setSearchAthlete(e.target.value)}
+                placeholder="Sporcu adı veya branş ara..."
+                className="w-full pl-8 pr-3 py-2 sm:py-1.5 min-h-[40px] sm:min-h-0 text-base sm:text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/30 transition"
+              />
             </div>
           </div>
-        </div>
 
-        {/* Filters and Search Bar */}
-        <div className="px-5 py-3 border-b border-slate-200 bg-white flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-1.5 overflow-x-auto">
-            <span className="text-xs font-bold text-slate-500 mr-1 flex items-center gap-1">
-              <Filter className="w-3.5 h-3.5" />
-              <span>Filtre:</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => setFilterSeverity('all')}
-              className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer ${
-                filterSeverity === 'all'
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-              }`}
-            >
-              Tümü ({liveSummary.totalAthletes})
-            </button>
-            <button
-              type="button"
-              onClick={() => setFilterSeverity('error')}
-              className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
-                filterSeverity === 'error'
-                  ? 'bg-rose-600 text-white shadow-xs'
-                  : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
-              }`}
-            >
-              <XCircle className="w-3 h-3" />
-              <span>Kritik ({liveSummary.errorAthletesCount})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setFilterSeverity('warning')}
-              className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
-                filterSeverity === 'warning'
-                  ? 'bg-amber-600 text-white shadow-xs'
-                  : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200'
-              }`}
-            >
-              <AlertTriangle className="w-3 h-3" />
-              <span>Uyarılar ({liveSummary.warningAthletesCount})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setFilterSeverity('clean')}
-              className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
-                filterSeverity === 'clean'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
-              }`}
-            >
-              <CheckCircle2 className="w-3 h-3" />
-              <span>Temiz ({liveSummary.cleanAthletesCount})</span>
-            </button>
-          </div>
+          {/* Audit Details List */}
+          <div className="sm:flex-1 sm:overflow-y-auto p-3.5 sm:p-5 space-y-2.5 sm:space-y-3 bg-slate-100/40">
+            {filteredResults.length === 0 ? (
+              <div className="p-6 sm:p-8 text-center text-slate-500 bg-white rounded-2xl border border-slate-200">
+                <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2 opacity-80" />
+                <div className="font-bold text-slate-800 text-sm">Seçilen filtrede kayıt bulunamadı.</div>
+                <div className="text-xs text-slate-400 mt-0.5">Tüm sporcuların doğrulaması başarıyla tamamlandı.</div>
+              </div>
+            ) : (
+              filteredResults.map((res) => {
+                const isExpanded = expandedAthleteId === res.athlete.id;
+                const hasErrors = res.errorCount > 0;
+                const hasWarnings = res.warningCount > 0;
+                const heightVal = res.athlete.bodyComposition?.find((b) => b.id === 'height')?.m1 || 0;
+                const weightVal = res.athlete.bodyComposition?.find((b) => b.id === 'weight')?.m1 || 0;
 
-          <div className="relative min-w-[200px]">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchAthlete}
-              onChange={(e) => setSearchAthlete(e.target.value)}
-              placeholder="Sporcu adı veya branş ara..."
-              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/30 transition"
-            />
-          </div>
-        </div>
-
-        {/* Audit Details List */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-3 bg-slate-100/40">
-          {filteredResults.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 bg-white rounded-2xl border border-slate-200">
-              <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2 opacity-80" />
-              <div className="font-bold text-slate-800 text-sm">Seçilen filtrede kayıt bulunamadı.</div>
-              <div className="text-xs text-slate-400 mt-0.5">Tüm sporcuların doğrulaması başarıyla tamamlandı.</div>
-            </div>
-          ) : (
-            filteredResults.map((res) => {
-              const isExpanded = expandedAthleteId === res.athlete.id;
-              const hasErrors = res.errorCount > 0;
-              const hasWarnings = res.warningCount > 0;
-
-              return (
-                <div
-                  key={res.athlete.id}
-                  className={`bg-white rounded-2xl border transition-all shadow-2xs overflow-hidden ${
-                    hasErrors
-                      ? 'border-rose-300'
-                      : hasWarnings
-                      ? 'border-amber-300'
-                      : 'border-slate-200/90'
-                  }`}
-                >
-                  {/* Athlete Summary Row */}
+                return (
                   <div
-                    onClick={() => setExpandedAthleteId(isExpanded ? null : res.athlete.id)}
-                    className="p-4 flex flex-wrap items-center justify-between gap-3 cursor-pointer hover:bg-slate-50/80 transition"
+                    key={res.athlete.id}
+                    className={`bg-white rounded-2xl border transition-all shadow-2xs overflow-hidden ${
+                      hasErrors
+                        ? 'border-rose-300'
+                        : hasWarnings
+                        ? 'border-amber-300'
+                        : 'border-slate-200/90'
+                    }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center justify-center">
-                        {isExpanded ? (
-                          <ChevronDown className="w-4 h-4 text-slate-400" />
-                        ) : (
-                          <ChevronRight className="w-4 h-4 text-slate-400" />
-                        )}
+                    {/* Athlete Summary Row */}
+                    <div
+                      onClick={() => setExpandedAthleteId(isExpanded ? null : res.athlete.id)}
+                      className="p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 cursor-pointer hover:bg-slate-50/80 active:bg-slate-50 transition"
+                    >
+                      <div className="flex items-start sm:items-center gap-2.5 sm:gap-3 min-w-0">
+                        <div className="flex items-center justify-center mt-0.5 sm:mt-0 shrink-0">
+                          {isExpanded ? (
+                            <ChevronDown className="w-4 h-4 text-slate-400" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4 text-slate-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                            <h4 className="font-black text-slate-900 text-sm truncate max-w-full">{res.athlete.athleteName}</h4>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 whitespace-nowrap shrink-0 tabular-nums">
+                              {res.athlete.athleteCode || `SF-${res.athleteIndex + 101}`}
+                            </span>
+                          </div>
+                          <div className="text-[11.5px] sm:text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                            <span>{res.athlete.sportBranch}</span>
+                            <span aria-hidden="true">•</span>
+                            <span>{res.athlete.gender}</span>
+                            <span aria-hidden="true">•</span>
+                            <span>{res.athlete.ageYears} Yaş</span>
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-black text-slate-900 text-sm">{res.athlete.athleteName}</h4>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
-                            {res.athlete.athleteCode || `SF-${res.athleteIndex + 101}`}
+
+                      <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 sm:gap-3 pl-6 sm:pl-0 pt-2 sm:pt-0 border-t border-slate-100 sm:border-t-0 shrink-0">
+                        {/* Metric info (visible on both mobile & desktop) */}
+                        <div className="flex items-center gap-1.5 sm:gap-2 text-xs">
+                          <span className="px-2 py-1 bg-slate-100 rounded-lg text-slate-700 font-semibold text-[11px] whitespace-nowrap tabular-nums">
+                            Boy: <strong>{heightVal} cm</strong>
+                          </span>
+                          <span className="px-2 py-1 bg-slate-100 rounded-lg text-slate-700 font-semibold text-[11px] whitespace-nowrap tabular-nums">
+                            Kilo: <strong>{weightVal} kg</strong>
                           </span>
                         </div>
-                        <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
-                          <span>{res.athlete.sportBranch}</span>
-                          <span>•</span>
-                          <span>{res.athlete.gender}</span>
-                          <span>•</span>
-                          <span>{res.athlete.ageYears} Yaş</span>
+
+                        <div className="flex items-center gap-2 sm:gap-3 ml-auto sm:ml-0">
+                          {/* Status badge */}
+                          {hasErrors ? (
+                            <span className="px-2.5 py-1 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-bold text-[11px] sm:text-xs flex items-center gap-1 whitespace-nowrap">
+                              <XCircle className="w-3.5 h-3.5 shrink-0" />
+                              <span>{res.errorCount} Kritik Eksik</span>
+                            </span>
+                          ) : hasWarnings ? (
+                            <span className="px-2.5 py-1 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 font-bold text-[11px] sm:text-xs flex items-center gap-1 whitespace-nowrap">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                              <span>{res.warningCount} Uyarı</span>
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold text-[11px] sm:text-xs flex items-center gap-1 whitespace-nowrap">
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                              <span>Doğrulandı</span>
+                            </span>
+                          )}
+
+                          {/* Quality Score */}
+                          <div className="min-w-[36px] sm:w-10 text-right">
+                            <span className={`text-xs font-black tabular-nums ${
+                              res.score >= 90 ? 'text-emerald-600' : res.score >= 70 ? 'text-amber-600' : 'text-rose-600'
+                            }`}>
+                              %{res.score}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      {/* Metric pills */}
-                      <div className="hidden sm:flex items-center gap-2 text-xs">
-                        <span className="px-2 py-1 bg-slate-100 rounded-lg text-slate-700 font-semibold text-[11px]">
-                          Boy: <strong>{res.athlete.bodyComposition?.find((b) => b.id === 'height')?.m1 || 0} cm</strong>
-                        </span>
-                        <span className="px-2 py-1 bg-slate-100 rounded-lg text-slate-700 font-semibold text-[11px]">
-                          Kilo: <strong>{res.athlete.bodyComposition?.find((b) => b.id === 'weight')?.m1 || 0} kg</strong>
-                        </span>
-                      </div>
-
-                      {/* Status badge */}
-                      {hasErrors ? (
-                        <span className="px-2.5 py-1 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-bold text-xs flex items-center gap-1">
-                          <XCircle className="w-3.5 h-3.5" />
-                          <span>{res.errorCount} Kritik Eksik</span>
-                        </span>
-                      ) : hasWarnings ? (
-                        <span className="px-2.5 py-1 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 font-bold text-xs flex items-center gap-1">
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                          <span>{res.warningCount} Uyarı</span>
-                        </span>
-                      ) : (
-                        <span className="px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold text-xs flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Doğrulandı</span>
-                        </span>
-                      )}
-
-                      {/* Quality Score */}
-                      <div className="w-10 text-right">
-                        <span className={`text-xs font-black ${
-                          res.score >= 90 ? 'text-emerald-600' : res.score >= 70 ? 'text-amber-600' : 'text-rose-600'
-                        }`}>
-                          %{res.score}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Expanded Issues Drawer */}
-                  {isExpanded && (
-                    <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-2.5 text-xs animate-in fade-in duration-100">
-                      <div className="font-bold text-slate-700 text-xs mb-2">Denetim Bulguları ve Düzeltmeler:</div>
-                      {res.issues.length === 0 ? (
-                        <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl text-emerald-800 font-medium flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span>Bu sporcunun tüm veri alanları geçerli, format kurallarına uygun ve eksiksizdir.</span>
-                        </div>
-                      ) : (
-                        res.issues.map((issue, iIdx) => {
-                          const issueKey = `${res.athlete.id}::${issue.fieldId}::${iIdx}`;
-                          const currentDraft =
-                            draftValues[issueKey] !== undefined
-                              ? draftValues[issueKey]
-                              : issue.cleanedVal === '—'
-                              ? ''
-                              : String(issue.cleanedVal ?? '');
-                          const isSaved = justSavedKey === issueKey;
-                          return (
-                            <div
-                              key={iIdx}
-                              className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
-                                issue.severity === 'error'
-                                  ? 'bg-rose-50/80 border-rose-200 text-rose-950'
-                                  : issue.severity === 'warning'
-                                  ? 'bg-amber-50/80 border-amber-200 text-amber-950'
-                                  : 'bg-slate-50 border-slate-200 text-slate-800'
-                              }`}
-                            >
-                              <div className="space-y-0.5 flex-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-extrabold text-slate-900">{issue.fieldName}</span>
-                                  <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${
-                                    issue.severity === 'error'
-                                      ? 'bg-rose-200 text-rose-900'
-                                      : issue.severity === 'warning'
-                                      ? 'bg-amber-200 text-amber-900'
-                                      : 'bg-slate-200 text-slate-700'
-                                  }`}>
-                                    {issue.category}
-                                  </span>
+                    {/* Expanded Issues Drawer */}
+                    {isExpanded && (
+                      <div className="p-3.5 sm:p-4 bg-slate-50 border-t border-slate-100 space-y-2.5 text-xs animate-in fade-in duration-100">
+                        <div className="font-bold text-slate-700 text-xs mb-1.5">Denetim Bulguları ve Düzeltmeler:</div>
+                        {res.issues.length === 0 ? (
+                          <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl text-emerald-800 font-medium flex items-start sm:items-center gap-2 leading-relaxed">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
+                            <span>Bu sporcunun tüm veri alanları geçerli, format kurallarına uygun ve eksiksizdir.</span>
+                          </div>
+                        ) : (
+                          res.issues.map((issue, iIdx) => {
+                            const issueKey = `${res.athlete.id}::${issue.fieldId}::${iIdx}`;
+                            const currentDraft =
+                              draftValues[issueKey] !== undefined
+                                ? draftValues[issueKey]
+                                : issue.cleanedVal === '—'
+                                ? ''
+                                : String(issue.cleanedVal ?? '');
+                            const isSaved = justSavedKey === issueKey;
+                            return (
+                              <div
+                                key={iIdx}
+                                className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                                  issue.severity === 'error'
+                                    ? 'bg-rose-50/80 border-rose-200 text-rose-950'
+                                    : issue.severity === 'warning'
+                                    ? 'bg-amber-50/80 border-amber-200 text-amber-950'
+                                    : 'bg-slate-50 border-slate-200 text-slate-800'
+                                }`}
+                              >
+                                <div className="space-y-1 flex-1 min-w-0">
+                                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                    <span className="font-extrabold text-slate-900">{issue.fieldName}</span>
+                                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded whitespace-nowrap ${
+                                      issue.severity === 'error'
+                                        ? 'bg-rose-200 text-rose-900'
+                                        : issue.severity === 'warning'
+                                        ? 'bg-amber-200 text-amber-900'
+                                        : 'bg-slate-200 text-slate-700'
+                                    }`}>
+                                      {issue.category}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11.5px] leading-relaxed font-medium">{issue.message}</p>
+                                  {issue.fixRecommendation && (
+                                    <p className="text-[11px] text-slate-500 italic mt-0.5">
+                                      Öneri: {issue.fixRecommendation}
+                                    </p>
+                                  )}
                                 </div>
-                                <p className="text-[11.5px] leading-relaxed font-medium">{issue.message}</p>
-                                {issue.fixRecommendation && (
-                                  <p className="text-[11px] text-slate-500 italic mt-0.5">
-                                    Öneri: {issue.fixRecommendation}
-                                  </p>
+
+                                {issue.editTarget ? (
+                                  <div className="w-full sm:w-auto sm:shrink-0 bg-white px-3 py-2.5 sm:px-2.5 sm:py-2 rounded-xl border border-slate-200/90 shadow-2xs flex flex-col items-stretch sm:items-end gap-1.5 sm:gap-1">
+                                    <span className="text-slate-400 text-[9.5px] uppercase font-sans font-bold">
+                                      İşlenen Veri (Düzenlenebilir)
+                                    </span>
+                                    <div className="flex items-center gap-2 sm:gap-1.5 w-full sm:w-auto">
+                                      <input
+                                        type="text"
+                                        inputMode={issue.editTarget.inputType === 'number' ? 'decimal' : 'text'}
+                                        value={currentDraft}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) =>
+                                          setDraftValues((prev) => ({
+                                            ...prev,
+                                            [issueKey]: e.target.value,
+                                          }))
+                                        }
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            handleApplyIssueFix(res.athlete, issue, issueKey);
+                                          }
+                                        }}
+                                        placeholder="Değer girin"
+                                        className="flex-1 sm:flex-none sm:w-24 min-h-[40px] sm:min-h-0 px-3 sm:px-2 py-1.5 sm:py-1 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white text-base sm:text-xs font-black text-slate-900 font-sans tabular-nums text-left sm:text-right focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleApplyIssueFix(res.athlete, issue, issueKey);
+                                        }}
+                                        className={`min-h-[40px] sm:min-h-0 px-3.5 sm:px-2.5 py-2 sm:py-1 rounded-lg text-xs sm:text-[11px] font-extrabold transition cursor-pointer shrink-0 whitespace-nowrap ${
+                                          isSaved
+                                            ? 'bg-emerald-600 text-white'
+                                            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                                        }`}
+                                      >
+                                        {isSaved ? 'Düzeltildi ✓' : 'Düzelt'}
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="w-full sm:w-auto flex sm:block items-center justify-between text-left sm:text-right shrink-0 bg-white/80 px-3 py-2 sm:py-1.5 rounded-lg border border-slate-200/60 font-mono text-[11px]">
+                                    <span className="text-slate-400 text-[9.5px] uppercase font-sans font-bold">İşlenen Veri</span>
+                                    <strong className="text-slate-900 font-black sm:block">{String(issue.cleanedVal)}</strong>
+                                  </div>
                                 )}
                               </div>
-
-                              {issue.editTarget ? (
-                                <div className="shrink-0 bg-white px-2.5 py-2 rounded-xl border border-slate-200/90 shadow-2xs flex flex-col items-end gap-1">
-                                  <span className="text-slate-400 text-[9.5px] uppercase font-sans font-bold">
-                                    İşlenen Veri (Düzenlenebilir)
-                                  </span>
-                                  <div className="flex items-center gap-1.5">
-                                    <input
-                                      type="text"
-                                      value={currentDraft}
-                                      onClick={(e) => e.stopPropagation()}
-                                      onChange={(e) =>
-                                        setDraftValues((prev) => ({
-                                          ...prev,
-                                          [issueKey]: e.target.value,
-                                        }))
-                                      }
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          handleApplyIssueFix(res.athlete, issue, issueKey);
-                                        }
-                                      }}
-                                      placeholder="Değer girin"
-                                      className="w-24 px-2 py-1 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white text-xs font-black text-slate-900 font-sans tabular-nums text-right focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleApplyIssueFix(res.athlete, issue, issueKey);
-                                      }}
-                                      className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition cursor-pointer shrink-0 ${
-                                        isSaved
-                                          ? 'bg-emerald-600 text-white'
-                                          : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                                      }`}
-                                    >
-                                      {isSaved ? 'Düzeltildi ✓' : 'Düzelt'}
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="text-right shrink-0 bg-white/80 px-3 py-1.5 rounded-lg border border-slate-200/60 font-mono text-[11px]">
-                                  <span className="text-slate-400 block text-[9.5px] uppercase font-sans font-bold">İşlenen Veri</span>
-                                  <strong className="text-slate-900 font-black">{String(issue.cleanedVal)}</strong>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 sm:p-5 border-t border-slate-200 bg-white flex flex-wrap items-center justify-between gap-3">
-          <div className="text-xs text-slate-500 font-medium">
-            Toplam <strong className="text-slate-800">{liveSummary.totalAthletes} sporcu</strong> taranmıştır.{' '}
+        <div className="px-4 py-3 sm:p-5 pb-[max(0.875rem,env(safe-area-inset-bottom))] sm:pb-5 border-t border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 shrink-0">
+          <div className="text-[11.5px] sm:text-xs text-slate-500 font-medium text-center sm:text-left">
+            Toplam <strong className="text-slate-800 tabular-nums">{liveSummary.totalAthletes} sporcu</strong> taranmıştır.
             {editedCount > 0 && (
               <span className="text-emerald-700 font-bold ml-1">
                 ({editedCount} sporcuda veri düzeltildi)
@@ -924,11 +938,11 @@ export const ExcelDataAuditModal: React.FC<ExcelDataAuditModalProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-[auto_1fr] sm:flex items-center gap-2 w-full sm:w-auto">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition cursor-pointer"
+              className="min-h-[44px] sm:min-h-0 px-4 py-2.5 sm:py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 transition cursor-pointer whitespace-nowrap"
             >
               Vazgeç
             </button>
@@ -952,10 +966,10 @@ export const ExcelDataAuditModal: React.FC<ExcelDataAuditModalProps> = ({
                 }
                 onConfirmAll(finalAthletes);
               }}
-              className="px-5 py-2.5 rounded-xl text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition cursor-pointer flex items-center gap-2"
+              className="min-h-[44px] sm:min-h-0 w-full sm:w-auto px-4 sm:px-5 py-2.5 rounded-xl text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 shadow-sm transition cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap"
             >
-              <Check className="w-4 h-4" />
-              <span>Verileri Onayla ve Havuzda İlerle</span>
+              <Check className="w-4 h-4 shrink-0" />
+              <span className="truncate">Verileri Onayla ve Havuzda İlerle</span>
             </button>
           </div>
         </div>
