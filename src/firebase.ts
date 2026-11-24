@@ -1,5 +1,12 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, setPersistence, browserSessionPersistence } from 'firebase/auth';
+import {
+  getAuth,
+  initializeAuth,
+  setPersistence,
+  browserSessionPersistence,
+  browserPopupRedirectResolver,
+  type Auth,
+} from 'firebase/auth';
 import {
   getFirestore,
   doc,
@@ -26,9 +33,19 @@ export const app = getApps().length > 0 ? getApp() : initializeApp(activeFirebas
 // Initialize Firestore with the provisioned database ID
 export const db = getFirestore(app, activeFirebaseConfig.firestoreDatabaseId);
 
-// Initialize Firebase Authentication with tab-scoped session persistence
-export const auth = getAuth(app);
-setPersistence(auth, browserSessionPersistence).catch(() => {});
+// Initialize Firebase Authentication strictly with tab-scoped session persistence
+// (never reads persistent IndexedDB/localStorage sessions across fresh visits or tabs)
+let authInstance: Auth;
+try {
+  authInstance = initializeAuth(app, {
+    persistence: browserSessionPersistence,
+    popupRedirectResolver: browserPopupRedirectResolver,
+  });
+} catch {
+  authInstance = getAuth(app);
+  setPersistence(authInstance, browserSessionPersistence).catch(() => {});
+}
+export const auth: Auth = authInstance;
 
 export enum OperationType {
   CREATE = 'create',

@@ -271,11 +271,6 @@ export default function App() {
         setCurrentPage('entegrasyonlar');
         sessionStorage.setItem('sportsfly_integration_active', 'true');
       }
-      if (typeof BroadcastChannel !== 'undefined') {
-        const ch = new BroadcastChannel('sportsfly_auth_channel');
-        ch.postMessage({ type: 'LOGIN', role: userObj.role || freshProfile?.role });
-        ch.close();
-      }
     } catch (e) {}
   };
 
@@ -363,6 +358,55 @@ export default function App() {
       }
     };
 
+    // Detect fresh navigation (e.g. clicking "Kulüp Girişi" from sportsfly.com.tr or opening a new URL)
+    // vs. an explicit in-tab page reload (F5) while already logged in.
+    const isFreshLoginEntry = (() => {
+      if (typeof window === 'undefined') return true;
+      try {
+        const url = new URL(window.location.href);
+        const path = url.pathname.toLowerCase();
+        const hasForceLoginParam =
+          path === '/login' ||
+          path === '/giris' ||
+          url.searchParams.has('login') ||
+          url.searchParams.has('forceLogin') ||
+          url.searchParams.has('logout') ||
+          url.searchParams.get('action') === 'login';
+        if (hasForceLoginParam) return true;
+
+        if (document.referrer) {
+          try {
+            const refOrigin = new URL(document.referrer).origin;
+            if (refOrigin !== window.location.origin) {
+              return true;
+            }
+          } catch {}
+        }
+
+        const navEntries = performance.getEntriesByType?.('navigation') as PerformanceNavigationTiming[] | undefined;
+        const navType = navEntries && navEntries.length > 0 ? navEntries[0].type : 'navigate';
+        if (navType !== 'reload') {
+          return true;
+        }
+      } catch {}
+      return false;
+    })();
+
+    if (isFreshLoginEntry && !manualSessionActiveRef.current) {
+      try {
+        sessionStorage.removeItem('sportsfly_auth_active');
+        sessionStorage.removeItem('sportsfly_google_login_pending');
+        sessionStorage.removeItem('sportsfly_integration_active');
+        sessionStorage.removeItem('sportsfly_active_page');
+        localStorage.removeItem('sportsfly_auth_active');
+      } catch (e) {}
+      clearStoredUserProfile();
+      setUserProfile(DEFAULT_USER_PROFILE);
+      setIsAuthenticated(false);
+      setIsIntegrationActive(false);
+      signOut(auth).catch(() => {});
+    }
+
     let authChannel: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== 'undefined') {
       try {
@@ -377,17 +421,9 @@ export default function App() {
             setUserProfile(DEFAULT_USER_PROFILE);
             try {
               sessionStorage.setItem('sportsfly_auth_active', 'false');
+              sessionStorage.removeItem('sportsfly_google_login_pending');
               localStorage.setItem('sportsfly_auth_active', 'false');
               sessionStorage.removeItem('sportsfly_active_page');
-            } catch (e) {}
-          } else if (ev.data?.type === 'LOGIN') {
-            isExplicitLogoutRef.current = false;
-            manualSessionActiveRef.current = true;
-            setUserProfile(getStoredUserProfile());
-            setIsAuthenticated(true);
-            try {
-              sessionStorage.setItem('sportsfly_auth_active', 'true');
-              localStorage.setItem('sportsfly_auth_active', 'true');
             } catch (e) {}
           }
         };
@@ -412,16 +448,26 @@ export default function App() {
         setIsAuthenticated(false);
         return;
       }
+
+      let isGoogleLoginInProgress = false;
       let hasActiveTabSession = false;
       try {
-        hasActiveTabSession =
-          sessionStorage.getItem('sportsfly_auth_active') === 'true' ||
+        isGoogleLoginInProgress =
           sessionStorage.getItem('sportsfly_google_login_pending') === 'true';
+        hasActiveTabSession =
+          sessionStorage.getItem('sportsfly_auth_active') === 'true';
       } catch (e) {}
 
       if (currentUser && !currentUser.isAnonymous && currentUser.email) {
-        if (!hasActiveTabSession) {
-          // Stale cached Firebase IndexedDB session from a closed session: require explicit login first
+        // Only allow session restoration if the user actively initiated Google login,
+        // already completed login in this tab, or reloaded an authenticated tab.
+        // Never auto-login on a fresh navigation (e.g. clicking "Kulüp Girişi" from sportsfly.com.tr).
+        const canAuthenticate =
+          manualSessionActiveRef.current ||
+          isGoogleLoginInProgress ||
+          (!isFreshLoginEntry && hasActiveTabSession);
+
+        if (!canAuthenticate) {
           signOut(auth).catch(() => {});
           clearStoredUserProfile();
           setUserProfile(DEFAULT_USER_PROFILE);
