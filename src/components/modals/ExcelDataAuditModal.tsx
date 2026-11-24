@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -551,27 +552,27 @@ export const ExcelDataAuditModal: React.FC<ExcelDataAuditModalProps> = ({
 
   const overallClean = liveSummary.errorAthletesCount === 0;
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-5 animate-in fade-in duration-150">
-      <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-4xl w-full max-h-[94dvh] sm:max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-150">
+  const modalContent = (
+    <div className="fixed inset-0 z-[9999] bg-slate-900/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-5">
+      <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-4xl w-full max-h-[92%] sm:max-h-[90%] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
         
         {/* Mobile Sheet Handle */}
-        <div className="sm:hidden flex justify-center pt-2.5 pb-1 bg-slate-50/80 shrink-0">
+        <div className="sm:hidden flex justify-center pt-2 pb-0.5 bg-slate-50/80 shrink-0">
           <div className="w-10 h-1 rounded-full bg-slate-300" />
         </div>
 
         {/* Header */}
-        <div className="px-4 py-3.5 sm:p-6 border-b border-slate-200/90 bg-gradient-to-r from-slate-50 via-white to-slate-50 flex items-start sm:items-center justify-between gap-3 shrink-0">
-          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
-            <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 ${
+        <div className="px-4 py-3 sm:p-6 border-b border-slate-200/90 bg-gradient-to-r from-slate-50 via-white to-slate-50 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl flex items-center justify-center shrink-0 ${
               overallClean ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-amber-50 text-amber-600 border border-amber-200'
             }`}>
               {overallClean ? <ShieldCheck className="w-5 h-5 sm:w-6 sm:h-6" /> : <ShieldAlert className="w-5 h-5 sm:w-6 sm:h-6" />}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="text-[9.5px] sm:text-[10px] font-extrabold uppercase tracking-wider sm:tracking-widest text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200 whitespace-nowrap">
-                  Otomatik Veri Doğrulama Katmanı
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider sm:tracking-widest text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200 whitespace-nowrap">
+                  Otomatik Veri Doğrulama
                 </span>
                 {fileName && (
                   <span className="text-[11px] font-semibold text-slate-500 truncate max-w-full sm:max-w-[220px]">
@@ -579,7 +580,7 @@ export const ExcelDataAuditModal: React.FC<ExcelDataAuditModalProps> = ({
                   </span>
                 )}
               </div>
-              <h2 className="text-base sm:text-xl font-black text-slate-900 tracking-tight mt-1 sm:mt-0.5 leading-snug">
+              <h2 className="text-base sm:text-xl font-black text-slate-900 tracking-tight mt-0.5 leading-snug truncate">
                 Excel Yükleme Ön-Denetim Raporu
               </h2>
             </div>
@@ -598,44 +599,44 @@ export const ExcelDataAuditModal: React.FC<ExcelDataAuditModalProps> = ({
         {/* Unified Scrollable Body on Mobile / Flex Column on Desktop */}
         <div className="flex-1 min-h-0 overflow-y-auto sm:overflow-hidden sm:flex sm:flex-col overscroll-contain">
           {/* Stats Summary Cards */}
-          <div className="p-3.5 sm:p-5 bg-slate-50/60 border-b border-slate-200/80 sm:shrink-0">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
-              <div className="bg-white p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="p-3 sm:p-5 bg-slate-50/60 border-b border-slate-200/80 sm:shrink-0">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+              <div className="bg-white p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-200 shadow-2xs">
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider leading-tight">Toplam Sporcu</div>
-                <div className="text-xl sm:text-2xl font-black text-slate-900 mt-1 tabular-nums">{liveSummary.totalAthletes}</div>
-                <div className="text-[10.5px] sm:text-[11px] text-slate-400 mt-0.5 leading-snug">Taranan satır sayısı</div>
+                <div className="text-lg sm:text-2xl font-black text-slate-900 mt-0.5 sm:mt-1 tabular-nums">{liveSummary.totalAthletes}</div>
+                <div className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 leading-snug">Taranan satır sayısı</div>
               </div>
 
-              <div className="bg-white p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-emerald-200/80 shadow-2xs">
+              <div className="bg-white p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl border border-emerald-200/80 shadow-2xs">
                 <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1 leading-tight">
                   <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
                   <span className="truncate">Kusursuz Veri</span>
                 </div>
-                <div className="text-xl sm:text-2xl font-black text-emerald-600 mt-1 tabular-nums">{liveSummary.cleanAthletesCount}</div>
-                <div className="text-[10.5px] sm:text-[11px] text-emerald-700/80 mt-0.5 leading-snug">Hata veya uyarı yok</div>
+                <div className="text-lg sm:text-2xl font-black text-emerald-600 mt-0.5 sm:mt-1 tabular-nums">{liveSummary.cleanAthletesCount}</div>
+                <div className="text-[10px] sm:text-[11px] text-emerald-700/80 mt-0.5 leading-snug">Hata veya uyarı yok</div>
               </div>
 
-              <div className="bg-white p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-amber-200/80 shadow-2xs">
+              <div className="bg-white p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl border border-amber-200/80 shadow-2xs">
                 <div className="text-[10px] font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1 leading-tight">
                   <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
                   <span className="truncate">Düzeltilen / Uyarı</span>
                 </div>
-                <div className="text-xl sm:text-2xl font-black text-amber-600 mt-1 tabular-nums">{liveSummary.warningAthletesCount}</div>
-                <div className="text-[10.5px] sm:text-[11px] text-amber-700/80 mt-0.5 leading-snug">Aşağıdan düzenlenebilir</div>
+                <div className="text-lg sm:text-2xl font-black text-amber-600 mt-0.5 sm:mt-1 tabular-nums">{liveSummary.warningAthletesCount}</div>
+                <div className="text-[10px] sm:text-[11px] text-amber-700/80 mt-0.5 leading-snug">Aşağıdan düzenlenebilir</div>
               </div>
 
-              <div className="bg-white p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-rose-200/80 shadow-2xs">
+              <div className="bg-white p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl border border-rose-200/80 shadow-2xs">
                 <div className="text-[10px] font-bold text-rose-700 uppercase tracking-wider flex items-center gap-1 leading-tight">
                   <XCircle className="w-3 h-3 text-rose-600 shrink-0" />
                   <span className="truncate">Kritik Eksik</span>
                 </div>
-                <div className="text-xl sm:text-2xl font-black text-rose-600 mt-1 tabular-nums">{liveSummary.errorAthletesCount}</div>
-                <div className="text-[10.5px] sm:text-[11px] text-rose-700/80 mt-0.5 leading-snug">Eksik boy / kilo vb.</div>
+                <div className="text-lg sm:text-2xl font-black text-rose-600 mt-0.5 sm:mt-1 tabular-nums">{liveSummary.errorAthletesCount}</div>
+                <div className="text-[10px] sm:text-[11px] text-rose-700/80 mt-0.5 leading-snug">Eksik boy / kilo vb.</div>
               </div>
             </div>
 
             {/* Quick Notice */}
-            <div className="mt-3 sm:mt-3.5 p-2.5 sm:p-3 rounded-xl bg-indigo-50/70 border border-indigo-100 flex items-start gap-2 sm:gap-2.5 text-[11px] sm:text-xs text-indigo-950 font-medium leading-relaxed">
+            <div className="mt-2.5 sm:mt-3.5 p-2.5 sm:p-3 rounded-xl bg-indigo-50/70 border border-indigo-100 flex items-start gap-2 sm:gap-2.5 text-[11px] sm:text-xs text-indigo-950 font-medium leading-relaxed">
               <Sparkles className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
               <div>
                 <strong>Akıllı Veri Koruma &amp; Yerinde Düzeltme Aktif:</strong> Uyarı veya eksik veri tespit edilen satırları açarak <strong>&ldquo;İşlenen Veri&rdquo;</strong> alanından doğrudan düzeltebilir ve <strong>&ldquo;Düzelt&rdquo;</strong> butonuyla karneye yansıtabilirsiniz.
@@ -977,4 +978,8 @@ export const ExcelDataAuditModal: React.FC<ExcelDataAuditModalProps> = ({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined'
+    ? createPortal(modalContent, document.body)
+    : modalContent;
 };
