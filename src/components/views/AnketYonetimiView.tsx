@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FileText, 
   BarChart2, 
@@ -17,22 +17,151 @@ import {
   Mail,
   Link2,
   Send,
-  Check
+  Check,
+  X,
+  Trash2,
 } from 'lucide-react';
 import { INITIAL_ANKETLER, AnketItem, AnketQuestion } from '../../data/mockAnketData';
+import { auth } from '../../firebase';
+import { anketlerService } from '../../services/operationsFirestoreService';
 
 type TabType = 'list' | 'report' | 'send';
 
 export const AnketYonetimiView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('list');
   const [selectedAnket, setSelectedAnket] = useState<AnketItem | null>(null);
-  const [anketler] = useState<AnketItem[]>(INITIAL_ANKETLER);
+  const [anketler, setAnketler] = useState<AnketItem[]>(INITIAL_ANKETLER);
   const [filterAudience, setFilterAudience] = useState<string>('Hepsi');
   
   // States for Sending Flow
   const [selectedChannel, setSelectedChannel] = useState<string>('whatsapp');
   const [isSending, setIsSending] = useState(false);
   const [showSendSuccess, setShowSendSuccess] = useState(false);
+
+  // Create / Edit Modal States
+  const [showEditorModal, setShowEditorModal] = useState(false);
+  const [editingAnket, setEditingAnket] = useState<AnketItem | null>(null);
+  const [formTitle, setFormTitle] = useState('');
+  const [formDesc, setFormDesc] = useState('');
+  const [formAudience, setFormAudience] = useState<AnketItem['targetAudience']>('Veli');
+  const [formStatus, setFormStatus] = useState<AnketItem['status']>('Aktif');
+  const [formDueDate, setFormDueDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    return d.toISOString().split('T')[0];
+  });
+  const [formQuestionText, setFormQuestionText] = useState('');
+  const [formQuestionType, setFormQuestionType] = useState<AnketQuestion['type']>('rating');
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const unsub = anketlerService.subscribe((items) => {
+      if (items.length > 0) {
+        setAnketler(items);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const openCreateModal = (fromTemplate = false) => {
+    setEditingAnket(null);
+    setFormTitle(fromTemplate ? 'Dönem Sonu Veli & Sporcu Memnuniyet Anketi' : '');
+    setFormDesc(
+      fromTemplate
+        ? 'Kulüp tesisleri, antrenman kalitesi ve iletişim memnuniyetini ölçmeye yönelik hazır dönem anketi.'
+        : ''
+    );
+    setFormAudience('Veli');
+    setFormStatus('Aktif');
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    setFormDueDate(d.toISOString().split('T')[0]);
+    setFormQuestionText(
+      fromTemplate ? 'Genel antrenman ve kulüp iletişiminden ne kadar memnunsunuz?' : ''
+    );
+    setFormQuestionType('rating');
+    setShowEditorModal(true);
+  };
+
+  const openEditModal = (anket: AnketItem) => {
+    setEditingAnket(anket);
+    setFormTitle(anket.title);
+    setFormDesc(anket.description);
+    setFormAudience(anket.targetAudience);
+    setFormStatus(anket.status);
+    setFormDueDate(anket.dueDate);
+    setFormQuestionText(anket.questions?.[0]?.text || '');
+    setFormQuestionType(anket.questions?.[0]?.type || 'rating');
+    setShowEditorModal(true);
+  };
+
+  const handleSaveAnket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formTitle.trim()) return;
+
+    const firstQuestion: AnketQuestion = {
+      id: editingAnket?.questions?.[0]?.id || `q-${Date.now()}`,
+      text: formQuestionText.trim() || 'Genel memnuniyet değerlendirmeniz nedir?',
+      type: formQuestionType,
+      stats: editingAnket?.questions?.[0]?.stats,
+    };
+
+    const nextQuestions =
+      editingAnket && editingAnket.questions.length > 0
+        ? [firstQuestion, ...editingAnket.questions.slice(1)]
+        : [firstQuestion];
+
+    const savedItem: AnketItem = editingAnket
+      ? {
+          ...editingAnket,
+          title: formTitle.trim(),
+          description: formDesc.trim(),
+          targetAudience: formAudience,
+          status: formStatus,
+          dueDate: formDueDate,
+          questions: nextQuestions,
+        }
+      : {
+          id: `ank-${Date.now()}`,
+          title: formTitle.trim(),
+          description: formDesc.trim(),
+          targetAudience: formAudience,
+          status: formStatus,
+          responseCount: 0,
+          totalSent: formStatus === 'Taslak' ? 0 : 120,
+          createdAt: new Date().toISOString().split('T')[0],
+          dueDate: formDueDate,
+          questions: nextQuestions,
+        };
+
+    setAnketler((prev) =>
+      editingAnket
+        ? prev.map((a) => (a.id === savedItem.id ? savedItem : a))
+        : [savedItem, ...prev]
+    );
+    setShowEditorModal(false);
+
+    if (auth.currentUser) {
+      try {
+        await anketlerService.upsert(savedItem);
+      } catch (err) {
+        console.error('Anket Firestore kaydı hatası:', err);
+      }
+    }
+  };
+
+  const handleDeleteAnket = async (anketId: string) => {
+    if (!window.confirm('Bu anketi silmek istediğinize emin misiniz?')) return;
+    setAnketler((prev) => prev.filter((a) => a.id !== anketId));
+    setShowEditorModal(false);
+    if (auth.currentUser) {
+      try {
+        await anketlerService.delete(anketId);
+      } catch (err) {
+        console.error('Anket silme Firestore hatası:', err);
+      }
+    }
+  };
 
   const handleViewReport = (anket: AnketItem) => {
     setSelectedAnket(anket);
@@ -48,9 +177,25 @@ export const AnketYonetimiView: React.FC = () => {
 
   const simulateSend = () => {
     setIsSending(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       setIsSending(false);
       setShowSendSuccess(true);
+      if (selectedAnket) {
+        const updatedAnket: AnketItem = {
+          ...selectedAnket,
+          status: selectedAnket.status === 'Taslak' ? 'Aktif' : selectedAnket.status,
+          totalSent: selectedAnket.totalSent > 0 ? selectedAnket.totalSent : 120,
+        };
+        setSelectedAnket(updatedAnket);
+        setAnketler((prev) => prev.map((a) => (a.id === updatedAnket.id ? updatedAnket : a)));
+        if (auth.currentUser) {
+          try {
+            await anketlerService.upsert(updatedAnket);
+          } catch (err) {
+            console.error('Anket gönderim güncelleme Firestore hatası:', err);
+          }
+        }
+      }
       setTimeout(() => {
         setActiveTab('list');
       }, 2500);
@@ -96,7 +241,8 @@ export const AnketYonetimiView: React.FC = () => {
         
         {activeTab === 'list' && (
           <button
-            className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-colors shadow-sm"
+            onClick={() => openCreateModal(false)}
+            className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-colors shadow-sm cursor-pointer"
           >
             <Plus className="w-5 h-5" />
             <span>Yeni Anket Oluştur</span>
@@ -171,7 +317,11 @@ export const AnketYonetimiView: React.FC = () => {
                     <Share2 className="w-4 h-4" />
                     Gönder
                   </button>
-                  <button className="px-3 py-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl font-semibold hover:bg-slate-50 hover:text-slate-800 transition-colors" title="Düzenle">
+                  <button 
+                    onClick={() => openEditModal(anket)}
+                    className="px-3 py-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl font-semibold hover:bg-slate-50 hover:text-slate-800 transition-colors cursor-pointer" 
+                    title="Düzenle"
+                  >
                     <FileText className="w-4 h-4" />
                   </button>
                 </div>
@@ -179,7 +329,10 @@ export const AnketYonetimiView: React.FC = () => {
             ))}
 
             {/* Template Card */}
-            <div className="border-2 border-dashed border-slate-200 rounded-2xl p-5 flex flex-col items-center justify-center text-center bg-slate-50/50 hover:bg-slate-50 transition-colors cursor-pointer min-h-[280px]">
+            <div 
+              onClick={() => openCreateModal(true)}
+              className="border-2 border-dashed border-slate-200 rounded-2xl p-5 flex flex-col items-center justify-center text-center bg-slate-50/50 hover:bg-slate-50 transition-colors cursor-pointer min-h-[280px]"
+            >
               <div className="w-14 h-14 bg-white rounded-full shadow-sm flex items-center justify-center mb-4 border border-slate-100">
                 <Plus className="w-6 h-6 text-blue-500" />
               </div>
@@ -405,7 +558,7 @@ export const AnketYonetimiView: React.FC = () => {
                     </div>
                     <div className="text-center px-4">
                       <div className="text-3xl font-black text-slate-700 mb-1">
-                        {Math.round((selectedAnket.responseCount / selectedAnket.totalSent) * 100)}%
+                        {selectedAnket.totalSent > 0 ? Math.round((selectedAnket.responseCount / selectedAnket.totalSent) * 100) : 0}%
                       </div>
                       <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Katılım Oranı</div>
                     </div>
@@ -486,6 +639,139 @@ export const AnketYonetimiView: React.FC = () => {
             </div>
           </div>
         )
+      )}
+
+      {/* Create / Edit Survey Modal */}
+      {showEditorModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <h3 className="font-bold text-slate-800">
+                {editingAnket ? 'Anketi Düzenle' : 'Yeni Anket Oluştur'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowEditorModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveAnket} className="p-6 space-y-4 text-sm">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">Anket Başlığı *</label>
+                <input
+                  type="text"
+                  required
+                  value={formTitle}
+                  onChange={(e) => setFormTitle(e.target.value)}
+                  placeholder="Örn: Yaz Dönemi Veli Memnuniyet Anketi"
+                  className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">Açıklama</label>
+                <textarea
+                  rows={2}
+                  value={formDesc}
+                  onChange={(e) => setFormDesc(e.target.value)}
+                  placeholder="Katılımcılara gösterilecek kısa bilgilendirme metni..."
+                  className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 resize-none"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Hedef Kitle</label>
+                  <select
+                    value={formAudience}
+                    onChange={(e) => setFormAudience(e.target.value as AnketItem['targetAudience'])}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white"
+                  >
+                    <option value="Veli">Veli</option>
+                    <option value="Sporcu">Sporcu</option>
+                    <option value="Eğitmen">Eğitmen</option>
+                    <option value="Genel">Genel</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Durum</label>
+                  <select
+                    value={formStatus}
+                    onChange={(e) => setFormStatus(e.target.value as AnketItem['status'])}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white"
+                  >
+                    <option value="Aktif">Aktif</option>
+                    <option value="Taslak">Taslak</option>
+                    <option value="Tamamlandı">Tamamlandı</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Bitiş Tarihi</label>
+                  <input
+                    type="date"
+                    value={formDueDate}
+                    onChange={(e) => setFormDueDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Ana Anket Sorusu</label>
+                  <input
+                    type="text"
+                    value={formQuestionText}
+                    onChange={(e) => setFormQuestionText(e.target.value)}
+                    placeholder="Örn: Antrenman kalitesini nasıl değerlendiriyorsunuz?"
+                    className="w-full px-3.5 py-2 border border-slate-200 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Soru Tipi</label>
+                  <select
+                    value={formQuestionType}
+                    onChange={(e) => setFormQuestionType(e.target.value as AnketQuestion['type'])}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white"
+                  >
+                    <option value="rating">Yıldız (1-5)</option>
+                    <option value="boolean">Evet / Hayır</option>
+                    <option value="text">Açık Uçlu</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                {editingAnket ? (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteAnket(editingAnket.id)}
+                    className="px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Sil</span>
+                  </button>
+                ) : (
+                  <div />
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowEditorModal(false)}
+                    className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl font-semibold cursor-pointer"
+                  >
+                    İptal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-xs cursor-pointer"
+                  >
+                    {editingAnket ? 'Değişiklikleri Kaydet' : 'Anketi Kaydet'}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

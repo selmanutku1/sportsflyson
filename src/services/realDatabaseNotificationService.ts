@@ -1,5 +1,7 @@
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { isSuperAdminSession } from './firestoreService';
 import {
   SportsFlyNotification,
   getStoredNotifications,
@@ -130,102 +132,110 @@ export function subscribeToRealDatabaseUserNotifications(onNewApprovedUser?: (no
   let isFirstSnapshot = true;
   let unsubscribe: (() => void) | undefined;
 
-  try {
-    const q = query(
-      collection(db, 'registered_users'),
-      where('status', '==', 'onaylandi')
-    );
-
-    unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const notified = getNotifiedApprovedUserIds();
-
-        if (isFirstSnapshot) {
-          // On initial snapshot, record all existing approved users in database
-          // so that page reloads or navigations DO NOT trigger repeated notification toasts!
-          snapshot.docs.forEach((docSnap) => {
-            const data = docSnap.data();
-            const docId = docSnap.id;
-            if (isRealApprovedUser(data, docId)) {
-              markApprovedUserNotified(docId);
-            }
-          });
-          isFirstSnapshot = false;
-          return;
-        }
-
-        // On subsequent changes, trigger notifications ONLY for newly approved real users!
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added' || change.type === 'modified') {
-            const data = change.doc.data();
-            const docId = change.doc.id;
-
-            if (isRealApprovedUser(data, docId) && !notified.has(docId)) {
-              markApprovedUserNotified(docId);
-
-              const notifId = `notif-approved-${docId}`;
-              const managerName = data.managerName || 'Kulüp Yetkilisi';
-              const clubName = data.clubName || 'Spor Kulübü';
-
-              const newNotif: SportsFlyNotification = {
-                id: notifId,
-                category: 'system',
-                title: 'Onaylı Kullanıcı Erişimi',
-                description: `"${managerName}" (${clubName}) hesabı veritabanında onaylanmıştır.`,
-                time: 'Şimdi',
-                isUnread: true,
-                actionUrl: 'yetkilendirmeler',
-                source: 'database',
-                userId: docId,
-                verifiedRealUser: true,
-              };
-
-              // Persist to all management feeds (admin, trainer)
-              ['admin', 'trainer'].forEach((role) => {
-                const current = getStoredNotifications(role);
-                if (!current.some((n) => n.id === notifId)) {
-                  const updated = [newNotif, ...current.filter((n) => isRealDatabaseNotification(n))];
-                  saveStoredNotifications(role, updated);
-                }
-              });
-
-              // Dispatch real user push event for UI toast & audio/haptic feedback
-              window.dispatchEvent(
-                new CustomEvent('sportsfly_real_user_approved', {
-                  detail: {
-                    notification: newNotif,
-                    user: {
-                      userId: docId,
-                      email: data.email,
-                      managerName,
-                      clubName,
-                      role: data.role,
-                      phone: data.phone,
-                      approvedAt: data.approvedAt || new Date().toISOString(),
-                    },
-                  },
-                })
-              );
-
-              if (onNewApprovedUser) {
-                onNewApprovedUser(newNotif);
-              }
-            }
-          }
-        });
-      },
-      (error) => {
-        console.warn('Real database notification listener error (offline or permission):', error);
-      }
-    );
-  } catch (e) {
-    console.error('Failed to initialize real database notification listener:', e);
-  }
-
-  return () => {
+  const authUnsub = onAuthStateChanged(auth, (fbUser) => {
     if (unsubscribe) {
       unsubscribe();
+      unsubscribe = undefined;
+    }
+    if (!fbUser || fbUser.isAnonymous || !isSuperAdminSession()) {
+      return;
+    }
+
+    isFirstSnapshot = true;
+    try {
+      const q = query(
+        collection(db, 'registered_users'),
+        where('status', '==', 'onaylandi')
+      );
+
+      unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const notified = getNotifiedApprovedUserIds();
+
+          if (isFirstSnapshot) {
+            snapshot.docs.forEach((docSnap) => {
+              const data = docSnap.data();
+              const docId = docSnap.id;
+              if (isRealApprovedUser(data, docId)) {
+                markApprovedUserNotified(docId);
+              }
+            });
+            isFirstSnapshot = false;
+            return;
+          }
+
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added' || change.type === 'modified') {
+              const data = change.doc.data();
+              const docId = change.doc.id;
+
+              if (isRealApprovedUser(data, docId) && !notified.has(docId)) {
+                markApprovedUserNotified(docId);
+
+                const notifId = `notif-approved-${docId}`;
+                const managerName = data.managerName || 'Kulüp Yetkilisi';
+                const clubName = data.clubName || 'Spor Kulübü';
+
+                const newNotif: SportsFlyNotification = {
+                  id: notifId,
+                  category: 'system',
+                  title: 'Onaylı Kullanıcı Erişimi',
+                  description: `"${managerName}" (${clubName}) hesabı veritabanında onaylanmıştır.`,
+                  time: 'Şimdi',
+                  isUnread: true,
+                  actionUrl: 'yetkilendirmeler',
+                  source: 'database',
+                  userId: docId,
+                  verifiedRealUser: true,
+                };
+
+                ['admin', 'trainer'].forEach((role) => {
+                  const current = getStoredNotifications(role);
+                  if (!current.some((n) => n.id === notifId)) {
+                    const updated = [newNotif, ...current.filter((n) => isRealDatabaseNotification(n))];
+                    saveStoredNotifications(role, updated);
+                  }
+                });
+
+                window.dispatchEvent(
+                  new CustomEvent('sportsfly_real_user_approved', {
+                    detail: {
+                      notification: newNotif,
+                      user: {
+                        userId: docId,
+                        email: data.email,
+                        managerName,
+                        clubName,
+                        role: data.role,
+                        phone: data.phone,
+                        approvedAt: data.approvedAt || new Date().toISOString(),
+                      },
+                    },
+                  })
+                );
+
+                if (onNewApprovedUser) {
+                  onNewApprovedUser(newNotif);
+                }
+              }
+            }
+          });
+        },
+        (error) => {
+          console.warn('Real database notification listener error (offline or permission):', error);
+        }
+      );
+    } catch (e) {
+      console.error('Failed to initialize real database notification listener:', e);
+    }
+  });
+
+  return () => {
+    authUnsub();
+    if (unsubscribe) {
+      unsubscribe();
+      unsubscribe = undefined;
     }
   };
 }

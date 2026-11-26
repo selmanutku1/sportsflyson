@@ -46,6 +46,7 @@ export const ALL_CONFIGURABLE_SYSTEM_AREAS: ConfigurableAreaItem[] = [
 
   // Sporpuan & Modüller
   { page: 'entegrasyonlar', label: 'Entegrasyonlar & SportsFly Lab', category: 'Sporpuan & Modüller', description: 'SportsFly Lab Karne, SMS, Sanal POS ve modül entegrasyonları' },
+  { page: 'sportsfly-studio', label: 'SportsFly Studio', category: 'Sporpuan & Modüller', description: 'Konu, başlık, logo ve prompt ile kulüp tasarım stüdyosu' },
   { page: 'sporpuan-sporcu-degerlendirme', label: 'Sporpuan · Sporcu Değerlendirme', category: 'Sporpuan & Modüller', description: 'Sporcu yetkinlik ve davranış puanlama motoru' },
   { page: 'sporpuan-degerlendirmeler', label: 'Sporpuan · İtibar Değerlendirmeleri', category: 'Sporpuan & Modüller', description: 'Kulüp ve eğitmen itibar değerlendirmeleri' },
   { page: 'sporpuan-dogrulamalar', label: 'Sporpuan · Doğrulamalar', category: 'Sporpuan & Modüller', description: 'Sertifika, rozet ve kazanım doğrulama ekranı' },
@@ -365,7 +366,7 @@ export function getGoogleUserAccessByEmail(email?: string): GoogleUserAccessReco
  * Checks if a specific NavPage is enabled by the Admin for this Google user
  */
 export function isPageAllowedForGoogleUser(page: NavPage, email?: string): boolean {
-  if (page === 'paketler' || page === 'paket-yonetimi') return true;
+  if (page === 'paketler') return true;
   if (!email) return false;
   const clean = email.trim().toLowerCase();
   if (clean === ADMIN_GOOGLE_EMAIL) return true;

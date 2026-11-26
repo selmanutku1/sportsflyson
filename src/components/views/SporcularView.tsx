@@ -28,6 +28,7 @@ import {
   Building2,
   Zap,
   ChevronDown,
+  MessageCircle,
 } from 'lucide-react';
 import { INITIAL_SPORCULAR } from '../../data/mockData';
 import { SporcuItem, NavPage } from '../../types';
@@ -35,6 +36,20 @@ import { SporcuProfiliView } from './SporcuProfiliView';
 import { SporcuD3OzetAlani } from './sporcu/SporcuD3OzetAlani';
 import { downloadSporcuDevelopmentPdfReport } from '../../utils/sporcuPdfReportGenerator';
 import { QuickPointAwardModal } from '../modals/QuickPointAwardModal';
+import {
+  SporcuWhatsAppNotificationModal,
+  SporcuWhatsAppNotificationType,
+} from '../modals/SporcuWhatsAppNotificationModal';
+import {
+  SporcuBildirimQuickMenu,
+  BildirimQuickMenuAnchor,
+} from '../modals/SporcuBildirimQuickMenu';
+import { auth } from '../../firebase';
+import { sporcularService } from '../../services/firestoreService';
+import {
+  mapSporcuToFirestoreDoc,
+  mapFirestoreDocToSporcuItem,
+} from '../../services/firestoreCollectionsSchema';
 
 interface SporcularViewProps {
   onNavigate?: (page: NavPage) => void;
@@ -50,7 +65,7 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
     localStorage.setItem('sportsfly_sporcular', JSON.stringify(sporcular));
   }, [sporcular]);
 
-  // Synchronize on cross-view changes
+  // Synchronize on cross-view changes + Firestore real-time subscription
   useEffect(() => {
     const handleSync = () => {
       const saved = localStorage.getItem('sportsfly_sporcular');
@@ -60,7 +75,22 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
     };
     window.addEventListener('sportsfly_sporcular_updated', handleSync);
     window.addEventListener('storage', handleSync);
+
+    let unsubscribeFirestore = () => {};
+    if (auth.currentUser) {
+      unsubscribeFirestore = sporcularService.subscribe((docs) => {
+        if (docs.length > 0) {
+          const mapped = docs.map(mapFirestoreDocToSporcuItem);
+          setSporcular(mapped);
+          try {
+            localStorage.setItem('sportsfly_sporcular', JSON.stringify(mapped));
+          } catch {}
+        }
+      });
+    }
+
     return () => {
+      unsubscribeFirestore();
       window.removeEventListener('sportsfly_sporcular_updated', handleSync);
       window.removeEventListener('storage', handleSync);
     };
@@ -76,6 +106,27 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
   );
   const [viewingProfileSporcu, setViewingProfileSporcu] = useState<SporcuItem | null>(null);
   const [quickPointSporcu, setQuickPointSporcu] = useState<SporcuItem | null>(null);
+  const [notifySporcu, setNotifySporcu] = useState<SporcuItem | null>(null);
+  const [notifyTemplateType, setNotifyTemplateType] =
+    useState<SporcuWhatsAppNotificationType>('training');
+  const [bildirimMenuAnchor, setBildirimMenuAnchor] =
+    useState<BildirimQuickMenuAnchor | null>(null);
+
+  const handleOpenBildirimMenu = (
+    sporcu: SporcuItem,
+    e: React.MouseEvent<HTMLButtonElement>
+  ) => {
+    e.stopPropagation();
+    setSelectedId(sporcu.id);
+    if (bildirimMenuAnchor?.sporcu.id === sporcu.id) {
+      setBildirimMenuAnchor(null);
+      return;
+    }
+    setBildirimMenuAnchor({
+      sporcu,
+      rect: e.currentTarget.getBoundingClientRect(),
+    });
+  };
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -115,9 +166,16 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
 
   const handleToggleActive = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    const target = sporcular.find((s) => s.id === id);
+    const nextActive = target ? !target.isActive : true;
     setSporcular((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, isActive: !s.isActive } : s))
+      prev.map((s) => (s.id === id ? { ...s, isActive: nextActive } : s))
     );
+    if (auth.currentUser) {
+      sporcularService.update(id, { isActive: nextActive }).catch((err) =>
+        console.warn('[Sporcular] Toggle active Firestore warning:', err)
+      );
+    }
     triggerToast('Sporcu aktiflik durumu güncellendi.');
   };
 
@@ -125,6 +183,11 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
     e.stopPropagation();
     if (window.confirm(`${name} isimli sporcuyu listeden kaldırmak istediğinize emin misiniz?`)) {
       setSporcular((prev) => prev.filter((s) => s.id !== id));
+      if (auth.currentUser) {
+        sporcularService.delete(id).catch((err) =>
+          console.warn('[Sporcular] Delete Firestore warning:', err)
+        );
+      }
       triggerToast(`${name} listeden kaldırıldı.`);
     }
   };
@@ -139,8 +202,8 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
 
     const newSporcu: SporcuItem = {
       id: `s-${Date.now()}`,
-      name: formName,
-      email: formEmail,
+      name: formName.trim(),
+      email: formEmail.trim(),
       phone: formPhone || '+90 530 000 00 00',
       branch: formBranch,
       teamGroup: formTeamGroup,
@@ -153,6 +216,12 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
     };
 
     setSporcular([newSporcu, ...sporcular]);
+    if (auth.currentUser) {
+      const firestorePayload = mapSporcuToFirestoreDoc(newSporcu, auth.currentUser.uid);
+      sporcularService.add(firestorePayload).catch((err) =>
+        console.warn('[Sporcular] Add Firestore warning:', err)
+      );
+    }
     setShowAddModal(false);
     setFormName('');
     setFormEmail('');
@@ -167,6 +236,25 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
     setSporcular((prev) =>
       prev.map((s) => (s.id === editingSporcu.id ? editingSporcu : s))
     );
+    if (auth.currentUser) {
+      const mapped = mapSporcuToFirestoreDoc(editingSporcu, auth.currentUser.uid);
+      sporcularService
+        .update(editingSporcu.id, {
+          name: mapped.name,
+          email: mapped.email,
+          phone: mapped.phone,
+          birthDate: mapped.birthDate,
+          facility: mapped.facility,
+          branch: mapped.branch,
+          groupId: mapped.groupId,
+          teamGroup: mapped.teamGroup,
+          trainerId: mapped.trainerId,
+          trainerName: mapped.trainerName,
+          isActive: mapped.isActive,
+          avatarUrl: mapped.avatarUrl,
+        })
+        .catch((err) => console.warn('[Sporcular] Edit Firestore warning:', err));
+    }
     setEditingSporcu(null);
     triggerToast('Sporcu bilgileri güncellendi.');
   };
@@ -187,6 +275,11 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
       avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80',
     };
     setSporcular([newSporcu, ...sporcular]);
+    if (auth.currentUser) {
+      sporcularService
+        .add(mapSporcuToFirestoreDoc(newSporcu, auth.currentUser.uid))
+        .catch((err) => console.warn('[Sporcular] Approve pre-reg Firestore warning:', err));
+    }
     setPreRegistrations(preRegistrations.filter((p) => p.id !== item.id));
     triggerToast(`${item.name} ön kaydı onaylanarak sporcu listesine eklendi.`);
   };
@@ -615,8 +708,8 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
                     </button>
                   </div>
 
-                    {/* Mobil Kısayol Butonları: Geniş Dokunmatik 'Hızlı Puan Ver' */}
-                  <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                  {/* Mobil Kısayol Butonları: Geniş Dokunmatik 'Hızlı Puan Ver' ve 'Bildirim' */}
+                  <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-2">
                     {/* HIZLI PUAN VER BUTONU - Geniş ergonomik dokunmatik alan */}
                     <button
                       type="button"
@@ -625,11 +718,33 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
                         setSelectedId(sporcu.id);
                         setQuickPointSporcu(sporcu);
                       }}
-                      className="flex-1 min-h-[46px] px-4 py-2.5 bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs active:scale-[0.98] transition-all cursor-pointer select-none"
+                      className="flex-1 min-w-[140px] min-h-[46px] px-4 py-2.5 bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs active:scale-[0.98] transition-all cursor-pointer select-none"
                       title="Sporcuya Hızlı Puan Ver"
                     >
                       <Zap className="w-4 h-4 fill-slate-950 text-slate-950 shrink-0" />
                       <span>Hızlı Puan Ver</span>
+                    </button>
+
+                    {/* WhatsApp Veli Bildirim Hızlı Şablon Menüsü Butonu */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleOpenBildirimMenu(sporcu, e)}
+                      aria-haspopup="menu"
+                      aria-expanded={bildirimMenuAnchor?.sporcu.id === sporcu.id}
+                      className={`min-h-[46px] px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-colors cursor-pointer ${
+                        bildirimMenuAnchor?.sporcu.id === sporcu.id
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                          : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border-emerald-200/80 dark:border-emerald-800/80'
+                      }`}
+                      title="Hazır WhatsApp bildirim şablonlarını aç (Antrenman Hatırlatması, Aidat Ödemesi vb.)"
+                    >
+                      <MessageCircle className="w-4 h-4 shrink-0" />
+                      <span>Bildirim</span>
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 shrink-0 transition-transform ${
+                          bildirimMenuAnchor?.sporcu.id === sporcu.id ? 'rotate-180' : ''
+                        }`}
+                      />
                     </button>
 
                     {/* Rapor Butonu */}
@@ -811,6 +926,34 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
                           >
                             <Zap className="w-3.5 h-3.5 fill-amber-500 text-amber-600 shrink-0" />
                             <span>Hızlı Puan</span>
+                          </button>
+
+                          {/* WhatsApp Veli Bildirim Hızlı Şablon Menüsü Butonu */}
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenBildirimMenu(sporcu, e)}
+                            aria-haspopup="menu"
+                            aria-expanded={bildirimMenuAnchor?.sporcu.id === sporcu.id}
+                            className={`min-h-[32px] px-2.5 py-1 rounded-lg transition-colors inline-flex items-center gap-1 font-bold text-xs border cursor-pointer shadow-2xs active:scale-95 ${
+                              bildirimMenuAnchor?.sporcu.id === sporcu.id
+                                ? 'bg-emerald-600 text-white border-emerald-600'
+                                : 'text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border-emerald-200/80 dark:border-emerald-800/80'
+                            }`}
+                            title="Hazır WhatsApp bildirim şablonlarını aç (Antrenman Hatırlatması, Aidat Ödemesi vb.)"
+                          >
+                            <MessageCircle
+                              className={`w-3.5 h-3.5 shrink-0 ${
+                                bildirimMenuAnchor?.sporcu.id === sporcu.id
+                                  ? 'text-white'
+                                  : 'text-emerald-600 dark:text-emerald-400'
+                              }`}
+                            />
+                            <span>Bildirim</span>
+                            <ChevronDown
+                              className={`w-3 h-3 shrink-0 transition-transform ${
+                                bildirimMenuAnchor?.sporcu.id === sporcu.id ? 'rotate-180' : ''
+                              }`}
+                            />
                           </button>
 
                           {/* Rapor PDF */}
@@ -1374,6 +1517,26 @@ export const SporcularView: React.FC<SporcularViewProps> = ({ onNavigate }) => {
         isOpen={!!quickPointSporcu}
         onClose={() => setQuickPointSporcu(null)}
         sporcu={quickPointSporcu}
+        onSuccess={(msg) => triggerToast(msg)}
+      />
+
+      {/* Hızlı Bildirim Şablon Popover Menüsü */}
+      <SporcuBildirimQuickMenu
+        anchor={bildirimMenuAnchor}
+        onClose={() => setBildirimMenuAnchor(null)}
+        onSelectTemplate={(sporcu, type) => {
+          setNotifyTemplateType(type);
+          setNotifySporcu(sporcu);
+        }}
+        onQuickSent={(msg) => triggerToast(msg)}
+      />
+
+      {/* Modal 7: WhatsApp Veli Bildirimi (Antrenman Hatırlatması / Aidat Ödemesi / Şablonlar) */}
+      <SporcuWhatsAppNotificationModal
+        isOpen={!!notifySporcu}
+        onClose={() => setNotifySporcu(null)}
+        sporcu={notifySporcu}
+        initialType={notifyTemplateType}
         onSuccess={(msg) => triggerToast(msg)}
       />
     </div>

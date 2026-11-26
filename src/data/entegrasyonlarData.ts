@@ -68,6 +68,19 @@ export const INITIAL_INTEGRATIONS: EntegrasyonItem[] = [
     targetPage: 'sportsfly-intelligence',
     connectedAt: '24.10.2026',
   },
+  {
+    id: 'int-sportsfly-studio',
+    name: 'SportsFly Studio',
+    category: 'Tasarım & Pazarlama',
+    description: 'Kulübünüzün tasarım ve içerik merkezi. Duyuru tasarımları, maç & turnuva afişleri, sporcu kartları ve Instagram post/story şablonlarını canlı kulüp verilerinizle hazırlayıp PNG, JPEG veya PDF olarak dışa aktarın.',
+    iconName: 'Palette',
+    badge: 'Yeni',
+    isRecommended: true,
+    isActive: true,
+    isInternalModule: true,
+    targetPage: 'sportsfly-studio',
+    connectedAt: '25.11.2026',
+  },
 ];
 
 const INTEGRATIONS_STORAGE_KEY = 'sportsfly_integrations_list_v2';

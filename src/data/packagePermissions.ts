@@ -791,6 +791,7 @@ export function isPageAllowedForPlan(
       'envanter-yonetimi',
       'sporcular',
       'entegrasyonlar',
+      'sportsfly-studio',
       'destek',
       'anasayfa',
     ];

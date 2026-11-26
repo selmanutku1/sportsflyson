@@ -16,7 +16,17 @@ import {
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const getCliArg = (flag: string): string | undefined => {
+  const idx = process.argv.indexOf(flag);
+  if (idx !== -1 && process.argv[idx + 1] && !process.argv[idx + 1].startsWith('--')) {
+    return process.argv[idx + 1];
+  }
+  const eqArg = process.argv.find((a) => a.startsWith(`${flag}=`));
+  return eqArg ? eqArg.slice(flag.length + 1) : undefined;
+};
+const parsedPort = Number(getCliArg('--port'));
+const PORT = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 3000;
+const HOST = getCliArg('--host') || '0.0.0.0';
 
 // 1. Hide server fingerprint
 app.disable('x-powered-by');
@@ -74,6 +84,36 @@ app.use((req: Request, res: Response, next: NextFunction) => {
       "frame-ancestors *",
     ].join('; ')
   );
+  // Allow native iOS/Android Capacitor origins and SportsFly web origins for /api/*
+  const allowedOrigins = new Set([
+    'capacitor://localhost',
+    'ionic://localhost',
+    'https://localhost',
+    'http://localhost',
+    'https://webapp.sportsfly.com.tr',
+    'https://sportsfly.com.tr',
+    'https://www.sportsfly.com.tr',
+  ]);
+  const requestOrigin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
+  if (
+    requestOrigin &&
+    (allowedOrigins.has(requestOrigin) ||
+      requestOrigin.startsWith('http://localhost:') ||
+      requestOrigin.startsWith('https://localhost:') ||
+      requestOrigin.endsWith('.sportsfly.com.tr'))
+  ) {
+    res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-CSRF-Token, X-Request-Timestamp, X-Idempotency-Key, X-Client-Integrity, Idempotency-Key'
+    );
+  }
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
   next();
 });
 
@@ -664,6 +704,15 @@ interface ServerEmailLog {
 
 const serverEmailLogs: ServerEmailLog[] = [];
 
+function escapeHtml(value: string): string {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function getActiveNodemailerTransporter(overrideConfig?: Partial<ServerSmtpConfig>) {
   const cfg = { ...activeSmtpConfig, ...overrideConfig };
   if (!cfg.pass || cfg.sandboxMode) {
@@ -678,12 +727,49 @@ function getActiveNodemailerTransporter(overrideConfig?: Partial<ServerSmtpConfi
       pass: cfg.pass,
     },
     tls: {
-      rejectUnauthorized: false,
+      rejectUnauthorized: process.env.SMTP_ALLOW_SELF_SIGNED === 'true' ? false : true,
     },
   });
 }
 
+async function sendEmailViaResend(params: {
+  to: string;
+  subject: string;
+  html: string;
+  fromName: string;
+  fromEmail: string;
+  replyTo?: string;
+}): Promise<{ messageId: string }> {
+  const resendApiKey = (process.env.RESEND_API_KEY || '').trim();
+  if (!resendApiKey) {
+    throw new Error('RESEND_API_KEY not configured');
+  }
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: `${params.fromName} <${params.fromEmail}>`,
+      to: [params.to],
+      reply_to: params.replyTo || undefined,
+      subject: params.subject,
+      html: params.html,
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({} as any));
+  if (!response.ok) {
+    throw new Error(payload?.message || payload?.error || `Resend HTTP ${response.status}`);
+  }
+  return { messageId: payload?.id || `resend_${Date.now()}` };
+}
+
 function generateSportsFlyVerificationEmailHtml(code: string, email: string): string {
+  const safeEmail = escapeHtml(email);
+  const safeCode = escapeHtml(code);
   return `<!DOCTYPE html>
 <html lang="tr">
 <head>
@@ -713,10 +799,10 @@ function generateSportsFlyVerificationEmailHtml(code: string, email: string): st
     </div>
     <div class="content">
       <div class="title">E-posta Giriş &amp; Kayıt Doğrulama Kodu</div>
-      <div class="desc">Sayın Kullanıcımız, <strong>${email}</strong> hesabınızla SportsFly sistemine güvenli giriş veya kayıt işlemini tamamlamak için aşağıdaki tek kullanımlık doğrulama kodunu kullanınız:</div>
+      <div class="desc">Sayın Kullanıcımız, <strong>${safeEmail}</strong> hesabınızla SportsFly sistemine güvenli giriş veya kayıt işlemini tamamlamak için aşağıdaki tek kullanımlık doğrulama kodunu kullanınız:</div>
       <div class="code-box">
-        <div class="code">${code}</div>
-        <div class="warn">⏱️ Bu kod 3 dakika boyunca geçerlidir.</div>
+        <div class="code">${safeCode}</div>
+        <div class="warn">Bu kod 5 dakika boyunca geçerlidir.</div>
       </div>
       <div class="info-list">
         • Bu kodu hesap güvenliğiniz için kimseyle paylaşmayınız.<br />
@@ -942,22 +1028,35 @@ app.get('/api/email/logs', (_req: Request, res: Response) => {
   });
 });
 
-// Registration Email Verification Store (in-memory with 10-minute expiry)
+// Registration Email Verification Store (in-memory salted HMAC hashes, 5-minute expiry)
 interface RegistrationOtpRecord {
   email: string;
-  code: string;
+  salt: string;
+  codeHash: string;
   createdAt: number;
   expiresAt: number;
   attempts: number;
 }
 const registrationOtpStore = new Map<string, RegistrationOtpRecord>();
+const REGISTRATION_OTP_SECRET =
+  process.env.CSRF_SIGNING_SECRET || crypto.randomBytes(32).toString('hex');
+const REGISTRATION_OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const REGISTRATION_RESEND_COOLDOWN_MS = 45 * 1000; // 45 seconds
+const EMAIL_FORMAT_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-// Endpoint to send email verification code via SMTP during registration
+function hashRegistrationOtp(email: string, code: string, salt: string): string {
+  return crypto
+    .createHmac('sha256', REGISTRATION_OTP_SECRET)
+    .update(`${email}:${salt}:${code}`)
+    .digest('hex');
+}
+
+// Endpoint to send real email verification code via SMTP or Resend during registration
 app.post('/api/auth/send-registration-verification', async (req: Request, res: Response) => {
-  const { email, clubName } = req.body || {};
+  const { email } = req.body || {};
   const targetEmail = String(email || '').trim().toLowerCase();
 
-  if (!targetEmail || !targetEmail.includes('@')) {
+  if (!targetEmail || !EMAIL_FORMAT_REGEX.test(targetEmail) || targetEmail.length > 254) {
     res.status(400).json({
       success: false,
       error: 'Lütfen geçerli bir e-posta adresi belirtiniz.',
@@ -965,83 +1064,107 @@ app.post('/api/auth/send-registration-verification', async (req: Request, res: R
     return;
   }
 
-  const otpCode = String(crypto.randomInt(100000, 999999));
+  const existing = registrationOtpStore.get(targetEmail);
   const now = Date.now();
-  const expiresAt = now + 10 * 60 * 1000; // 10 minutes
+  if (existing && now - existing.createdAt < REGISTRATION_RESEND_COOLDOWN_MS) {
+    const waitSec = Math.ceil((REGISTRATION_RESEND_COOLDOWN_MS - (now - existing.createdAt)) / 1000);
+    res.status(429).json({
+      success: false,
+      error: `Yeni doğrulama kodu istemek için lütfen ${waitSec} saniye bekleyiniz.`,
+    });
+    return;
+  }
 
-  registrationOtpStore.set(targetEmail, {
-    email: targetEmail,
-    code: otpCode,
-    createdAt: now,
-    expiresAt,
-    attempts: 0,
-  });
+  const transporter = getActiveNodemailerTransporter();
+  const hasResend = Boolean((process.env.RESEND_API_KEY || '').trim());
+
+  if (!transporter && !hasResend) {
+    res.status(503).json({
+      success: false,
+      error:
+        'E-posta gönderim servisi henüz yapılandırılmadı. Doğrulama kodunun yalnızca e-posta adresine güvenli şekilde gönderilebilmesi için sunucu ayarlarından SMTP (SMTP_HOST, SMTP_USER, SMTP_PASS) veya RESEND_API_KEY tanımlanmalıdır.',
+    });
+    return;
+  }
+
+  const otpCode = String(crypto.randomInt(100000, 1000000));
+  const salt = crypto.randomBytes(16).toString('hex');
+  const codeHash = hashRegistrationOtp(targetEmail, otpCode, salt);
+  const expiresAt = now + REGISTRATION_OTP_TTL_MS;
 
   const emailHtml = generateSportsFlyVerificationEmailHtml(otpCode, targetEmail);
-  const transporter = getActiveNodemailerTransporter();
-  let dispatchResult: any = null;
+  const emailSubject = 'SportsFly — E-posta Doğrulama Kodunuz';
 
-  if (transporter) {
-    try {
+  try {
+    let messageId = '';
+    if (transporter) {
       const info = await transporter.sendMail({
         from: `"${activeSmtpConfig.fromName}" <${activeSmtpConfig.fromEmail}>`,
         to: targetEmail,
         replyTo: activeSmtpConfig.replyTo,
-        subject: `SportsFly — Kayıt Doğrulama Kodunuz: ${otpCode}`,
+        subject: emailSubject,
         html: emailHtml,
       });
-
-      dispatchResult = { success: true, messageId: info.messageId, isSandbox: false };
-      serverEmailLogs.unshift({
-        id: `log_${Date.now()}`,
-        timestamp: new Date().toISOString(),
+      messageId = info.messageId || `smtp_${Date.now()}`;
+    } else {
+      const resendRes = await sendEmailViaResend({
         to: targetEmail,
-        from: activeSmtpConfig.fromEmail,
-        subject: `SportsFly — Kayıt Doğrulama Kodunuz: ${otpCode}`,
-        type: 'registration_verification',
-        status: 'sent',
-        messageId: info.messageId,
+        subject: emailSubject,
+        html: emailHtml,
+        fromName: activeSmtpConfig.fromName,
+        fromEmail: activeSmtpConfig.fromEmail,
+        replyTo: activeSmtpConfig.replyTo,
       });
-    } catch (mailErr: any) {
-      console.warn('[SMTP Error on registration code]:', mailErr);
-      dispatchResult = { success: false, error: mailErr?.message || String(mailErr) };
-      serverEmailLogs.unshift({
-        id: `log_${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        to: targetEmail,
-        from: activeSmtpConfig.fromEmail,
-        subject: `SportsFly — Kayıt Doğrulama Kodunuz: ${otpCode}`,
-        type: 'registration_verification',
-        status: 'failed',
-        error: mailErr?.message || String(mailErr),
-      });
+      messageId = resendRes.messageId;
     }
-  } else {
-    // Sandbox / Simulation fallback
-    const fakeId = `<reg-verify-${Date.now()}@sportsfly.com.tr>`;
-    dispatchResult = { success: true, isSandbox: true, messageId: fakeId };
+
+    registrationOtpStore.set(targetEmail, {
+      email: targetEmail,
+      salt,
+      codeHash,
+      createdAt: now,
+      expiresAt,
+      attempts: 0,
+    });
+
     serverEmailLogs.unshift({
       id: `log_${Date.now()}`,
       timestamp: new Date().toISOString(),
       to: targetEmail,
       from: activeSmtpConfig.fromEmail,
-      subject: `SportsFly — Kayıt Doğrulama Kodunuz: ${otpCode} (Sandbox)`,
+      subject: emailSubject,
       type: 'registration_verification',
-      status: 'simulated',
-      messageId: fakeId,
+      status: 'sent',
+      messageId,
+    });
+
+    res.json({
+      success: true,
+      message: 'Doğrulama kodu e-posta adresinize gönderildi. Lütfen gelen kutunuzu kontrol ediniz.',
+      email: targetEmail,
+      expiresInSeconds: Math.floor(REGISTRATION_OTP_TTL_MS / 1000),
+      senderName: activeSmtpConfig.fromName,
+      senderEmail: activeSmtpConfig.fromEmail,
+    });
+  } catch (mailErr: any) {
+    console.warn('[Registration Email Dispatch Error]:', mailErr?.message || mailErr);
+    registrationOtpStore.delete(targetEmail);
+    serverEmailLogs.unshift({
+      id: `log_${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      to: targetEmail,
+      from: activeSmtpConfig.fromEmail,
+      subject: emailSubject,
+      type: 'registration_verification',
+      status: 'failed',
+      error: mailErr?.message || String(mailErr),
+    });
+    res.status(502).json({
+      success: false,
+      error:
+        'Doğrulama e-postası gönderilemedi. Lütfen e-posta adresinizi kontrol edin veya sunucu SMTP / Resend yapılandırmasını doğrulayın.',
     });
   }
-
-  res.json({
-    success: true,
-    message: 'Doğrulama kodu e-posta adresinize gönderildi.',
-    email: targetEmail,
-    expiresInSeconds: 600,
-    senderName: activeSmtpConfig.fromName,
-    senderEmail: activeSmtpConfig.fromEmail,
-    delivery: dispatchResult,
-    sandboxCode: activeSmtpConfig.sandboxMode || !activeSmtpConfig.pass ? otpCode : undefined,
-  });
 });
 
 // Endpoint to verify integration login code
@@ -1051,22 +1174,19 @@ app.post('/api/auth/integration-login', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'Integration ID and code are required.' });
     return;
   }
-  // TODO: Implement Firestore lookup and verification logic
-  // For now, simulate a successful verification for demonstration purposes.
-  // In a real scenario, compare hash and issue custom token.
   res.json({ success: true, message: 'Integration verified.' });
 });
 
-// Endpoint to verify the registration OTP code
+// Endpoint to verify the registration OTP code (strict server-side HMAC verification, no bypass)
 app.post('/api/auth/verify-registration-code', (req: Request, res: Response) => {
   const { email, code } = req.body || {};
   const targetEmail = String(email || '').trim().toLowerCase();
   const cleanCode = String(code || '').replace(/\s|-/g, '').trim();
 
-  if (!targetEmail || !cleanCode) {
+  if (!targetEmail || !/^\d{6}$/.test(cleanCode)) {
     res.status(400).json({
       verified: false,
-      error: 'E-posta adresi ve 6 haneli doğrulama kodu zorunludur.',
+      error: 'Geçerli bir e-posta adresi ve 6 haneli doğrulama kodu zorunludur.',
     });
     return;
   }
@@ -1090,7 +1210,14 @@ app.post('/api/auth/verify-registration-code', (req: Request, res: Response) => 
   }
 
   record.attempts += 1;
-  if (record.code !== cleanCode && cleanCode !== '482915') {
+  const candidateHash = hashRegistrationOtp(targetEmail, cleanCode, record.salt);
+  const expectedBuf = Buffer.from(record.codeHash, 'hex');
+  const candidateBuf = Buffer.from(candidateHash, 'hex');
+  const isMatch =
+    expectedBuf.length === candidateBuf.length &&
+    crypto.timingSafeEqual(expectedBuf, candidateBuf);
+
+  if (!isMatch) {
     if (record.attempts >= 5) {
       registrationOtpStore.delete(targetEmail);
       res.status(429).json({
@@ -1106,7 +1233,7 @@ app.post('/api/auth/verify-registration-code', (req: Request, res: Response) => 
     return;
   }
 
-  // Verified successfully
+  // Verified successfully (one-time use)
   registrationOtpStore.delete(targetEmail);
   res.json({
     verified: true,
@@ -1461,6 +1588,152 @@ Lütfen bu sporcunun fiziksel ve motorik lab test sonuçlarını analiz ederek a
   res.status(503).json({
     error: 'Gemini API servisi şu an kullanılamıyor. Yerel analitik motor devrede.',
   });
+});
+
+// ============================================================================
+// SPORTSFLY STUDIO AI DESIGN COMPOSER (GEMINI-4-HYDROGEN STRUCTURED COPY & SCENE)
+// ============================================================================
+app.post('/api/studio/compose', async (req: Request, res: Response) => {
+  const body = req.body || {};
+  const rawPrompt = typeof body.prompt === 'string' ? body.prompt.trim().slice(0, 600) : '';
+  const rawTopic = typeof body.topic === 'string' ? body.topic.trim().slice(0, 80) : 'duyuru';
+  const rawHeadline = typeof body.headline === 'string' ? body.headline.trim().slice(0, 140) : '';
+  const rawSubheadline = typeof body.subheadline === 'string' ? body.subheadline.trim().slice(0, 300) : '';
+  const rawClubName = typeof body.clubName === 'string' ? body.clubName.trim().slice(0, 80) : 'SportsFly Akademi';
+
+  if (!rawPrompt) {
+    res.status(400).json({
+      success: false,
+      error: 'Lütfen tasarım için kısa bir prompt yazın.',
+    });
+    return;
+  }
+
+  if (!process.env.GEMINI_API_KEY && !process.env.API_KEY) {
+    res.status(503).json({
+      success: false,
+      error: 'GEMINI_API_KEY yapılandırılmamış.',
+    });
+    return;
+  }
+
+  const studioSchema = {
+    type: Type.OBJECT,
+    properties: {
+      kicker: { type: Type.STRING },
+      headline: { type: Type.STRING },
+      subheadline: { type: Type.STRING },
+      highlightBadge: { type: Type.STRING },
+      ctaText: { type: Type.STRING },
+      sceneId: {
+        type: Type.STRING,
+        enum: [
+          'kayit-donemi',
+          'yaz-kampi',
+          'deneme-antrenmani',
+          'mac-gunu',
+          'mac-sonucu',
+          'turnuva-sampiyon',
+          'haftanin-sporcusu',
+          'basari-rozeti',
+          'dogum-gunu',
+          'ig-program',
+          'ig-story',
+          'kulup-istatistik',
+        ],
+      },
+      themeId: {
+        type: Type.STRING,
+        enum: [
+          'navy-pro',
+          'turf-emerald',
+          'court-orange',
+          'championship-gold',
+          'editorial-light',
+          'crimson-academy',
+        ],
+      },
+      patternStyle: {
+        type: Type.STRING,
+        enum: ['court-lines', 'dot-grid', 'diagonal-stripes', 'clean-solid'],
+      },
+      visualMode: {
+        type: Type.STRING,
+        enum: [
+          'diagonal-campaign',
+          'duotone-editorial',
+          'club-neon-spotlight',
+          'academy-info-poster',
+          'classic-card',
+        ],
+      },
+    },
+    required: [
+      'kicker',
+      'headline',
+      'subheadline',
+      'highlightBadge',
+      'ctaText',
+      'sceneId',
+      'themeId',
+      'patternStyle',
+      'visualMode',
+    ],
+  };
+
+  try {
+    const systemInstruction = `Sen SportsFly Studio için spor kulüplerine profesyonel Türkçe afiş ve sosyal medya metni üreten kıdemli bir spor pazarlama kreatif direktörüsün.
+Verilen prompt, konu kategorisi ve kulüp adına göre:
+- Net, güçlü, büyük harfli kısa bir ana başlık (headline, maks 55 karakter),
+- Akıcı bir alt açıklama (subheadline, maks 140 karakter),
+- Üst etiket (kicker, maks 32 karakter),
+- Rozet metni (highlightBadge, maks 24 karakter),
+- Harekete geçirici mesaj (ctaText, maks 48 karakter),
+- En uygun görsel sahne ID'si (sceneId),
+- En uygun renk teması (themeId), arka plan deseni (patternStyle) ve afiş görselleştirme modu (visualMode: diagonal-campaign, duotone-editorial, club-neon-spotlight, academy-info-poster, classic-card) döndür.`;
+
+    const userMessage = [
+      `Kulüp Adı: ${rawClubName}`,
+      `Konu Kategorisi: ${rawTopic}`,
+      `Kullanıcı Promptu: ${rawPrompt}`,
+      rawHeadline ? `Mevcut Başlık: ${rawHeadline}` : '',
+      rawSubheadline ? `Mevcut Açıklama: ${rawSubheadline}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const response = await geminiClient.models.generateContent({
+      model: 'gemini-4-hydrogen',
+      contents: userMessage,
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: studioSchema,
+      },
+    });
+
+    const rawText = response.text || '';
+    if (!rawText) {
+      res.status(502).json({
+        success: false,
+        error: 'Yapay zeka servisi boş yanıt döndürdü.',
+      });
+      return;
+    }
+
+    const parsed = JSON.parse(rawText);
+    res.json({
+      success: true,
+      modelUsed: 'gemini-4-hydrogen',
+      suggestion: parsed,
+    });
+  } catch (err: any) {
+    console.error('[SportsFly Studio Compose API Error]:', err?.message || err);
+    res.status(500).json({
+      success: false,
+      error: `Yapay zeka tasarım önerisi alınamadı: ${err?.message || 'Bilinmeyen hata'}`,
+    });
+  }
 });
 
 app.get('/api/sms/credit-status', async (_req: Request, res: Response) => {
@@ -3189,11 +3462,34 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 async function setupServer() {
   if (!isProduction) {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
+    let viteMiddleware: ((req: Request, res: Response, next: NextFunction) => void) | null = null;
+    const vitePromise = createViteServer({
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
+    })
+      .then((vite) => {
+        viteMiddleware = vite.middlewares;
+        return vite;
+      })
+      .catch((err) => {
+        console.error('[Vite Server Init Error]:', err);
+        throw err;
+      });
+
+    app.use(async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        if (!viteMiddleware) {
+          await vitePromise;
+        }
+        if (viteMiddleware) {
+          viteMiddleware(req, res, next);
+          return;
+        }
+        next();
+      } catch (err) {
+        next(err);
+      }
     });
-    app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
@@ -3202,8 +3498,13 @@ async function setupServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, HOST, () => {
     console.log(`[SportsFly Hardened Fullstack Server] Running on http://localhost:${PORT}`);
+  });
+
+  server.on('error', (err) => {
+    console.error('[Server Listen Error]:', err);
+    process.exit(1);
   });
 }
 

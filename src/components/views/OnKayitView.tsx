@@ -39,6 +39,10 @@ import { OnKayitItem, OnKayitDurumu, SporcuItem } from '../../types';
 import { INITIAL_ON_KAYITLAR, INITIAL_SPORCULAR } from '../../data/mockData';
 import { LegalDocPreviewModal } from '../modals/LegalDocPreviewModal';
 import { TURKEY_CITIES, getDistrictsForCity } from '../../data/turkeyCitiesData';
+import { auth } from '../../firebase';
+import { onKayitlarService } from '../../services/operationsFirestoreService';
+import { sporcularService, getAuthenticatedOwnerId } from '../../services/firestoreService';
+import { mapSporcuToFirestoreDoc } from '../../services/firestoreCollectionsSchema';
 
 export const OnKayitView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'liste' | 'yeni-kayit'>('liste');
@@ -60,7 +64,7 @@ export const OnKayitView: React.FC = () => {
     } catch (e) {}
   }, [records]);
 
-  // Synchronize on cross-view / cross-tab changes
+  // Synchronize on cross-view / cross-tab changes & Firestore realtime updates
   useEffect(() => {
     const handleSync = () => {
       const saved = localStorage.getItem('sportsfly_on_kayitlar');
@@ -75,9 +79,20 @@ export const OnKayitView: React.FC = () => {
     };
     window.addEventListener('sportsfly_on_kayitlar_updated', handleSync);
     window.addEventListener('storage', handleSync);
+
+    let unsubFirestore = () => {};
+    if (auth.currentUser) {
+      unsubFirestore = onKayitlarService.subscribe((items) => {
+        if (items.length > 0) {
+          setRecords(items);
+        }
+      });
+    }
+
     return () => {
       window.removeEventListener('sportsfly_on_kayitlar_updated', handleSync);
       window.removeEventListener('storage', handleSync);
+      unsubFirestore();
     };
   }, []);
 
@@ -228,7 +243,7 @@ export const OnKayitView: React.FC = () => {
   };
 
   // Handle Form Submit
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formData.sporcuAdSoyad || !formData.veliAdSoyad || !formData.veliTelefon) {
@@ -255,11 +270,20 @@ export const OnKayitView: React.FC = () => {
     setRecords([newRecord, ...records]);
     setFormData(initialFormState);
     setActiveTab('liste');
+
+    if (auth.currentUser) {
+      try {
+        await onKayitlarService.upsert(newRecord);
+      } catch (err) {
+        console.error('Ön kayıt Firestore kaydı hatası:', err);
+      }
+    }
+
     triggerNotification(`"${newRecord.sporcuAdSoyad}" için ${newRecord.onKayitNo} numaralı ön kayıt başarıyla oluşturuldu!`);
   };
 
   // Convert Pre-registration to real Athlete (Autonomously mapping profile fields)
-  const convertToSporcu = (item: OnKayitItem) => {
+  const convertToSporcu = async (item: OnKayitItem) => {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const now = new Date();
     const formattedDate = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`;
@@ -290,7 +314,16 @@ export const OnKayitView: React.FC = () => {
     if (!currentSporcular.some(s => s.name === newSporcu.name && s.phone === newSporcu.phone)) {
       currentSporcular = [newSporcu, ...currentSporcular];
       localStorage.setItem('sportsfly_sporcular', JSON.stringify(currentSporcular));
-      
+
+      if (auth.currentUser) {
+        try {
+          const ownerId = getAuthenticatedOwnerId();
+          await sporcularService.add(mapSporcuToFirestoreDoc(newSporcu, ownerId));
+        } catch (err) {
+          console.error('Ön kayıttan sporcu aktarma Firestore hatası:', err);
+        }
+      }
+
       // Dispatch events for immediate reactivity
       window.dispatchEvent(new Event('sportsfly_sporcular_updated'));
       triggerNotification(`"${newSporcu.name}" isimli sporcu otomatik olarak ana listeye aktarıldı!`);
@@ -300,7 +333,8 @@ export const OnKayitView: React.FC = () => {
   };
 
   // Quick change status
-  const handleQuickStatusChange = (id: string, newStatus: OnKayitDurumu) => {
+  const handleQuickStatusChange = async (id: string, newStatus: OnKayitDurumu) => {
+    let updatedTarget: OnKayitItem | null = null;
     setRecords((prev) =>
       prev.map((r) => {
         if (r.id === id) {
@@ -312,14 +346,24 @@ export const OnKayitView: React.FC = () => {
               ' ' +
               new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
           };
+          updatedTarget = updatedRecord;
           if (newStatus === 'Kayıt Oldu') {
-            convertToSporcu(updatedRecord);
+            void convertToSporcu(updatedRecord);
           }
           return updatedRecord;
         }
         return r;
       })
     );
+
+    if (auth.currentUser && updatedTarget) {
+      try {
+        await onKayitlarService.upsert(updatedTarget);
+      } catch (err) {
+        console.error('Ön kayıt durum güncelleme Firestore hatası:', err);
+      }
+    }
+
     triggerNotification(`Durum "${newStatus}" olarak güncellendi.`);
   };
 

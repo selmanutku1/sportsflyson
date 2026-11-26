@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getStoredUserProfile, saveStoredUserProfile } from '../data/userProfile';
+import { resolveApiUrl } from '../utils/mobileBridge';
 
 export interface RegisteredUser {
   id: string;
@@ -265,7 +266,7 @@ export async function registerNewUser(params: {
 
   // 3. Also post application to demo requests endpoint & Firestore /spor-okulu-basvurulari for admin notifications
   try {
-    fetch('/api/demo-requests', {
+    fetch(resolveApiUrl('/api/demo-requests'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -357,7 +358,7 @@ export async function approveRegisteredUser(
 
   // Also sync with /api/demo-requests if applicable
   try {
-    fetch(`/api/demo-requests/${updatedUser.id}`, {
+    fetch(resolveApiUrl(`/api/demo-requests/${updatedUser.id}`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'onaylandi' }),

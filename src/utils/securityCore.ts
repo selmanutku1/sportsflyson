@@ -1,3 +1,5 @@
+import { resolveApiUrl } from './mobileBridge';
+
 /**
  * SportsFly Security Core — Client-Side Cryptographic Vault, Input Sanitizer,
  * PCI-DSS Guard, Anti-Tamper Storage & Secure API Client
@@ -603,7 +605,7 @@ export async function getCsrfToken(forceRefresh = false): Promise<string> {
     return cachedCsrfToken;
   }
   try {
-    const res = await fetch('/api/security/csrf-token', {
+    const res = await fetch(resolveApiUrl('/api/security/csrf-token'), {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -667,7 +669,7 @@ export async function secureFetch(
     }
   }
 
-  return fetch(url, {
+  return fetch(resolveApiUrl(url), {
     ...options,
     headers,
   });

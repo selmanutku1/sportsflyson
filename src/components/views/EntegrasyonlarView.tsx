@@ -31,6 +31,7 @@ import {
   Key,
   Globe,
   ArrowLeft,
+  Palette,
 } from 'lucide-react';
 import { EntegrasyonItem, NavPage } from '../../types';
 import { getStoredIntegrations, saveStoredIntegrations } from '../../data/entegrasyonlarData';
@@ -40,6 +41,7 @@ import { EnvanterYonetimiView } from './moduller/EnvanterYonetimiView';
 import { SportsFlyLabView } from './moduller/SportsFlyLabView';
 import { ClubWebsiteBuilderView } from './moduller/ClubWebsiteBuilderView';
 import { SportsFlyIntelligenceView } from './moduller/SportsFlyIntelligenceView';
+import { SportsFlyStudioView } from './moduller/SportsFlyStudioView';
 import { SportsFlyVectorMark } from '../SportsFlyLogo';
 import { getStoredUserProfile } from '../../data/userProfile';
 import { isSuperAdminUser } from '../../data/packagePermissions';
@@ -110,8 +112,8 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
   const [onlyRecommended, setOnlyRecommended] = useState(false);
   const [onlyActive, setOnlyActive] = useState(false);
 
-  // Active Sub-module viewing (e.g. if user opens SporPuan, Turnuva, Envanter, SportsFly Lab, Kulup Web Sitesi, or SportsFly Intelligence directly inside Integrations)
-  const [activeSubModule, setActiveSubModule] = useState<'sportsfly-lab' | 'sporpuan' | 'turnuva' | 'envanter' | 'kulup-web-sitesi' | 'sportsfly-intelligence' | null>(null);
+  // Active Sub-module viewing (e.g. if user opens SporPuan, Turnuva, Envanter, SportsFly Lab, Kulup Web Sitesi, SportsFly Intelligence, or SportsFly Studio directly inside Integrations)
+  const [activeSubModule, setActiveSubModule] = useState<'sportsfly-lab' | 'sporpuan' | 'turnuva' | 'envanter' | 'kulup-web-sitesi' | 'sportsfly-intelligence' | 'sportsfly-studio' | null>(null);
 
   // Settings Modal for 3rd party APIs (İyzico, WhatsApp, etc.)
   const [settingsModalItem, setSettingsModalItem] = useState<EntegrasyonItem | null>(null);
@@ -142,6 +144,8 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
           setActiveSubModule('kulup-web-sitesi');
         } else if (selectedId === 'int-sportsfly-intelligence') {
           setActiveSubModule('sportsfly-intelligence');
+        } else if (selectedId === 'int-sportsfly-studio') {
+          setActiveSubModule('sportsfly-studio');
         } else {
           const found = integrations.find((i) => i.id === selectedId);
           if (found) {
@@ -203,6 +207,8 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
       setActiveSubModule('kulup-web-sitesi');
     } else if (item.id === 'int-sportsfly-intelligence') {
       setActiveSubModule('sportsfly-intelligence');
+    } else if (item.id === 'int-sportsfly-studio') {
+      setActiveSubModule('sportsfly-studio');
     } else {
       setSettingsModalItem(item);
       setApiKeyInput(item.apiKey || '');
@@ -210,15 +216,20 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
     }
   };
 
-  // Open integration action (bypasses pass code for Super Admin, Club Website, and Intelligence AI)
+  // Open integration action (bypasses pass code for Super Admin, Club Website, Intelligence AI, and SportsFly Studio)
   const handleOpenIntegration = (item: EntegrasyonItem) => {
     if (!item.isActive) {
       showNotification(`"${item.name}" entegrasyonu ayarlardan pasif durumda olduğu için açılamaz.`);
       return;
     }
 
-    // Süper Admin, Kulüp Web Sitesi ve Intelligence AI için geçiş kodu sorulmaz, doğrudan açılır!
-    if (isSuperAdmin || item.id === 'int-kulup-web-sitesi' || item.id === 'int-sportsfly-intelligence') {
+    // Süper Admin, Kulüp Web Sitesi, Intelligence AI ve SportsFly Studio için geçiş kodu sorulmaz, doğrudan açılır!
+    if (
+      isSuperAdmin ||
+      item.id === 'int-kulup-web-sitesi' ||
+      item.id === 'int-sportsfly-intelligence' ||
+      item.id === 'int-sportsfly-studio'
+    ) {
       openModuleDirectly(item);
       return;
     }
@@ -366,15 +377,17 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
         return <Sparkles className="w-6 h-6 sm:w-7 sm:h-7 text-emerald-500" />;
       case 'Globe':
         return <Globe className="w-6 h-6 sm:w-7 sm:h-7 text-indigo-500" />;
+      case 'Palette':
+        return <Palette className="w-6 h-6 sm:w-7 sm:h-7 text-white" />;
       default:
         return <Layers className="w-6 h-6 sm:w-7 sm:h-7 text-slate-600" />;
     }
   };
 
-  // If user is inside a submodule (SportsFly Lab, SporPuan, Turnuva, Envanter, or Kulup Web Sitesi), show the submodule with a responsive header
+  // If user is inside a submodule (SportsFly Lab, SporPuan, Turnuva, Envanter, Kulup Web Sitesi, SportsFly Intelligence, or SportsFly Studio)
   if (activeSubModule) {
     const subModules: Array<{
-      key: 'sportsfly-lab' | 'sporpuan' | 'turnuva' | 'envanter' | 'kulup-web-sitesi' | 'sportsfly-intelligence';
+      key: 'sportsfly-lab' | 'sporpuan' | 'turnuva' | 'envanter' | 'kulup-web-sitesi' | 'sportsfly-intelligence' | 'sportsfly-studio';
       shortLabel: string;
       fullLabel: string;
     }> = [
@@ -408,6 +421,11 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
         shortLabel: 'Intelligence AI',
         fullLabel: 'SportsFly Intelligence — Yapay Zeka Büyüme Asistanı',
       },
+      {
+        key: 'sportsfly-studio',
+        shortLabel: 'SportsFly Studio',
+        fullLabel: 'SportsFly Studio — Kulüp Tasarım ve İçerik Merkezi',
+      },
     ];
 
     const activeModuleMeta = subModules.find((m) => m.key === activeSubModule);
@@ -415,7 +433,7 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
     return (
       <div className="space-y-3 sm:space-y-4 print:space-y-0">
         {/* Responsive Entegrasyon Oturum Çubuğu */}
-        {activeSubModule !== 'sportsfly-lab' && (
+        {activeSubModule !== 'sportsfly-lab' && activeSubModule !== 'sportsfly-studio' && (
           <div className="bg-white dark:bg-[#111c2e] p-3 sm:px-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2.5 shadow-2xs print:hidden">
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
@@ -455,6 +473,12 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
         {activeSubModule === 'envanter' && <EnvanterYonetimiView onToast={onToast} />}
         {activeSubModule === 'kulup-web-sitesi' && <ClubWebsiteBuilderView onToast={onToast} onLogout={onLogout} />}
         {activeSubModule === 'sportsfly-intelligence' && <SportsFlyIntelligenceView onToast={onToast} />}
+        {activeSubModule === 'sportsfly-studio' && (
+          <SportsFlyStudioView
+            onToast={onToast}
+            onBackToIntegrations={() => setActiveSubModule(null)}
+          />
+        )}
       </div>
     );
   }
@@ -743,6 +767,7 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
               {filteredList.map((item) => {
                 const isLab = item.id === 'int-sportsfly-lab';
+                const isStudio = item.id === 'int-sportsfly-studio';
                 return (
                   <div
                     key={item.id}
@@ -750,6 +775,8 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
                     className={`bg-white dark:bg-[#111c2e] rounded-2xl border p-4 sm:p-5 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between cursor-pointer group ${
                       isLab
                         ? 'border-sky-200/90 dark:border-sky-800/70 hover:border-sky-400'
+                        : isStudio
+                        ? 'border-slate-300 dark:border-slate-700 hover:border-[#0F2444] dark:hover:border-sky-500'
                         : 'border-slate-200/90 dark:border-slate-800 hover:border-orange-300 dark:hover:border-slate-700'
                     }`}
                   >
@@ -761,6 +788,8 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
                             className={`w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform ${
                               isLab
                                 ? ''
+                                : isStudio
+                                ? 'bg-[#0F2444]'
                                 : 'bg-slate-50 dark:bg-[#162238] border border-slate-100 dark:border-slate-800'
                             }`}
                           >
@@ -836,6 +865,8 @@ export const EntegrasyonlarView: React.FC<EntegrasyonlarViewProps> = ({
                         className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs ${
                           isLab
                             ? 'bg-slate-900 hover:bg-sky-600 text-white dark:bg-sky-600 dark:hover:bg-sky-500'
+                            : isStudio
+                            ? 'bg-[#0F2444] hover:bg-blue-900 text-white dark:bg-sky-600 dark:hover:bg-sky-500'
                             : 'bg-slate-100 hover:bg-orange-500 hover:text-white dark:bg-slate-800 dark:hover:bg-blue-600 text-slate-700 dark:text-slate-200'
                         }`}
                       >

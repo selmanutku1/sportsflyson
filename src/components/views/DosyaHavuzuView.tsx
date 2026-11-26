@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { resolveApiUrl } from '../../utils/mobileBridge';
 import {
   Upload,
   FileText,
@@ -243,7 +244,7 @@ export const DosyaHavuzuView: React.FC<DosyaHavuzuViewProps> = ({ onNavigate, on
           });
 
           try {
-            const res = await fetch('/api/ai/ocr-athlete-sheet', {
+            const res = await fetch(resolveApiUrl('/api/ai/ocr-athlete-sheet'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({

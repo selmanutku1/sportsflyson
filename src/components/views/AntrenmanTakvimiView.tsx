@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -30,6 +30,8 @@ import {
   downloadTrainingAttendancePdfReport,
   downloadTrainingAttendanceCsvReport,
 } from '../../utils/trainingAttendanceReportGenerator';
+import { auth } from '../../firebase';
+import { antrenmanlarService } from '../../services/operationsFirestoreService';
 
 type CalendarViewMode = 'ay' | 'hafta' | 'gun';
 
@@ -86,6 +88,16 @@ export const AntrenmanTakvimiView: React.FC = () => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 2500);
   };
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const unsub = antrenmanlarService.subscribe((items) => {
+      if (items.length > 0) {
+        setAntrenmanlar(items);
+      }
+    });
+    return () => unsub();
+  }, []);
 
   // Dynamic filter options extracted from dataset + standard options
   const trainerOptions = useMemo(() => {
@@ -219,7 +231,7 @@ export const AntrenmanTakvimiView: React.FC = () => {
   };
 
   // Add Antrenman
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTitle.trim()) return;
 
@@ -246,14 +258,22 @@ export const AntrenmanTakvimiView: React.FC = () => {
 
     setAntrenmanlar((prev) => [newAntrenman, ...prev]);
     setShowAddModal(false);
-    triggerToast('Yeni antrenman seansı başarıyla takvime eklendi!');
-    // Reset
     setFormTitle('');
     setFormNotes('');
+
+    if (auth.currentUser) {
+      try {
+        await antrenmanlarService.upsert(newAntrenman);
+      } catch (err) {
+        console.error('Antrenman seansı Firestore kaydı hatası:', err);
+      }
+    }
+
+    triggerToast('Yeni antrenman seansı başarıyla takvime eklendi!');
   };
 
   // Open session modal with automatic fallback roster if empty
-  const openSessionModal = (session: AntrenmanItem) => {
+  const openSessionModal = async (session: AntrenmanItem) => {
     if (!session.attendees || session.attendees.length === 0) {
       const defaultAthletes = [
         { id: `${session.id}-a1`, name: 'Burak Yılmaz', phone: '+90 535 221 4455', present: true },
@@ -284,6 +304,13 @@ export const AntrenmanTakvimiView: React.FC = () => {
       };
       setSelectedSession(updated);
       setAntrenmanlar((prev) => prev.map((s) => (s.id === session.id ? updated : s)));
+      if (auth.currentUser) {
+        try {
+          await antrenmanlarService.upsert(updated);
+        } catch (err) {
+          console.error('Seans katılımcıları Firestore kaydı hatası:', err);
+        }
+      }
     } else {
       setSelectedSession(session);
     }
@@ -317,32 +344,38 @@ export const AntrenmanTakvimiView: React.FC = () => {
   };
 
   // Toggle Attendance
-  const handleToggleAttendance = (sessionId: string, attendeeId: string) => {
-    setAntrenmanlar((prev) =>
-      prev.map((session) => {
-        if (session.id !== sessionId) return session;
-        const updatedAttendees = session.attendees.map((att) =>
-          att.id === attendeeId ? { ...att, present: !att.present } : att
-        );
-        return { ...session, attendees: updatedAttendees };
-      })
-    );
-
-    if (selectedSession && selectedSession.id === sessionId) {
-      setSelectedSession((prev) => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          attendees: prev.attendees.map((att) =>
+  const handleToggleAttendance = async (sessionId: string, attendeeId: string) => {
+    const targetSession = antrenmanlar.find((s) => s.id === sessionId);
+    const updatedSession = targetSession
+      ? {
+          ...targetSession,
+          attendees: targetSession.attendees.map((att) =>
             att.id === attendeeId ? { ...att, present: !att.present } : att
           ),
-        };
-      });
+        }
+      : null;
+
+    setAntrenmanlar((prev) =>
+      prev.map((session) =>
+        session.id === sessionId && updatedSession ? updatedSession : session
+      )
+    );
+
+    if (selectedSession && selectedSession.id === sessionId && updatedSession) {
+      setSelectedSession(updatedSession);
+    }
+
+    if (auth.currentUser && updatedSession) {
+      try {
+        await antrenmanlarService.upsert(updatedSession);
+      } catch (err) {
+        console.error('Seans yoklama güncellemesi Firestore hatası:', err);
+      }
     }
   };
 
   // Add attendee to session
-  const handleAddAttendee = (sessionId: string) => {
+  const handleAddAttendee = async (sessionId: string) => {
     if (!newAttendeeName.trim()) return;
     const newAtt: AntrenmanAttendee = {
       id: `att-${Date.now()}`,
@@ -351,37 +384,48 @@ export const AntrenmanTakvimiView: React.FC = () => {
       present: true,
     };
 
+    const targetSession = antrenmanlar.find((s) => s.id === sessionId);
+    const updatedSession = targetSession
+      ? {
+          ...targetSession,
+          enrolledCount: targetSession.enrolledCount + 1,
+          attendees: [...targetSession.attendees, newAtt],
+        }
+      : null;
+
     setAntrenmanlar((prev) =>
-      prev.map((s) => {
-        if (s.id !== sessionId) return s;
-        return {
-          ...s,
-          enrolledCount: s.enrolledCount + 1,
-          attendees: [...s.attendees, newAtt],
-        };
-      })
+      prev.map((s) => (s.id === sessionId && updatedSession ? updatedSession : s))
     );
 
-    if (selectedSession && selectedSession.id === sessionId) {
-      setSelectedSession((prev) => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          enrolledCount: prev.enrolledCount + 1,
-          attendees: [...prev.attendees, newAtt],
-        };
-      });
+    if (selectedSession && selectedSession.id === sessionId && updatedSession) {
+      setSelectedSession(updatedSession);
     }
 
     setNewAttendeeName('');
     setNewAttendeePhone('');
+
+    if (auth.currentUser && updatedSession) {
+      try {
+        await antrenmanlarService.upsert(updatedSession);
+      } catch (err) {
+        console.error('Seans katılımcı ekleme Firestore hatası:', err);
+      }
+    }
+
     triggerToast('Sporcu yoklama listesine eklendi!');
   };
 
   // Delete session
-  const handleDeleteSession = (sessionId: string) => {
+  const handleDeleteSession = async (sessionId: string) => {
     setAntrenmanlar((prev) => prev.filter((s) => s.id !== sessionId));
     setSelectedSession(null);
+    if (auth.currentUser) {
+      try {
+        await antrenmanlarService.delete(sessionId);
+      } catch (err) {
+        console.error('Seans silme Firestore hatası:', err);
+      }
+    }
     triggerToast('Antrenman takvimden kaldırıldı.');
   };
 

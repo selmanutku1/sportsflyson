@@ -1,4 +1,9 @@
 // Yoklama Reminder Service
+import { auth } from '../firebase';
+import {
+  yoklamaHatirlaticiLogsService,
+  saveYoklamaConfigToFirestore,
+} from './operationsFirestoreService';
 
 
 export interface ReminderRecipient {
@@ -87,12 +92,17 @@ export function getAutomationConfig(): AutomationRuleConfig {
   return DEFAULT_AUTOMATION_CONFIG;
 }
 
-// Save automation rules config to localStorage
+// Save automation rules config to localStorage and Firestore
 export function saveAutomationConfig(config: AutomationRuleConfig): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
     window.dispatchEvent(new CustomEvent('sportsfly_yoklama_config_updated', { detail: config }));
+    if (auth.currentUser) {
+      saveYoklamaConfigToFirestore(config).catch((e) =>
+        console.warn('[YoklamaConfig] Firestore save warning:', e)
+      );
+    }
   } catch (e) {
     console.error('Failed to save automation config', e);
   }
@@ -193,6 +203,11 @@ export function executeYoklamaReminderTrigger(payload: TriggerReminderPayload): 
 
   const existingLogs = getReminderLogs();
   saveReminderLogs([newLog, ...existingLogs]);
+  if (auth.currentUser) {
+    yoklamaHatirlaticiLogsService.upsert(newLog).catch((e) =>
+      console.warn('[YoklamaReminder] Firestore log save warning:', e)
+    );
+  }
 
   // 5. Dispatch global live event for UI Push Toast Notification & Haptic
   if (typeof window !== 'undefined') {

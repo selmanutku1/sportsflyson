@@ -4,6 +4,7 @@ import {
   initializeAuth,
   setPersistence,
   browserSessionPersistence,
+  browserLocalPersistence,
   browserPopupRedirectResolver,
   type Auth,
 } from 'firebase/auth';
@@ -13,6 +14,7 @@ import {
   getDocFromServer,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+import { isNativeCapacitorApp } from './utils/mobileBridge';
 
 // Resolve configuration from Vercel environment variables or bundled config
 const metaEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
@@ -33,17 +35,18 @@ export const app = getApps().length > 0 ? getApp() : initializeApp(activeFirebas
 // Initialize Firestore with the provisioned database ID
 export const db = getFirestore(app, activeFirebaseConfig.firestoreDatabaseId);
 
-// Initialize Firebase Authentication strictly with tab-scoped session persistence
-// (never reads persistent IndexedDB/localStorage sessions across fresh visits or tabs)
+// Persist Firebase Auth session across preview reloads until explicit logout.
+const preferredPersistence = browserLocalPersistence;
+
 let authInstance: Auth;
 try {
   authInstance = initializeAuth(app, {
-    persistence: browserSessionPersistence,
+    persistence: preferredPersistence,
     popupRedirectResolver: browserPopupRedirectResolver,
   });
 } catch {
   authInstance = getAuth(app);
-  setPersistence(authInstance, browserSessionPersistence).catch(() => {});
+  setPersistence(authInstance, preferredPersistence).catch(() => {});
 }
 export const auth: Auth = authInstance;
 
@@ -104,8 +107,8 @@ export function handleFirestoreError(
     isCorsError: errInfo.error.includes('CORS') || errInfo.error.includes('fetch'),
     isPermissionError: errInfo.error.includes('permission'),
     firebaseConfigUsed: {
-      databaseId: (app as any).options?.databaseId || 'default',
-      projectId: (app as any).options?.projectId,
+      databaseId: activeFirebaseConfig.firestoreDatabaseId || 'default',
+      projectId: activeFirebaseConfig.projectId || (app as any).options?.projectId,
     },
     fullDetails: errInfo
   });
@@ -113,8 +116,14 @@ export function handleFirestoreError(
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Validate connection to Firestore on boot (disabled to prevent timeout warnings when offline/unprovisioned)
+// Validate connection to Firestore on boot
 export async function testFirestoreConnection(): Promise<void> {
-  // No-op
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error('Firestore connection failed: client is offline. Please check your Firebase configuration.');
+    }
+  }
 }
 

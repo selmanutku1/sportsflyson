@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
+import { resolveApiUrl } from '../utils/mobileBridge';
 
 export interface SmtpConfig {
   host: string;
@@ -157,7 +158,7 @@ export async function saveSmtpConfig(config: SmtpConfig): Promise<void> {
 
   // 2. Sync to Node.js backend server memory
   try {
-    await fetch('/api/email/config', {
+    await fetch(resolveApiUrl('/api/email/config'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updated),
@@ -205,7 +206,7 @@ export async function fetchSmtpConfigFromFirestore(): Promise<SmtpConfig> {
 export async function sendTestEmail(targetEmail: string, customConfig?: SmtpConfig): Promise<EmailTestResult> {
   const currentConfig = customConfig || getStoredSmtpConfig();
   try {
-    const res = await fetch('/api/email/test', {
+    const res = await fetch(resolveApiUrl('/api/email/test'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

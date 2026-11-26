@@ -52,6 +52,14 @@ import {
   SUBE_MONTHLY_TRENDS,
 } from '../../data/subeOzetData';
 import { jsPDF } from 'jspdf';
+import { auth } from '../../firebase';
+import {
+  subelerService,
+  clubSettingsService,
+  muhasebeHareketlerService,
+} from '../../services/operationsFirestoreService';
+import { sporcularService, getAuthenticatedOwnerId } from '../../services/firestoreService';
+import { mapSporcuToFirestoreDoc } from '../../services/firestoreCollectionsSchema';
 
 interface SubeOzetViewProps {
   onNavigate?: (page: NavPage) => void;
@@ -122,10 +130,26 @@ export const SubeOzetView: React.FC<SubeOzetViewProps> = ({ onNavigate }) => {
     window.addEventListener('sportsfly_subeler_updated', handleSubelerChange);
     window.addEventListener('sportsfly_sube_data_changed', handleDataChange);
 
+    let unsubSubeler = () => {};
+    let unsubSettings = () => {};
+    if (auth.currentUser) {
+      unsubSubeler = subelerService.subscribe((items) => {
+        if (items.length > 0) setSubeler(items);
+      });
+      unsubSettings = clubSettingsService.subscribe((docs) => {
+        const activeDoc = docs.find((d) => d.settingKey === 'active_sube_id');
+        if (activeDoc?.activeValue) {
+          setActiveBranchId(activeDoc.activeValue);
+        }
+      });
+    }
+
     return () => {
       window.removeEventListener('sportsfly_active_sube_changed', handleActiveChange);
       window.removeEventListener('sportsfly_subeler_updated', handleSubelerChange);
       window.removeEventListener('sportsfly_sube_data_changed', handleDataChange);
+      unsubSubeler();
+      unsubSettings();
     };
   }, []);
 
@@ -300,7 +324,7 @@ export const SubeOzetView: React.FC<SubeOzetViewProps> = ({ onNavigate }) => {
   }, [activeBranchId]);
 
   // Add Transaction Handler
-  const handleSaveTransaction = (e: React.FormEvent) => {
+  const handleSaveTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTxTitle.trim() || !newTxAmount) {
       showToast('Lütfen başlık ve tutar giriniz');
@@ -329,11 +353,31 @@ export const SubeOzetView: React.FC<SubeOzetViewProps> = ({ onNavigate }) => {
     setIsAddTxModalOpen(false);
     setNewTxTitle('');
     setNewTxPayer('');
+
+    if (auth.currentUser) {
+      try {
+        await muhasebeHareketlerService.upsert({
+          id: newTx.id,
+          type: newTx.type,
+          title: newTx.title,
+          category: newTx.category,
+          amount: newTx.amount,
+          date: newTx.date,
+          payerOrPayee: newTx.payerOrPayee,
+          paymentMethod: newTx.paymentMethod,
+          status: 'Tamamlandı',
+          description: newTx.description,
+        });
+      } catch (err) {
+        console.error('Şube muhasebe kaydı Firestore hatası:', err);
+      }
+    }
+
     showToast(`✓ ${newTxType === 'Gelir' ? 'Gelir' : 'Gider'} kaydı başarıyla eklendi.`);
   };
 
   // Add Athlete Handler
-  const handleSaveAthlete = (e: React.FormEvent) => {
+  const handleSaveAthlete = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAthName.trim()) {
       showToast('Lütfen sporcu adını giriniz');
@@ -341,6 +385,7 @@ export const SubeOzetView: React.FC<SubeOzetViewProps> = ({ onNavigate }) => {
     }
 
     const branchIdToUse = activeBranchId === 'all' ? subeler[0]?.id || 'sube-kadikoy' : activeBranchId;
+    const branchMeta = subeler.find((s) => s.id === branchIdToUse);
 
     const newAth: SubeSporcu = {
       id: `sp-custom-${Date.now()}`,
@@ -364,6 +409,32 @@ export const SubeOzetView: React.FC<SubeOzetViewProps> = ({ onNavigate }) => {
     setIsAddAthleteModalOpen(false);
     setNewAthName('');
     setNewAthParent('');
+
+    if (auth.currentUser) {
+      try {
+        const ownerId = getAuthenticatedOwnerId();
+        await sporcularService.add(
+          mapSporcuToFirestoreDoc(
+            {
+              id: newAth.id,
+              name: newAth.name,
+              email: `${newAth.code}@sportsfly-student.com`,
+              phone: newAth.parentPhone,
+              branch: newAth.branch,
+              teamGroup: newAth.group,
+              code: newAth.code,
+              date: newAth.registeredAt,
+              facility: branchMeta?.ad || 'SportsFly Şube',
+              isActive: true,
+            },
+            ownerId
+          )
+        );
+      } catch (err) {
+        console.error('Şube sporcusu Firestore kaydı hatası:', err);
+      }
+    }
+
     showToast(`✓ "${newAth.name}" seçilen şubeye başarıyla kaydedildi.`);
   };
 

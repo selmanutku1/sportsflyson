@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { SportsFlyIcon } from '../SportsFlyLogo';
 import { SporcuKarne } from '../../data/mockKarneData';
+import { openExternalUrl, isNativeCapacitorApp } from '../../utils/mobileBridge';
 import { 
   NotificationChannel,
   VeliBildirimLog,
@@ -162,7 +163,11 @@ export const VeliKarneGonderimModal: React.FC<VeliKarneGonderimModalProps> = ({
 
     // WhatsApp Click to Chat URL
     const url = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(waMessage)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    if (isNativeCapacitorApp()) {
+      void openExternalUrl(url);
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
 
     // Add to logs
     addBildirimLog({

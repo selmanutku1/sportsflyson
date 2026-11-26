@@ -41,8 +41,9 @@ import {
   Trophy,
 } from 'lucide-react';
 import { SportsFlyVectorMark } from './SportsFlyLogo';
-import { signInWithPopup, GoogleAuthProvider, User, sendPasswordResetEmail } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, GoogleAuthProvider, User, sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../firebase';
+import { isNativeCapacitorApp, resolveApiUrl } from '../utils/mobileBridge';
 import { basvurularService } from '../services/firestoreService';
 import {
   registerNewUser,
@@ -72,7 +73,19 @@ import {
 } from '../utils/securityCore';
 
 interface LoginViewProps {
-  onLoginSuccess: (userData: { email?: string; name?: string; photoURL?: string; uid?: string; role?: string } | string) => void;
+  onLoginSuccess: (
+    userData:
+      | {
+          email?: string;
+          name?: string;
+          photoURL?: string;
+          uid?: string;
+          role?: string;
+          clubName?: string;
+          authProvider?: 'google' | 'standard' | 'integration';
+        }
+      | string
+  ) => void;
 }
 
 type LegalDocKey = 'kullanim-kosullari' | 'kvkk' | 'gizlilik' | 'acik-riza' | 'iletisim' | 'veli-onay';
@@ -148,7 +161,9 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [regOtpCode, setRegOtpCode] = useState<string>('');
   const [regOtpCountdown, setRegOtpCountdown] = useState<number>(300);
   const [regVerificationError, setRegVerificationError] = useState<string | null>(null);
-  const [regSandboxCode, setRegSandboxCode] = useState<string | null>(null);
+  const [regSenderDisplay, setRegSenderDisplay] = useState<string>(
+    'SportsFly Doğrulama Servisi <noreply@sportsfly.com.tr>'
+  );
   const [isSendingRegCode, setIsSendingRegCode] = useState<boolean>(false);
 
   // Onboarding wizard states
@@ -210,7 +225,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     return () => clearInterval(timer);
   }, [regStep, showRegisterModal]);
 
-  // Trigger sending registration verification code via SMTP
+  // Trigger sending real registration verification code via SMTP / Resend (never exposed in UI)
   const handleSendRegistrationOtp = async (targetEmail: string, club: string) => {
     setIsSendingRegCode(true);
     setRegVerificationError(null);
@@ -222,19 +237,21 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
+        setRegOtpCode('');
         setRegStep('verify');
-        setRegOtpCountdown(300);
-        if (data.sandboxCode) {
-          setRegSandboxCode(data.sandboxCode);
+        setRegOtpCountdown(Number(data.expiresInSeconds) || 300);
+        if (data.senderName && data.senderEmail) {
+          setRegSenderDisplay(`${data.senderName} <${data.senderEmail}>`);
         }
       } else {
-        setRegVerificationError(data.error || 'Doğrulama kodu gönderilemedi. Lütfen tekrar deneyin.');
+        setRegVerificationError(
+          data.error || 'Doğrulama kodu e-posta adresinize gönderilemedi. Lütfen tekrar deneyin.'
+        );
       }
     } catch {
-      // Offline fallback: continue in verify step
-      setRegStep('verify');
-      setRegOtpCountdown(300);
-      setRegSandboxCode('482915');
+      setRegVerificationError(
+        'Sunucuya bağlanılamadı. Doğrulama e-postası gönderilemedi, lütfen bağlantınızı kontrol edip tekrar deneyin.'
+      );
     } finally {
       setIsSendingRegCode(false);
     }
@@ -262,7 +279,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     if (!is2FAStepActive || twoFactorMethod !== 'authenticator') return;
     const fetchTotp = async () => {
       try {
-        const res = await fetch('/api/auth/2fa/totp-preview');
+        const res = await fetch(resolveApiUrl('/api/auth/2fa/totp-preview'));
         if (res.ok) {
           const data = await res.json();
           setSandboxDelivery((prev) =>
@@ -634,6 +651,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       try {
         sessionStorage.setItem('sportsfly_active_page', 'anasayfa');
         sessionStorage.setItem('sportsfly_auth_active', 'true');
+        localStorage.setItem('sportsfly_auth_active', 'true');
       } catch (e) {}
 
       recordSecurityAuditEvent(
@@ -649,6 +667,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         photoURL: photoURL || undefined,
         uid: actualUid,
         role: 'Süper Admin',
+        authProvider: 'google',
       });
       return;
     }
@@ -682,6 +701,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     try {
       sessionStorage.setItem('sportsfly_active_page', hasFullAccessByAdmin ? 'anasayfa' : 'paketler');
       sessionStorage.setItem('sportsfly_auth_active', 'true');
+      localStorage.setItem('sportsfly_auth_active', 'true');
     } catch (e) {}
 
     recordSecurityAuditEvent(
@@ -697,6 +717,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       photoURL: photoURL || undefined,
       uid: actualUid,
       role: 'Google Kullanıcısı',
+      authProvider: 'google',
     });
   };
 
@@ -734,6 +755,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
       try {
         sessionStorage.setItem('sportsfly_auth_active', 'true');
+        localStorage.setItem('sportsfly_auth_active', 'true');
       } catch (e) {}
 
       const cleanEmail = (user.email || '').trim().toLowerCase();
@@ -746,6 +768,16 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       );
     } catch (error: unknown) {
       const err = error as { code?: string; message?: string };
+      if (isNativeCapacitorApp() && err?.code !== 'auth/popup-closed-by-user') {
+        try {
+          const redirectProvider = new GoogleAuthProvider();
+          redirectProvider.setCustomParameters({ prompt: 'select_account' });
+          await signInWithRedirect(auth, redirectProvider);
+          return;
+        } catch (redirectErr) {
+          console.warn('Google redirect oturum açma hatası:', redirectErr);
+        }
+      }
       console.warn('Google popup oturum açma hatası:', err);
 
       // Audit Log capture for security diagnostics
@@ -853,6 +885,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             email: authResult.user?.email || email,
             name: authResult.user?.managerName || 'Kulüp Yöneticisi',
             clubName: authResult.user?.clubName || 'Spor Kulübü',
+            authProvider: 'standard',
           });
         }, 500);
         return;
@@ -908,6 +941,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           email: authResult.user?.email || '',
           name: authResult.user?.managerName || 'Kulüp Yöneticisi',
           clubName: authResult.user?.clubName || 'Spor Kulübü',
+          authProvider: 'standard',
         });
       }, 500);
     } catch {
@@ -1991,21 +2025,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                   </span>
                 </div>
 
-                {/* Sender & Sandbox transparency badge */}
+                {/* Sender info (code is delivered strictly to email inbox, never shown on screen) */}
                 <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 truncate">
                     <span className="font-bold text-slate-800">Gönderici:</span>
-                    <span className="text-slate-500 truncate">SportsFly Doğrulama Servisi &lt;noreply@sportsfly.com.tr&gt;</span>
+                    <span className="text-slate-500 truncate">{regSenderDisplay}</span>
                   </div>
-                  {regSandboxCode && (
-                    <button
-                      type="button"
-                      onClick={() => setRegOtpCode(regSandboxCode)}
-                      className="px-2 py-0.5 rounded-md bg-blue-100 hover:bg-blue-200 text-blue-800 font-extrabold text-[10px] shrink-0 cursor-pointer transition-colors"
-                    >
-                      Kodu Doldur ({regSandboxCode})
-                    </button>
-                  )}
                 </div>
 
                 {/* 6-Digit Code Input */}
@@ -2019,7 +2044,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                     maxLength={6}
                     value={regOtpCode}
                     onChange={(e) => setRegOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="Örn: 482915"
+                    placeholder="000000"
                     className="w-full h-12 text-center text-xl font-black font-mono tracking-widest text-slate-900 bg-slate-50 border-2 border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-100 transition-all"
                     autoFocus
                   />
@@ -2095,10 +2120,11 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                         });
                         const verifyData = await verifyRes.json().catch(() => ({}));
 
-                        // Allow local fallback if simulated code matches
-                        const localCodeMatch = regSandboxCode && regOtpCode === regSandboxCode;
-                        if (!verifyRes.ok && !verifyData.verified && !localCodeMatch && regOtpCode !== '482915') {
-                          setRegVerificationError(verifyData.error || 'Girdiğiniz doğrulama kodu hatalı veya süresi dolmuş.');
+                        // Strictly require server-side verification (no client-side or hardcoded bypass)
+                        if (!verifyRes.ok || verifyData.verified !== true) {
+                          setRegVerificationError(
+                            verifyData.error || 'Girdiğiniz doğrulama kodu hatalı veya süresi dolmuş.'
+                          );
                           setIsLoading(false);
                           return;
                         }

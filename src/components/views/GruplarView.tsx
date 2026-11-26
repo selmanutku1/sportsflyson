@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Plus,
   Search,
@@ -34,7 +34,19 @@ import {
 import { SportsFlyIcon } from '../SportsFlyLogo';
 import { INITIAL_GRUPLAR } from '../../data/mockMuhasebeData';
 import { INITIAL_SPORCULAR } from '../../data/mockData';
-import { GrupItem, GrupMember, NavPage } from '../../types';
+import { GrupItem, GrupMember, NavPage, SporcuItem } from '../../types';
+import { auth } from '../../firebase';
+import {
+  gruplarService,
+  grupUyeleriService,
+  sporcularService,
+  getAuthenticatedOwnerId,
+} from '../../services/firestoreService';
+import {
+  mapGrupToFirestoreDoc,
+  mapFirestoreDocToGrupItem,
+  mapFirestoreDocToSporcuItem,
+} from '../../services/firestoreCollectionsSchema';
 
 interface GruplarViewProps {
   onNavigate?: (page: NavPage) => void;
@@ -42,6 +54,7 @@ interface GruplarViewProps {
 
 export const GruplarView: React.FC<GruplarViewProps> = ({ onNavigate }) => {
   const [gruplar, setGruplar] = useState<GrupItem[]>(INITIAL_GRUPLAR);
+  const [clubSporcular, setClubSporcular] = useState<SporcuItem[]>(INITIAL_SPORCULAR);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBranch, setSelectedBranch] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -104,6 +117,50 @@ export const GruplarView: React.FC<GruplarViewProps> = ({ onNavigate }) => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    let isMounted = true;
+
+    const unsubGruplar = gruplarService.subscribe(async (grupDocs) => {
+      if (!isMounted || grupDocs.length === 0) return;
+      try {
+        const hydrated = await Promise.all(
+          grupDocs.map(async (gDoc) => {
+            const uyeDocs = await grupUyeleriService.getByGrupId(gDoc.id);
+            const members: GrupMember[] = uyeDocs.map((u) => ({
+              id: u.id,
+              name: u.name,
+              phone: u.phone || '',
+              code: u.code,
+              birthYear: u.birthYear,
+              parentName: u.parentName,
+              parentPhone: u.parentPhone,
+              attendanceRate: u.attendanceRate,
+              licenseNumber: u.licenseNumber,
+            }));
+            return mapFirestoreDocToGrupItem(gDoc, members);
+          })
+        );
+        if (isMounted) {
+          setGruplar(hydrated);
+        }
+      } catch (err) {
+        console.error('Gruplar yüklenirken hata:', err);
+      }
+    });
+
+    const unsubSporcular = sporcularService.subscribe((sporcuDocs) => {
+      if (!isMounted || sporcuDocs.length === 0) return;
+      setClubSporcular(sporcuDocs.map(mapFirestoreDocToSporcuItem));
+    });
+
+    return () => {
+      isMounted = false;
+      unsubGruplar();
+      unsubSporcular();
+    };
+  }, []);
+
   const handleOpenEdit = (group: GrupItem) => {
     setEditingGroup(group);
     setEditName(group.name);
@@ -120,7 +177,7 @@ export const GruplarView: React.FC<GruplarViewProps> = ({ onNavigate }) => {
     setEditDescription(group.description || '');
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingGroup) return;
 
@@ -148,6 +205,16 @@ export const GruplarView: React.FC<GruplarViewProps> = ({ onNavigate }) => {
       setDetailModalGroup(updatedGroup);
     }
 
+    if (auth.currentUser) {
+      try {
+        const ownerId = getAuthenticatedOwnerId();
+        const { grupDoc } = mapGrupToFirestoreDoc(updatedGroup, ownerId);
+        await gruplarService.update(updatedGroup.id, grupDoc);
+      } catch (err) {
+        console.error('Grup güncellenirken Firestore hatası:', err);
+      }
+    }
+
     showToast(`"${editName}" grubu başarıyla güncellendi.`);
     setEditingGroup(null);
   };
@@ -157,7 +224,28 @@ export const GruplarView: React.FC<GruplarViewProps> = ({ onNavigate }) => {
     setDetailActiveTab(tab);
   };
 
-  const handleAddMemberToGroup = (e: React.FormEvent) => {
+  const persistGroupMembersUpdate = async (updatedGroup: GrupItem) => {
+    if (!auth.currentUser) return;
+    try {
+      const ownerId = getAuthenticatedOwnerId();
+      const { grupDoc } = mapGrupToFirestoreDoc(updatedGroup, ownerId);
+      await gruplarService.update(updatedGroup.id, {
+        memberCount: grupDoc.memberCount,
+        status: grupDoc.status,
+        primaryAthleteIds: grupDoc.primaryAthleteIds,
+      });
+      await grupUyeleriService.syncForGrup(
+        updatedGroup.id,
+        updatedGroup.members || [],
+        grupDoc.instructorId,
+        ownerId
+      );
+    } catch (err) {
+      console.error('Grup üyeleri güncellenirken Firestore hatası:', err);
+    }
+  };
+
+  const handleAddMemberToGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     const targetGroup = detailModalGroup || editingGroup;
     if (!targetGroup || !newMemberName.trim()) return;
@@ -191,13 +279,15 @@ export const GruplarView: React.FC<GruplarViewProps> = ({ onNavigate }) => {
       setEditingGroup(updatedGroup);
     }
 
+    await persistGroupMembersUpdate(updatedGroup);
+
     setNewMemberName('');
     setNewMemberPhone('');
     setNewMemberParentName('');
     showToast(`${newMem.name} başarıyla "${updatedGroup.name}" kadrosuna eklendi.`);
   };
 
-  const handleAddClubAthleteToGroup = (athlete: typeof INITIAL_SPORCULAR[0]) => {
+  const handleAddClubAthleteToGroup = async (athlete: SporcuItem) => {
     const targetGroup = detailModalGroup || editingGroup;
     if (!targetGroup) return;
 
@@ -209,10 +299,10 @@ export const GruplarView: React.FC<GruplarViewProps> = ({ onNavigate }) => {
     const newMem: GrupMember = {
       id: `m-${Date.now()}-${athlete.id}`,
       name: athlete.name,
-      phone: '+90 532 555 44 33',
+      phone: athlete.phone || '+90 532 555 44 33',
       code: athlete.code,
       parentName: `${athlete.name} Velisi`,
-      parentPhone: '+90 532 555 44 33',
+      parentPhone: athlete.phone || '+90 532 555 44 33',
       birthYear: 2011,
       attendanceRate: 95,
       licenseNumber: `SPF-34-${athlete.code}`,
@@ -232,10 +322,12 @@ export const GruplarView: React.FC<GruplarViewProps> = ({ onNavigate }) => {
       setDetailModalGroup(updatedGroup);
     }
 
+    await persistGroupMembersUpdate(updatedGroup);
+
     showToast(`${athlete.name} kulüp havuzundan gruba dahil edildi.`);
   };
 
-  const handleRemoveMember = (memberId: string) => {
+  const handleRemoveMember = async (memberId: string) => {
     const targetGroup = detailModalGroup || editingGroup;
     if (!targetGroup) return;
 
@@ -257,19 +349,29 @@ export const GruplarView: React.FC<GruplarViewProps> = ({ onNavigate }) => {
       setEditingGroup(updatedGroup);
     }
 
+    await persistGroupMembersUpdate(updatedGroup);
+
     showToast(`${removedMember?.name || 'Sporcu'} gruptan çıkarıldı.`);
   };
 
-  const handleDeleteGroup = (groupId: string, groupName: string) => {
+  const handleDeleteGroup = async (groupId: string, groupName: string) => {
     if (window.confirm(`"${groupName}" grubunu ve tüm kadro kaydını silmek istediğinize emin misiniz?`)) {
       setGruplar((prev) => prev.filter((g) => g.id !== groupId));
       if (detailModalGroup?.id === groupId) setDetailModalGroup(null);
       if (editingGroup?.id === groupId) setEditingGroup(null);
+      if (auth.currentUser) {
+        try {
+          await grupUyeleriService.syncForGrup(groupId, []);
+          await gruplarService.delete(groupId);
+        } catch (err) {
+          console.error('Grup silinirken Firestore hatası:', err);
+        }
+      }
       showToast(`"${groupName}" grubu silindi.`);
     }
   };
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
 
@@ -298,6 +400,17 @@ export const GruplarView: React.FC<GruplarViewProps> = ({ onNavigate }) => {
     setShowAddModal(false);
     setNewName('');
     setNewDescription('');
+
+    if (auth.currentUser) {
+      try {
+        const ownerId = getAuthenticatedOwnerId();
+        const { grupDoc } = mapGrupToFirestoreDoc(newGroup, ownerId);
+        await gruplarService.add(grupDoc);
+      } catch (err) {
+        console.error('Grup oluşturulurken Firestore hatası:', err);
+      }
+    }
+
     showToast(`"${newGroup.name}" grubu başarıyla oluşturuldu.`);
   };
 
@@ -1107,7 +1220,7 @@ export const GruplarView: React.FC<GruplarViewProps> = ({ onNavigate }) => {
                         Kulüp kayıtlı sporcuları arasından hızlı aktar:
                       </span>
                       <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-                        {INITIAL_SPORCULAR.slice(0, 4).map((ath) => (
+                        {clubSporcular.slice(0, 6).map((ath) => (
                           <button
                             key={ath.id}
                             type="button"

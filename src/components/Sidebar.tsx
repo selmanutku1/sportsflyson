@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Home,
@@ -41,6 +41,10 @@ import {
   Sparkles,
   Mail,
   Database,
+  Palette,
+  Crown,
+  Check,
+  ArrowRight,
 } from 'lucide-react';
 import { NavPage, PackagePlanType } from '../types';
 import { SportsFlyLogo, SportsFlyIcon } from './SportsFlyLogo';
@@ -49,7 +53,10 @@ import {
   isSuperAdminUser,
   isGoogleRestrictedUser,
   isGoogleUserPageUnlocked,
+  CANONICAL_PACKAGES,
   PACKAGE_DETAILS,
+  getActiveSessionPlan,
+  setActiveSessionPlan,
 } from '../data/packagePermissions';
 import { getStoredUserProfile, UserProfileData } from '../data/userProfile';
 import { basvurularService } from '../services/firestoreService';
@@ -75,20 +82,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [, setGoogleAccessVersion] = useState<number>(0);
   const [pendingBasvuruCount, setPendingBasvuruCount] = useState<number>(0);
   const [lockedToast, setLockedToast] = useState<string | null>(null);
+  const [activePlan, setActivePlan] = useState<PackagePlanType>(
+    () => currentPlan || getActiveSessionPlan()
+  );
+  const [showSidebarPlanMenu, setShowSidebarPlanMenu] = useState<boolean>(false);
+  const compactPlanRef = useRef<HTMLDivElement>(null);
+  const expandedPlanRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let unsub: (() => void) | undefined;
-    try {
-      unsub = basvurularService.subscribeToPending((count) => {
-        setPendingBasvuruCount(count);
-      });
-    } catch (e) {
-      console.error('Realtime pending application badge error:', e);
+    if (currentPlan) {
+      setActivePlan(currentPlan);
     }
+  }, [currentPlan]);
+
+  useEffect(() => {
+    const handlePlanSync = (e: any) => {
+      if (e.detail?.plan) {
+        setActivePlan(e.detail.plan);
+      } else {
+        setActivePlan(getActiveSessionPlan());
+      }
+    };
+    window.addEventListener('sportsfly_plan_updated', handlePlanSync);
+    window.addEventListener('sportsfly_plan_changed', handlePlanSync);
     return () => {
-      if (unsub) unsub();
+      window.removeEventListener('sportsfly_plan_updated', handlePlanSync);
+      window.removeEventListener('sportsfly_plan_changed', handlePlanSync);
     };
   }, []);
+
+  useEffect(() => {
+    if (!showSidebarPlanMenu) return;
+    const handleOutside = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node;
+      const inCompact = compactPlanRef.current?.contains(target);
+      const inExpanded = expandedPlanRef.current?.contains(target);
+      if (!inCompact && !inExpanded) {
+        setShowSidebarPlanMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside);
+    };
+  }, [showSidebarPlanMenu]);
 
   useEffect(() => {
     const handleProfileUpdate = () => {
@@ -135,6 +174,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return !isRestricted(page);
   };
 
+  useEffect(() => {
+    if (isGoogleRestricted || isIntegrationUser || isRestricted('spor-okulu-basvurulari')) {
+      setPendingBasvuruCount(0);
+      return;
+    }
+    let unsub: (() => void) | undefined;
+    try {
+      unsub = basvurularService.subscribeToPending((count) => {
+        setPendingBasvuruCount(count);
+      });
+    } catch (e) {
+      console.error('Realtime pending application badge error:', e);
+    }
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [isGoogleRestricted, isIntegrationUser, isSuperAdmin, currentPlan, userProfile?.role, userProfile?.email]);
+
   const visibleMuhasebeItems = (
     [
       'on-muhasebe',
@@ -172,14 +229,57 @@ export const Sidebar: React.FC<SidebarProps> = ({
     'odeme-plani',
   ].includes(currentPage);
 
+  const businessChildPages: NavPage[] = [
+    'sporcular',
+    'gruplar',
+    'egitmenler',
+    'yoneticiler',
+    'subeler',
+    'brans-yonetimi',
+    'egitim-planlama',
+    'antrenman-takvimi',
+    'yoklama',
+    'sporcu-karnesi',
+    'sportsfly-lab',
+    'sube-ozet',
+    'kulup-evraklari',
+    'kulup-galerisi',
+    'anket-yonetimi',
+  ];
+
+  const muhasebeChildPages: NavPage[] = [
+    'on-muhasebe',
+    'gelir-gider-kategori',
+    'gelir-gider-yonetimi',
+    'odeme-plani-kontrol',
+    'odeme-plani',
+  ];
+
+  const hasUnlockedBusinessChild =
+    !isGoogleRestricted ||
+    businessChildPages.some((p) => isGoogleUserPageUnlocked(p, userProfile?.email));
+
+  const hasUnlockedMuhasebeChild =
+    !isGoogleRestricted ||
+    muhasebeChildPages.some((p) => isGoogleUserPageUnlocked(p, userProfile?.email));
+
   const [isBusinessesOpen, setIsBusinessesOpen] = useState(false);
   const [isOnMuhasebeOpen, setIsOnMuhasebeOpen] = useState(false);
+
+  useEffect(() => {
+    if (!hasUnlockedBusinessChild && isBusinessesOpen) {
+      setIsBusinessesOpen(false);
+    }
+    if (!hasUnlockedMuhasebeChild && isOnMuhasebeOpen) {
+      setIsOnMuhasebeOpen(false);
+    }
+  }, [hasUnlockedBusinessChild, hasUnlockedMuhasebeChild, isBusinessesOpen, isOnMuhasebeOpen]);
 
   const triggerLockedNotice = (label?: string) => {
     setLockedToast(
       label
-        ? `"${label}" kategorisi kilitlidir. Sistem özelliklerini açmak için lütfen bir paket seçin veya yöneticinizden alan yetkisi talep edin.`
-        : 'Bu kategori kilitlidir. Sistem özelliklerini açmak için lütfen bir paket seçin.'
+        ? `"${label}" kategorisi kilitlidir. Paketler sayfasına yönlendirildiniz.`
+        : 'Bu kategori kilitlidir. Paketler sayfasına yönlendirildiniz.'
     );
     setTimeout(() => {
       setLockedToast(null);
@@ -189,7 +289,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const handleNavClick = (page: NavPage, label?: string) => {
     if (isGoogleRestricted && !isGoogleUserPageUnlocked(page, userProfile?.email)) {
       triggerLockedNotice(label);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('sportsfly_google_locked_redirect', {
+            detail: { attemptedPage: page, label },
+          })
+        );
+      }
       onSelectPage('paketler');
+      if (onCloseMobile && window.innerWidth < 1024) {
+        onCloseMobile();
+      }
       return;
     }
     onSelectPage(page);
@@ -207,20 +317,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <>
-      {/* Desktop Compact Icon Rail when sidebar is collapsed (matches screenshot) */}
+      {/* Compact Icon Rail when sidebar is collapsed (visible from 640px+) */}
       {!isOpen && (
         <aside
           id="app-sidebar-compact"
-          className="hidden lg:flex flex-col w-14 h-full bg-white dark:bg-[#111c2e] border-r border-slate-200/90 dark:border-slate-800 py-3 items-center shrink-0 z-30 justify-between select-none transition-colors"
+          className="hidden sm:flex flex-col w-14 h-full bg-white dark:bg-[#111c2e] border-r border-slate-200/90 dark:border-slate-800 py-3 items-center shrink-0 z-30 justify-between select-none transition-colors"
         >
           {/* Top Section */}
           <div className="flex flex-col items-center gap-3 w-full">
-            <div className="p-1.5 cursor-pointer" onClick={() => handleNavClick('anasayfa')} title="SportsFly">
+            <div className="p-1.5 cursor-pointer" onClick={() => handleNavClick('anasayfa', 'Anasayfa')} title="SportsFly">
               <SportsFlyLogo className="w-8 h-8" />
             </div>
 
             {/* Manager Avatar Icon */}
             <div
+              onClick={() => handleNavClick(isGoogleRestricted ? 'paketler' : 'anasayfa', 'SportsFly Manager')}
               className="w-9 h-9 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 flex items-center justify-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/70 transition-colors shadow-2xs"
               title="SportsFly Manager"
             >
@@ -313,14 +424,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <button
                 onClick={() => handleNavClick('sportsfly-lab', 'SportsFly Lab')}
-                title="SportsFly LAB (Biyomekanik Laboratuvar & Karne)"
+                title={isRestricted('sportsfly-lab') ? 'SportsFly LAB (Kilitli)' : 'SportsFly LAB (Biyomekanik Laboratuvar & Karne)'}
                 className={`p-2.5 rounded-xl transition-all relative cursor-pointer ${
                   !isGoogleRestricted && currentPage === 'sportsfly-lab'
                     ? 'bg-indigo-600 text-white shadow-xs'
+                    : isRestricted('sportsfly-lab')
+                    ? 'text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800/40 opacity-75'
                     : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Activity className="w-4 h-4" />
+                {isRestricted('sportsfly-lab') && (
+                  <Lock className="w-2.5 h-2.5 text-amber-500 absolute top-1 right-1" />
+                )}
               </button>
 
 
@@ -457,6 +573,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               )}
 
+              {/* SportsFly Studio */}
+              {shouldShowItem('sportsfly-studio') && (
+                <button
+                  onClick={() => handleNavClick('sportsfly-studio', 'SportsFly Studio')}
+                  title={isRestricted('sportsfly-studio') ? 'SportsFly Studio (Kilitli)' : 'SportsFly Studio'}
+                  className={`p-2.5 rounded-xl transition-all relative cursor-pointer ${
+                    !isGoogleRestricted && currentPage === 'sportsfly-studio'
+                      ? 'bg-[#0F2444] text-white shadow-xs'
+                      : isRestricted('sportsfly-studio')
+                      ? 'text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800/40 opacity-75'
+                      : 'text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Palette className="w-4 h-4" />
+                  {isRestricted('sportsfly-studio') && (
+                    <Lock className="w-2.5 h-2.5 text-amber-500 absolute top-1 right-1" />
+                  )}
+                </button>
+              )}
+
               {/* Yöneticiler */}
               <button
                 onClick={() => handleNavClick('yoneticiler', 'Yöneticiler')}
@@ -542,6 +678,114 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </button>
             )}
+
+            {/* Paketler & Hızlı Paket Geçişi (Sol Menü En Altta) */}
+            <div className="relative w-full flex justify-center pt-1.5 mt-0.5 border-t border-slate-100 dark:border-slate-800" ref={compactPlanRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (isSuperAdmin && !isGoogleRestricted) {
+                    setShowSidebarPlanMenu((prev) => !prev);
+                  } else {
+                    handleNavClick('paketler', 'Paketler');
+                  }
+                }}
+                title={
+                  isSuperAdmin && !isGoogleRestricted
+                    ? `Aktif Paket: ${activePlan} (Lvl ${PACKAGE_DETAILS[activePlan]?.level || 2}) — Paket Değiştir`
+                    : 'Paketler & Abonelik'
+                }
+                className={`p-2 rounded-xl transition-all relative cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
+                  showSidebarPlanMenu || currentPage === 'paketler'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'bg-indigo-50/80 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/60 hover:bg-indigo-100 dark:hover:bg-indigo-950'
+                }`}
+              >
+                <Crown className="w-4 h-4 shrink-0" />
+                <span className="text-[8px] font-extrabold leading-none tabular-nums">
+                  L{PACKAGE_DETAILS[activePlan]?.level || 2}
+                </span>
+              </button>
+
+              {isSuperAdmin && !isGoogleRestricted && showSidebarPlanMenu && (
+                <div className="absolute left-full bottom-0 ml-2 w-72 bg-white dark:bg-[#111c2e] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 py-3 z-[9999] animate-in fade-in slide-in-from-left-2 duration-150">
+                  <div className="px-4 pb-2.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+                        Kulüp Üyelik Paketi
+                      </span>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        Hızlı Paket Geçişi
+                      </span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                      Lvl {PACKAGE_DETAILS[activePlan]?.level || 2}
+                    </span>
+                  </div>
+
+                  <div className="p-2 space-y-1">
+                    {CANONICAL_PACKAGES.map((planName) => {
+                      const planInfo = PACKAGE_DETAILS[planName];
+                      const isCurrent = activePlan === planName;
+                      return (
+                        <button
+                          key={planName}
+                          type="button"
+                          onClick={() => {
+                            setActiveSessionPlan(planName);
+                            setActivePlan(planName);
+                            setShowSidebarPlanMenu(false);
+                          }}
+                          className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all cursor-pointer ${
+                            isCurrent
+                              ? 'bg-indigo-50/90 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-950 dark:text-indigo-100 font-bold'
+                              : 'hover:bg-slate-50 dark:hover:bg-slate-800/70 border border-transparent text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div
+                              className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                                isCurrent
+                                  ? 'bg-indigo-600 text-white'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                              }`}
+                            >
+                              <Crown className="w-3.5 h-3.5" />
+                            </div>
+                            <div className="truncate">
+                              <div className="text-xs font-bold truncate">{planName}</div>
+                              <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                                {planInfo.priceFormatted} &bull; {planInfo.maxStudents} Sporcu
+                              </div>
+                            </div>
+                          </div>
+                          {isCurrent && (
+                            <Check className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="px-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSidebarPlanMenu(false);
+                        handleNavClick('paketler', 'Paketler');
+                      }}
+                      className="w-full text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center justify-between cursor-pointer py-1"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Package className="w-3.5 h-3.5" />
+                        Tüm Paket &amp; Limit Detayları
+                      </span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </aside>
       )}
@@ -692,15 +936,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="pt-1">
             <button
               onClick={() => {
-                setIsBusinessesOpen(!isBusinessesOpen);
-                if (isGoogleRestricted && !isBusinessesOpen) {
+                if (isGoogleRestricted && !hasUnlockedBusinessChild) {
+                  setIsBusinessesOpen(false);
                   triggerLockedNotice(t('sidebar.clubs'));
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(
+                      new CustomEvent('sportsfly_google_locked_redirect', {
+                        detail: { attemptedPage: 'anasayfa', label: t('sidebar.clubs') },
+                      })
+                    );
+                  }
+                  onSelectPage('paketler');
+                  if (onCloseMobile && window.innerWidth < 1024) {
+                    onCloseMobile();
+                  }
+                  return;
                 }
+                setIsBusinessesOpen(!isBusinessesOpen);
               }}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
                 !isGoogleRestricted && isBusinessChildActive
                   ? 'text-blue-700 dark:text-blue-300 bg-blue-50/70 dark:bg-blue-900/30 font-semibold'
-                  : isGoogleRestricted
+                  : isGoogleRestricted && !hasUnlockedBusinessChild
                   ? 'text-slate-400 dark:text-slate-500 bg-slate-50/70 dark:bg-slate-800/30 hover:bg-slate-100/80 dark:hover:bg-slate-800/50'
                   : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
               }`}
@@ -710,8 +967,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span>{t('sidebar.clubs')}</span>
               </div>
               <div className="flex items-center gap-1.5">
-                {isGoogleRestricted && renderLockedPill()}
-                {isBusinessesOpen ? (
+                {isGoogleRestricted && !hasUnlockedBusinessChild && renderLockedPill()}
+                {isBusinessesOpen && hasUnlockedBusinessChild ? (
                   <ChevronDown className="w-4 h-4 text-slate-400" />
                 ) : (
                   <ChevronRight className="w-4 h-4 text-slate-400" />
@@ -720,7 +977,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
 
             {/* Sub-menu items */}
-            {isBusinessesOpen && (
+            {isBusinessesOpen && hasUnlockedBusinessChild && (
               <div className="ml-5 mt-1 pl-3 border-l-2 border-slate-200 dark:border-slate-800 space-y-4">
                 {/* 1. Kadro & Yapılanma */}
                 <div className="space-y-1">
@@ -972,12 +1229,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
-                        <Activity className="w-3.5 h-3.5 text-indigo-500" />
+                        <Activity className={`w-3.5 h-3.5 ${isRestricted('sportsfly-lab') ? 'text-slate-400' : 'text-indigo-500'}`} />
                         <span>SportsFly LAB</span>
                       </div>
-                      <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
-                        LAB
-                      </span>
+                      {isRestricted('sportsfly-lab') ? (
+                        renderLockedPill()
+                      ) : (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                          LAB
+                        </span>
+                      )}
                     </button>
                   )}
                   {shouldShowItem('sube-ozet') && (
@@ -1123,31 +1384,74 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
 
-          {/* ÖN MUHASEBE (Accordion) */}
-          {visibleMuhasebeItems.length > 0 && (
-            <div className="pt-2">
+          {/* SPORTSFLY STUDIO */}
+          {shouldShowItem('sportsfly-studio') && (
+            <div className="pt-1.5">
               <button
-                onClick={() => {
-                  setIsOnMuhasebeOpen(!isOnMuhasebeOpen);
-                  if (isGoogleRestricted && !isOnMuhasebeOpen) {
-                    triggerLockedNotice('Ön Muhasebe');
-                  }
-                }}
+                onClick={() => handleNavClick('sportsfly-studio', 'SportsFly Studio')}
                 className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
-                  !isGoogleRestricted && isOnMuhasebeChildActive
-                    ? 'text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 font-bold'
-                    : isGoogleRestricted
+                  !isGoogleRestricted && currentPage === 'sportsfly-studio'
+                    ? 'text-white bg-[#0F2444] dark:bg-sky-700 font-bold shadow-xs'
+                    : isRestricted('sportsfly-studio')
                     ? 'text-slate-400 dark:text-slate-500 bg-slate-50/70 dark:bg-slate-800/30 hover:bg-slate-100/80 dark:hover:bg-slate-800/50'
                     : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <Receipt className={`w-4 h-4 shrink-0 ${isGoogleRestricted ? 'text-slate-400' : 'text-slate-800 dark:text-slate-200'}`} />
-                  <span className={`font-semibold ${isGoogleRestricted ? 'text-slate-400 dark:text-slate-500' : 'text-slate-800 dark:text-slate-200'}`}>Ön Muhasebe</span>
+                  <Palette
+                    className={`w-4 h-4 shrink-0 ${
+                      !isGoogleRestricted && currentPage === 'sportsfly-studio'
+                        ? 'text-white'
+                        : isRestricted('sportsfly-studio')
+                        ? 'text-slate-400'
+                        : 'text-sky-600 dark:text-sky-400'
+                    }`}
+                  />
+                  <span className="font-semibold">SportsFly Studio</span>
+                </div>
+                {isRestricted('sportsfly-studio') && renderLockedPill()}
+              </button>
+            </div>
+          )}
+
+          {/* ÖN MUHASEBE (Accordion) */}
+          {visibleMuhasebeItems.length > 0 && (
+            <div className="pt-2">
+              <button
+                onClick={() => {
+                  if (isGoogleRestricted && !hasUnlockedMuhasebeChild) {
+                    setIsOnMuhasebeOpen(false);
+                    triggerLockedNotice('Ön Muhasebe');
+                    if (typeof window !== 'undefined') {
+                      window.dispatchEvent(
+                        new CustomEvent('sportsfly_google_locked_redirect', {
+                          detail: { attemptedPage: 'on-muhasebe', label: 'Ön Muhasebe' },
+                        })
+                      );
+                    }
+                    onSelectPage('paketler');
+                    if (onCloseMobile && window.innerWidth < 1024) {
+                      onCloseMobile();
+                    }
+                    return;
+                  }
+                  setIsOnMuhasebeOpen(!isOnMuhasebeOpen);
+                }}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
+                  !isGoogleRestricted && isOnMuhasebeChildActive
+                    ? 'text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 font-bold'
+                    : isGoogleRestricted && !hasUnlockedMuhasebeChild
+                    ? 'text-slate-400 dark:text-slate-500 bg-slate-50/70 dark:bg-slate-800/30 hover:bg-slate-100/80 dark:hover:bg-slate-800/50'
+                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Receipt className={`w-4 h-4 shrink-0 ${isGoogleRestricted && !hasUnlockedMuhasebeChild ? 'text-slate-400' : 'text-slate-800 dark:text-slate-200'}`} />
+                  <span className={`font-semibold ${isGoogleRestricted && !hasUnlockedMuhasebeChild ? 'text-slate-400 dark:text-slate-500' : 'text-slate-800 dark:text-slate-200'}`}>Ön Muhasebe</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  {isGoogleRestricted && renderLockedPill()}
-                  {isOnMuhasebeOpen ? (
+                  {isGoogleRestricted && !hasUnlockedMuhasebeChild && renderLockedPill()}
+                  {isOnMuhasebeOpen && hasUnlockedMuhasebeChild ? (
                     <ChevronDown className="w-4 h-4 text-slate-400" />
                   ) : (
                     <ChevronRight className="w-4 h-4 text-slate-400" />
@@ -1156,7 +1460,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
 
               {/* Ön Muhasebe Sub-items */}
-              {isOnMuhasebeOpen && (
+              {isOnMuhasebeOpen && hasUnlockedMuhasebeChild && (
                 <div className="ml-5 mt-1 pl-3 border-l-2 border-slate-200 dark:border-slate-800 space-y-1">
                   {shouldShowItem('on-muhasebe') && (
                     <button
@@ -1321,7 +1625,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* AYARLAR (Sol Menüde En Altta) */}
           <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800 mt-2 space-y-1">
-            <div className="px-3 py-1 mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center justify-between">
+            <div
+              onClick={() => {
+                if (isGoogleRestricted) {
+                  handleNavClick('yetkilendirmeler', 'Ayarlar');
+                }
+              }}
+              className={`px-3 py-1 mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center justify-between ${
+                isGoogleRestricted ? 'cursor-pointer hover:text-slate-700 dark:hover:text-slate-200' : ''
+              }`}
+            >
               <span className="flex items-center gap-1.5">
                 <Settings className="w-3.5 h-3.5 text-slate-400" />
                 Ayarlar
@@ -1373,7 +1686,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Active Package Status Card & Footer info */}
+        {/* Active Package Status Card / Quick Switcher (Sol Menü En Altta) & Footer info */}
         <div className="p-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-[#0b1320]/60">
           {isGoogleRestricted ? (
             <div className="mb-2.5 p-2.5 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/80 shadow-2xs">
@@ -1398,26 +1711,125 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               </div>
             </div>
+          ) : isSuperAdmin ? (
+            <div className="relative mb-2.5" ref={expandedPlanRef}>
+              <button
+                id="sidebar-package-plan-btn"
+                type="button"
+                onClick={() => setShowSidebarPlanMenu((prev) => !prev)}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border border-indigo-200/90 dark:border-indigo-800/70 bg-indigo-50/80 hover:bg-indigo-100/80 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/70 text-indigo-950 dark:text-indigo-100 text-xs font-bold transition-all cursor-pointer"
+                title="Aktif Kulüp Paketi ve Hızlı Geçiş"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Crown className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <div className="text-left min-w-0">
+                    <div className="text-[10px] font-semibold text-indigo-600/80 dark:text-indigo-300/80 leading-tight">
+                      Paketler
+                    </div>
+                    <div className="text-xs font-bold truncate">
+                      {activePlan === 'Pro Akademi & Çoklu Şube' ? 'Pro Akademi' : activePlan}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-[10px] bg-indigo-200/80 dark:bg-indigo-900/80 text-indigo-900 dark:text-indigo-200 px-1.5 py-0.5 rounded-md font-extrabold tabular-nums">
+                    Lvl {PACKAGE_DETAILS[activePlan]?.level || 2}
+                  </span>
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 text-indigo-500 transition-transform ${
+                      showSidebarPlanMenu ? 'rotate-180' : ''
+                    }`}
+                  />
+                </div>
+              </button>
+
+              {showSidebarPlanMenu && (
+                <div className="absolute left-0 right-0 bottom-full mb-2 bg-white dark:bg-[#111c2e] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 py-3 z-[9999] animate-in fade-in slide-in-from-bottom-2 duration-150">
+                  <div className="px-3.5 pb-2 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+                        Kulüp Üyelik Paketi
+                      </span>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        Hızlı Paket Geçişi
+                      </span>
+                    </div>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                      Lvl {PACKAGE_DETAILS[activePlan]?.level || 2}
+                    </span>
+                  </div>
+
+                  <div className="p-1.5 space-y-1 max-h-60 overflow-y-auto">
+                    {CANONICAL_PACKAGES.map((planName) => {
+                      const planInfo = PACKAGE_DETAILS[planName];
+                      const isCurrent = activePlan === planName;
+                      return (
+                        <button
+                          key={planName}
+                          type="button"
+                          onClick={() => {
+                            setActiveSessionPlan(planName);
+                            setActivePlan(planName);
+                            setShowSidebarPlanMenu(false);
+                          }}
+                          className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-all cursor-pointer ${
+                            isCurrent
+                              ? 'bg-indigo-50/90 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-950 dark:text-indigo-100 font-bold'
+                              : 'hover:bg-slate-50 dark:hover:bg-slate-800/70 border border-transparent text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          <div className="min-w-0 pr-2">
+                            <div className="text-xs font-bold truncate">{planName}</div>
+                            <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                              {planInfo.priceFormatted} &bull; {planInfo.maxStudents} Sporcu
+                            </div>
+                          </div>
+                          {isCurrent && (
+                            <Check className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="px-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSidebarPlanMenu(false);
+                        handleNavClick('paketler', 'Paketler');
+                      }}
+                      className="w-full text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center justify-between cursor-pointer py-1"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Package className="w-3.5 h-3.5" />
+                        Tüm Paket Detayları
+                      </span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           ) : (
-            currentPlan && (
+            activePlan && (
               <div className="mb-2.5 p-2.5 rounded-xl bg-white dark:bg-[#162238] border border-slate-200/90 dark:border-slate-700 shadow-2xs">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                     Aktif Paket
                   </span>
                   <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">
-                    {PACKAGE_DETAILS[currentPlan]?.priceFormatted}
+                    {PACKAGE_DETAILS[activePlan]?.priceFormatted}
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between mt-1">
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                    {currentPlan}
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+                    {activePlan}
                   </span>
                   <button
                     onClick={() => handleNavClick('paketler')}
-                    className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline cursor-pointer"
+                    className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline cursor-pointer shrink-0 ml-2"
                     title="Paketleri incele ve yükselt"
                   >
                     Yükselt

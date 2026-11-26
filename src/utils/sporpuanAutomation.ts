@@ -1,4 +1,6 @@
 // SporPuan Automation System
+import { auth } from '../firebase';
+import { sporpuanLogsService } from '../services/operationsFirestoreService';
 
 
 export interface AutomatedPuanResult {
@@ -156,8 +158,28 @@ export function processAttendanceAutomation(
   // Save to localStorage
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify([...newLogs, ...currentLogs]));
+    window.dispatchEvent(new Event('sportsfly_sporpuan_updated'));
   } catch (err) {
     console.error('Failed to save automated SporPuan logs', err);
+  }
+
+  // Persist to Firestore when authenticated
+  if (auth.currentUser && newLogs.length > 0) {
+    Promise.allSettled(
+      newLogs.map((logItem) =>
+        sporpuanLogsService.upsert({
+          id: logItem.id,
+          sporcuId: logItem.sporcuId,
+          sporcuName: logItem.sporcuName,
+          category: logItem.category,
+          ruleName: logItem.ruleName,
+          points: logItem.points,
+          date: logItem.date,
+          source: 'Otomatik',
+          note: logItem.note,
+        })
+      )
+    ).catch((err) => console.warn('[SporPuan] Firestore automation sync warning:', err));
   }
 
   return {

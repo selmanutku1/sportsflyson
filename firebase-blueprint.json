@@ -271,6 +271,45 @@
           "type": "string",
           "maxLength": 500
         },
+        "bio": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "gender": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "accountDuration": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "mailEnabled": {
+          "type": "boolean"
+        },
+        "smsEnabled": {
+          "type": "boolean"
+        },
+        "specialties": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "joinDate": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "reviewCount": {
+          "type": "number"
+        },
+        "documents": {
+          "type": "array"
+        },
+        "appointments": {
+          "type": "array"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -829,6 +868,404 @@
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "subdomain", "siteTitle"]
+    },
+    "YoklamaKaydi": {
+      "title": "YoklamaKaydi",
+      "description": "Attendance sheet per group and date in /yoklamalar/{yoklamaId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "groupId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "groupName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "date": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "records": { "type": "array" },
+        "presentCount": { "type": "number" },
+        "absentCount": { "type": "number" },
+        "excusedCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "groupId", "groupName", "date", "records", "createdAt", "updatedAt"]
+    },
+    "MuhasebeHareket": {
+      "title": "MuhasebeHareket",
+      "description": "Accounting income/expense entry in /muhasebe_hareketler/{hareketId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["Gelir", "Gider"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "payerOrPayee": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "paymentMethod": { "type": "string", "enum": ["Nakit", "Kredi Kartı", "Havale/EFT", "POS"] },
+        "status": { "type": "string", "enum": ["Tamamlandı", "Beklemede", "İptal"] },
+        "description": { "type": "string", "maxLength": 600 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "type", "title", "category", "amount", "date", "payerOrPayee", "paymentMethod", "status", "createdAt", "updatedAt"]
+    },
+    "MuhasebeKategori": {
+      "title": "MuhasebeKategori",
+      "description": "Accounting category in /muhasebe_kategoriler/{kategoriId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "type": { "type": "string", "enum": ["Gelir", "Gider"] },
+        "itemCount": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "color": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "name", "type", "itemCount", "totalAmount", "color", "createdAt", "updatedAt"]
+    },
+    "OdemePlani": {
+      "title": "OdemePlani",
+      "description": "Installment payment plan in /odeme_planlari/{planId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "athleteName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "athleteCode": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "planName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "installment": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "dueDate": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["Ödendi", "Bekliyor", "Gecikti"] },
+        "paidDate": { "type": "string", "maxLength": 32 },
+        "receiptNumber": { "type": "string", "maxLength": 32 },
+        "receiptDate": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "athleteName", "athleteCode", "planName", "installment", "dueDate", "amount", "status", "createdAt", "updatedAt"]
+    },
+    "AntrenmanSeansi": {
+      "title": "AntrenmanSeansi",
+      "description": "Scheduled training session in /antrenmanlar/{antrenmanId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "branch": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "groupName": { "type": "string", "maxLength": 140 },
+        "sube": { "type": "string", "maxLength": 140 },
+        "date": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "startTime": { "type": "string", "minLength": 3, "maxLength": 16 },
+        "endTime": { "type": "string", "minLength": 3, "maxLength": 16 },
+        "trainerName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "facilityName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "capacity": { "type": "number" },
+        "enrolledCount": { "type": "number" },
+        "status": { "type": "string", "enum": ["Planlandı", "Devam Ediyor", "Tamamlandı", "İptal"] },
+        "color": { "type": "string", "enum": ["blue", "emerald", "amber", "purple", "rose", "indigo", "sky"] },
+        "notes": { "type": "string", "maxLength": 800 },
+        "attendees": { "type": "array" },
+        "googleCalendarEventId": { "type": "string", "maxLength": 160 },
+        "googleCalendarLink": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "title", "branch", "date", "startTime", "endTime", "trainerName", "facilityName", "capacity", "enrolledCount", "status", "color", "attendees", "createdAt", "updatedAt"]
+    },
+    "Anket": {
+      "title": "Anket",
+      "description": "Club feedback survey in /anketler/{anketId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 800 },
+        "targetAudience": { "type": "string", "enum": ["Sporcu", "Veli", "Eğitmen", "Genel"] },
+        "status": { "type": "string", "enum": ["Aktif", "Taslak", "Tamamlandı"] },
+        "responseCount": { "type": "number" },
+        "totalSent": { "type": "number" },
+        "createdDate": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "dueDate": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "questions": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "title", "description", "targetAudience", "status", "responseCount", "totalSent", "createdDate", "dueDate", "questions", "createdAt", "updatedAt"]
+    },
+    "DestekTalebi": {
+      "title": "DestekTalebi",
+      "description": "Support ticket and messages thread in /destek_talepleri/{ticketId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ticketNumber": { "type": "number" },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "category": { "type": "string", "enum": ["teknik", "muhasebe", "paket", "egitim-planlama", "veli-karne", "entegrasyon", "oneri"] },
+        "priority": { "type": "string", "enum": ["Dusuk", "Normal", "Yuksek", "Acil"] },
+        "status": { "type": "string", "enum": ["Acik", "Yanitlandi", "MusteriYaniti", "Beklemede", "Cozuldu", "Kapali"] },
+        "clubName": { "type": "string", "maxLength": 160 },
+        "clubPackage": { "type": "string", "maxLength": 100 },
+        "clubBranch": { "type": "string", "maxLength": 140 },
+        "creatorName": { "type": "string", "maxLength": 140 },
+        "creatorEmail": { "type": "string", "maxLength": 160 },
+        "creatorPhone": { "type": "string", "maxLength": 32 },
+        "createdDateStr": { "type": "string", "maxLength": 64 },
+        "updatedDateStr": { "type": "string", "maxLength": 64 },
+        "closedAt": { "type": "string", "maxLength": 64 },
+        "preferredContact": { "type": "string", "enum": ["panel", "whatsapp", "email", "phone"] },
+        "messages": { "type": "array" },
+        "assignedAgent": { "type": "object" },
+        "feedback": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "ticketNumber", "subject", "category", "priority", "status", "clubName", "clubPackage", "creatorName", "creatorEmail", "creatorPhone", "createdDateStr", "updatedDateStr", "preferredContact", "messages", "createdAt", "updatedAt"]
+    },
+    "OnKayit": {
+      "title": "OnKayit",
+      "description": "Athlete pre-registration CRM record in /on_kayitlar/{onKayitId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "onKayitNo": { "type": "string", "maxLength": 64 },
+        "onKayitTarihi": { "type": "string", "maxLength": 32 },
+        "sube": { "type": "string", "maxLength": 140 },
+        "brans": { "type": "string", "maxLength": 80 },
+        "sporcuAdSoyad": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "cinsiyet": { "type": "string", "enum": ["Erkek", "Kız"] },
+        "tcKimlikNo": { "type": "string", "maxLength": 20 },
+        "dogumTarihi": { "type": "string", "maxLength": 32 },
+        "telefon": { "type": "string", "maxLength": 32 },
+        "il": { "type": "string", "maxLength": 80 },
+        "ilce": { "type": "string", "maxLength": 80 },
+        "adres": { "type": "string", "maxLength": 300 },
+        "veliAdSoyad": { "type": "string", "maxLength": 140 },
+        "veliTelefon": { "type": "string", "maxLength": 32 },
+        "veliEposta": { "type": "string", "maxLength": 160 },
+        "acilDurumAranacakKisi": { "type": "string", "maxLength": 140 },
+        "acilDurumTelefonu": { "type": "string", "maxLength": 32 },
+        "ulasmaTuru": { "type": "string", "maxLength": 80 },
+        "kayitDurumu": { "type": "string", "enum": ["Ön Kayıt", "Görüşme Yapıldı", "Deneme Antrenmanı", "Sözleşme Bekleniyor", "Kayıt Oldu", "Kayıt Olmadı", "İptal"] },
+        "kayitTarihi": { "type": "string", "maxLength": 32 },
+        "sonGuncellemeTarihi": { "type": "string", "maxLength": 32 },
+        "kayitOlusturanKullanici": { "type": "string", "maxLength": 120 },
+        "kvkkAydinlatmaOnay": { "type": "boolean" },
+        "acikRizaOnay": { "type": "boolean" },
+        "fotografVideoIzni": { "type": "boolean" },
+        "iletisimKampanyaIzni": { "type": "boolean" },
+        "veliOnayi": { "type": "boolean" },
+        "extraFields": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "onKayitNo", "onKayitTarihi", "sube", "brans", "sporcuAdSoyad", "cinsiyet", "veliAdSoyad", "veliTelefon", "kayitDurumu", "createdAt", "updatedAt"]
+    },
+    "Sube": {
+      "title": "Sube",
+      "description": "Sports club branch record in /subeler/{subeId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ad": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "kod": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "sehir": { "type": "string", "maxLength": 80 },
+        "ilce": { "type": "string", "maxLength": 80 },
+        "adres": { "type": "string", "maxLength": 300 },
+        "telefon": { "type": "string", "maxLength": 32 },
+        "eposta": { "type": "string", "maxLength": 160 },
+        "sorumluYonetici": { "type": "string", "maxLength": 120 },
+        "sorumluAntrenor": { "type": "string", "maxLength": 120 },
+        "antrenorSayisi": { "type": "number" },
+        "sporcuSayisi": { "type": "number" },
+        "kapasite": { "type": "number" },
+        "branslar": { "type": "array", "items": { "type": "string" } },
+        "tesisTipi": { "type": "string", "maxLength": 80 },
+        "durum": { "type": "string", "enum": ["Aktif", "Pasif", "Tadilatta"] },
+        "acilisTarihi": { "type": "string", "maxLength": 32 },
+        "aylikCiro": { "type": "number" },
+        "ozellikler": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "ad", "kod", "sehir", "ilce", "durum", "kapasite", "branslar", "ozellikler", "createdAt", "updatedAt"]
+    },
+    "SporPuanLog": {
+      "title": "SporPuanLog",
+      "description": "Athlete SporPuan award log in /sporpuan_logs/{logId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sporcuId": { "type": "string", "maxLength": 128 },
+        "sporcuName": { "type": "string", "maxLength": 140 },
+        "ruleId": { "type": "string", "maxLength": 64 },
+        "category": { "type": "string", "maxLength": 64 },
+        "ruleName": { "type": "string", "maxLength": 160 },
+        "points": { "type": "number" },
+        "date": { "type": "string", "maxLength": 32 },
+        "source": { "type": "string", "enum": ["Otomatik", "Koç Onayı"] },
+        "note": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "sporcuId", "category", "ruleName", "points", "date", "source", "createdAt", "updatedAt"]
+    },
+    "YoklamaReminderLog": {
+      "title": "YoklamaReminderLog",
+      "description": "Automated attendance reminder dispatch log in /yoklama_hatirlatici_logs/{logId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "groupName": { "type": "string", "maxLength": 160 },
+        "trainingDate": { "type": "string", "maxLength": 32 },
+        "targetAudience": { "type": "string", "enum": ["parent", "trainer", "both"] },
+        "totalRecipientCount": { "type": "number" },
+        "channels": { "type": "array", "items": { "type": "string" } },
+        "messagePreview": { "type": "string", "maxLength": 800 },
+        "status": { "type": "string", "enum": ["sent", "pending", "failed"] },
+        "triggeredBy": { "type": "string", "maxLength": 160 },
+        "recipientsSummary": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "timestamp", "groupName", "trainingDate", "targetAudience", "totalRecipientCount", "channels", "messagePreview", "status", "triggeredBy", "recipientsSummary", "createdAt", "updatedAt"]
+    },
+    "ClubSetting": {
+      "title": "ClubSetting",
+      "description": "Tenant-scoped operational preferences (attendance automation, SporPuan rules, active branch) in /club_settings/{settingId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "settingKey": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "config": { "type": "object" },
+        "rulesList": { "type": "array" },
+        "activeValue": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "settingKey", "createdAt", "updatedAt"]
+    },
+    "EgitimPlani": {
+      "title": "EgitimPlani",
+      "description": "Curriculum training plan in /egitim_planlari/{planId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "branch": { "type": "string", "maxLength": 80 },
+        "ageCategory": { "type": "string", "maxLength": 64 },
+        "difficulty": { "type": "string", "maxLength": 64 },
+        "durationMinutes": { "type": "number" },
+        "summary": { "type": "string", "maxLength": 1000 },
+        "focusTags": { "type": "array", "items": { "type": "string" } },
+        "objectives": { "type": "array", "items": { "type": "string" } },
+        "equipment": { "type": "array", "items": { "type": "string" } },
+        "sections": { "type": "array" },
+        "coachNotes": { "type": "string", "maxLength": 1000 },
+        "isCustom": { "type": "boolean" },
+        "assignedGroups": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "code", "title", "branch", "ageCategory", "difficulty", "durationMinutes", "summary", "focusTags", "createdAt", "updatedAt"]
+    },
+    "Yonetici": {
+      "title": "Yonetici",
+      "description": "School/club manager registry in /yoneticiler/{yoneticiId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "email": { "type": "string", "maxLength": 160 },
+        "code": { "type": "string", "maxLength": 32 },
+        "createdDate": { "type": "string", "maxLength": 32 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "role": { "type": "string", "maxLength": 80 },
+        "schoolName": { "type": "string", "maxLength": 160 },
+        "accessibility": { "type": "string", "enum": ["Erişilebilir", "Erişilemez"] },
+        "packageType": { "type": "string", "maxLength": 80 },
+        "avatarUrl": { "type": "string", "maxLength": 500 },
+        "authProvider": { "type": "string", "enum": ["google", "email"] },
+        "activeStudents": { "type": "number" },
+        "activeTrainers": { "type": "number" },
+        "branches": { "type": "array", "items": { "type": "string" } },
+        "lastLogin": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "name", "email", "code", "createdDate", "phone", "role", "schoolName", "accessibility", "createdAt", "updatedAt"]
+    },
+    "KulupSozlesmesi": {
+      "title": "KulupSozlesmesi",
+      "description": "Official club/merchant legal contract in /kulup_sozlesmeleri/{sozlesmeId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sozlesmeNo": { "type": "string", "maxLength": 64 },
+        "yonetici": { "type": "string", "maxLength": 140 },
+        "firmaTip": { "type": "string", "maxLength": 80 },
+        "tcKimlik": { "type": "string", "maxLength": 20 },
+        "dogumTarihi": { "type": "string", "maxLength": 32 },
+        "il": { "type": "string", "maxLength": 80 },
+        "ilce": { "type": "string", "maxLength": 80 },
+        "eposta": { "type": "string", "maxLength": 160 },
+        "vergiDairesi": { "type": "string", "maxLength": 120 },
+        "ibanUnvan": { "type": "string", "maxLength": 200 },
+        "adSoyad": { "type": "string", "maxLength": 140 },
+        "firmaUnvani": { "type": "string", "maxLength": 200 },
+        "telefon": { "type": "string", "maxLength": 32 },
+        "website": { "type": "string", "maxLength": 200 },
+        "iban": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["Onaylandı", "İmza Bekliyor", "İnceleniyor"] },
+        "createdDate": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "sozlesmeNo", "yonetici", "firmaTip", "tcKimlik", "dogumTarihi", "il", "ilce", "vergiDairesi", "ibanUnvan", "adSoyad", "firmaUnvani", "telefon", "iban", "status", "createdDate", "createdAt", "updatedAt"]
+    },
+    "SporcuSozlesmesi": {
+      "title": "SporcuSozlesmesi",
+      "description": "Athlete parent digital consent contract in /sporcu_sozlesmeleri/{contractId}.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "athleteName": { "type": "string", "maxLength": 140 },
+        "parentName": { "type": "string", "maxLength": 140 },
+        "birthDate": { "type": "string", "maxLength": 32 },
+        "tcNo": { "type": "string", "maxLength": 20 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "email": { "type": "string", "maxLength": 160 },
+        "branch": { "type": "string", "maxLength": 80 },
+        "sube": { "type": "string", "maxLength": 140 },
+        "signedAt": { "type": "string", "maxLength": 64 },
+        "ipAddress": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["Onaylandı", "Bekliyor"] },
+        "signature": { "type": "string", "maxLength": 200 },
+        "kvkkApproved": { "type": "boolean" },
+        "taahhutnameApproved": { "type": "boolean" },
+        "photoVideoApproved": { "type": "boolean" },
+        "hash": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "athleteName", "parentName", "branch", "sube", "status", "kvkkApproved", "taahhutnameApproved", "photoVideoApproved", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -903,6 +1340,70 @@
     "/club_websites/{websiteId}": {
       "schema": { "$ref": "#/entities/ClubWebsite" },
       "description": "Club public landing page settings."
+    },
+    "/yoklamalar/{yoklamaId}": {
+      "schema": { "$ref": "#/entities/YoklamaKaydi" },
+      "description": "Daily attendance records per group."
+    },
+    "/muhasebe_hareketler/{hareketId}": {
+      "schema": { "$ref": "#/entities/MuhasebeHareket" },
+      "description": "Club income and expense transactions."
+    },
+    "/muhasebe_kategoriler/{kategoriId}": {
+      "schema": { "$ref": "#/entities/MuhasebeKategori" },
+      "description": "Club accounting income/expense categories."
+    },
+    "/odeme_planlari/{planId}": {
+      "schema": { "$ref": "#/entities/OdemePlani" },
+      "description": "Athlete installment payment plans and receipts."
+    },
+    "/antrenmanlar/{antrenmanId}": {
+      "schema": { "$ref": "#/entities/AntrenmanSeansi" },
+      "description": "Scheduled training sessions and attendee rosters."
+    },
+    "/anketler/{anketId}": {
+      "schema": { "$ref": "#/entities/Anket" },
+      "description": "Club feedback surveys."
+    },
+    "/destek_talepleri/{ticketId}": {
+      "schema": { "$ref": "#/entities/DestekTalebi" },
+      "description": "Support tickets and conversation history."
+    },
+    "/on_kayitlar/{onKayitId}": {
+      "schema": { "$ref": "#/entities/OnKayit" },
+      "description": "Athlete pre-registration CRM leads."
+    },
+    "/subeler/{subeId}": {
+      "schema": { "$ref": "#/entities/Sube" },
+      "description": "Club branch and facility definitions."
+    },
+    "/sporpuan_logs/{logId}": {
+      "schema": { "$ref": "#/entities/SporPuanLog" },
+      "description": "SporPuan athlete points history."
+    },
+    "/yoklama_hatirlatici_logs/{logId}": {
+      "schema": { "$ref": "#/entities/YoklamaReminderLog" },
+      "description": "Attendance reminder notification audit logs."
+    },
+    "/club_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/ClubSetting" },
+      "description": "Tenant-scoped operational configuration settings."
+    },
+    "/egitim_planlari/{planId}": {
+      "schema": { "$ref": "#/entities/EgitimPlani" },
+      "description": "Custom and assigned training curriculum plans."
+    },
+    "/yoneticiler/{yoneticiId}": {
+      "schema": { "$ref": "#/entities/Yonetici" },
+      "description": "Club manager accounts and licensing registry."
+    },
+    "/kulup_sozlesmeleri/{sozlesmeId}": {
+      "schema": { "$ref": "#/entities/KulupSozlesmesi" },
+      "description": "Club official merchant agreements."
+    },
+    "/sporcu_sozlesmeleri/{contractId}": {
+      "schema": { "$ref": "#/entities/SporcuSozlesmesi" },
+      "description": "Parent/athlete signed digital consent contracts."
     }
   }
 }

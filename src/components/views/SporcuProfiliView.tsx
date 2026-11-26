@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { openExternalUrl, isNativeCapacitorApp } from '../../utils/mobileBridge';
 import {
   ArrowLeft,
   ChevronLeft,
@@ -356,7 +357,12 @@ export const SporcuProfiliView: React.FC<SporcuProfiliViewProps> = ({
     const text = encodeURIComponent(
       `Sayın Veli, Sporcumuz ${currentProfil.kimlik.adSoyad} hakkında bilgilendirme:`
     );
-    window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${text}`, '_blank');
+    const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${text}`;
+    if (isNativeCapacitorApp()) {
+      void openExternalUrl(waUrl);
+    } else {
+      window.open(waUrl, '_blank');
+    }
   };
 
   // Athlete Photo update handler

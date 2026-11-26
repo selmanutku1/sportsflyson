@@ -1135,6 +1135,7 @@ export const CompanyIntegrationProfileView: React.FC<CompanyIntegrationProfileVi
                   'int-sporpuan': 'SporPuan (Sporcu Değerlendirme)',
                   'int-turnuva': 'Turnuva Yönetimi',
                   'int-envanter': 'Kulüp Envanteri',
+                  'int-sportsfly-studio': 'SportsFly Studio (Tasarım & İçerik Merkezi)',
                 };
                 return (
                   <div

@@ -60,6 +60,30 @@ export interface FirestoreEgitmenDoc {
   monthlySalary?: number;     // Örn: 34000
   city?: string;              // Örn: "İstanbul"
   avatarUrl?: string;
+  bio?: string;
+  gender?: string;
+  address?: string;
+  accountDuration?: string;
+  mailEnabled?: boolean;
+  smsEnabled?: boolean;
+  specialties?: string[];
+  joinDate?: string;
+  reviewCount?: number;
+  documents?: {
+    id: string;
+    name: string;
+    type: string;
+    date: string;
+    size: string;
+  }[];
+  appointments?: {
+    id: string;
+    title: string;
+    date: string;
+    time: string;
+    student: string;
+    status: string;
+  }[];
   createdAt: Timestamp | FieldValue;
   updatedAt: Timestamp | FieldValue;
 }
@@ -208,38 +232,54 @@ const BRANCH_TO_DEFAULT_TRAINER: Record<string, { id: string; name: string }> = 
   Jimnastik: { id: 'e-5', name: 'Zeynep Koç' },
 };
 
+export function sanitizeAvatarUrl(url?: string): string | undefined {
+  if (!url || typeof url !== 'string') return undefined;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith('data:') || trimmed.length > 500) {
+    return undefined;
+  }
+  return trimmed;
+}
+
 export function mapSporcuToFirestoreDoc(
   item: SporcuItem,
   ownerId: string,
   overrides?: { groupId?: string; trainerId?: string; trainerName?: string }
 ): FirestoreSporcuDoc {
-  const branch = (item.branch || 'Basketbol').slice(0, 80);
+  const branch = (item.branch || 'Basketbol').trim().slice(0, 80) || 'Basketbol';
   const defaultTrainer = BRANCH_TO_DEFAULT_TRAINER[branch] || { id: 'e-2', name: 'Berkan Saraç' };
   const resolvedGroupId = overrides?.groupId || BRANCH_TO_DEFAULT_GROUP_ID[branch] || 'grp-1';
   const resolvedTrainerId = overrides?.trainerId || defaultTrainer.id;
   const resolvedTrainerName = overrides?.trainerName || defaultTrainer.name;
+  const safeName = (item.name || 'Sporcu').trim().slice(0, 120);
+  const safeEmail = (item.email || `${item.code || 'sporcu'}@sportsfly.local`).trim().slice(0, 160);
+  const safeFacility = (item.facility || 'SportsFly Ana Tesis').trim().slice(0, 140);
+  const safeCode = (item.code || `${Math.floor(100000 + Math.random() * 900000)}`)
+    .replace(/[^a-zA-Z0-9_\-]/g, '')
+    .slice(0, 32) || '100000';
 
   const docData: FirestoreSporcuDoc = {
     id: item.id,
     ownerId,
-    code: item.code,
-    name: item.name.slice(0, 120),
-    email: item.email.slice(0, 160),
-    facility: item.facility.slice(0, 140),
-    branch,
+    code: safeCode.length >= 4 ? safeCode : safeCode.padEnd(4, '0'),
+    name: safeName.length >= 2 ? safeName : `${safeName} Sporcu`,
+    email: safeEmail.length >= 5 ? safeEmail : 'sporcu@sportsfly.local',
+    facility: safeFacility.length >= 2 ? safeFacility : 'SportsFly',
+    branch: branch.length >= 2 ? branch : 'Genel',
     groupId: resolvedGroupId,
     trainerId: resolvedTrainerId,
     trainerName: resolvedTrainerName.slice(0, 120),
     isActive: Boolean(item.isActive),
-    registrationDate: item.date.slice(0, 32),
+    registrationDate: (item.date || new Date().toLocaleDateString('tr-TR')).slice(0, 32),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
 
-  if (item.phone) docData.phone = item.phone.slice(0, 32);
-  if (item.birthDate) docData.birthDate = item.birthDate.slice(0, 24);
-  if (item.teamGroup) docData.teamGroup = item.teamGroup.slice(0, 120);
-  if (item.avatarUrl) docData.avatarUrl = item.avatarUrl.slice(0, 500);
+  if (item.phone && item.phone.trim().length >= 7) docData.phone = item.phone.trim().slice(0, 32);
+  if (item.birthDate && item.birthDate.trim().length >= 4) docData.birthDate = item.birthDate.trim().slice(0, 24);
+  if (item.teamGroup) docData.teamGroup = item.teamGroup.trim().slice(0, 120);
+  const safeAvatar = sanitizeAvatarUrl(item.avatarUrl);
+  if (safeAvatar) docData.avatarUrl = safeAvatar;
 
   return docData;
 }
@@ -249,22 +289,30 @@ export function mapEgitmenToFirestoreDoc(
   ownerId: string,
   assignedGroupIds?: string[]
 ): FirestoreEgitmenDoc {
-  const branch = (item.branch || 'Basketbol').slice(0, 80);
+  const branch = (item.branch || 'Basketbol').trim().slice(0, 80) || 'Basketbol';
   const defaultGroupId = BRANCH_TO_DEFAULT_GROUP_ID[branch] || 'grp-1';
   const resolvedGroupIds = (assignedGroupIds && assignedGroupIds.length > 0
     ? assignedGroupIds
     : [defaultGroupId]
   ).slice(0, 20);
 
+  const safeName = (item.name || 'Eğitmen').trim().slice(0, 120);
+  const safeEmail = (item.email || `${item.code || 'egitmen'}@sportsfly.local`).trim().slice(0, 160);
+  const safePhone = (item.phone || '+90 500 000 00 00').trim().slice(0, 32);
+  const safeFacility = (item.facility || 'SportsFly Ana Tesis').trim().slice(0, 140);
+  const safeCode = (item.code || `${Math.floor(100000 + Math.random() * 900000)}`)
+    .replace(/[^a-zA-Z0-9_\-]/g, '')
+    .slice(0, 32) || '100000';
+
   const docData: FirestoreEgitmenDoc = {
     id: item.id,
     ownerId,
-    code: item.code,
-    name: item.name.slice(0, 120),
-    email: item.email.slice(0, 160),
-    phone: item.phone.slice(0, 32),
-    facility: item.facility.slice(0, 140),
-    branch,
+    code: safeCode.length >= 4 ? safeCode : safeCode.padEnd(4, '0'),
+    name: safeName.length >= 2 ? safeName : `${safeName} Koç`,
+    email: safeEmail.length >= 5 ? safeEmail : 'egitmen@sportsfly.local',
+    phone: safePhone.length >= 5 ? safePhone : '+90 500 000 00 00',
+    facility: safeFacility.length >= 2 ? safeFacility : 'SportsFly',
+    branch: branch.length >= 2 ? branch : 'Genel',
     assignedGroupIds: resolvedGroupIds,
     status: item.status || 'Aktif',
     createdAt: serverTimestamp(),
@@ -272,19 +320,37 @@ export function mapEgitmenToFirestoreDoc(
   };
 
   if (item.assignedGroups && item.assignedGroups.length > 0) {
-    docData.assignedGroups = item.assignedGroups.slice(0, 20).map((g) => g.slice(0, 140));
+    docData.assignedGroups = item.assignedGroups.slice(0, 20).map((g) => String(g).slice(0, 140));
   }
   if (item.title) docData.title = item.title.slice(0, 140);
   if (item.licenseLevel) docData.licenseLevel = item.licenseLevel.slice(0, 140);
-  if (typeof item.experienceYears === 'number') docData.experienceYears = item.experienceYears;
-  if (typeof item.rating === 'number') docData.rating = item.rating;
-  if (typeof item.activeGroupsCount === 'number') docData.activeGroupsCount = item.activeGroupsCount;
-  if (typeof item.activeAthletesCount === 'number') docData.activeAthletesCount = item.activeAthletesCount;
-  if (typeof item.weeklyHours === 'number') docData.weeklyHours = item.weeklyHours;
-  if (typeof item.hourlyRate === 'number') docData.hourlyRate = item.hourlyRate;
-  if (typeof item.monthlySalary === 'number') docData.monthlySalary = item.monthlySalary;
+  if (typeof item.experienceYears === 'number') docData.experienceYears = Math.max(0, item.experienceYears);
+  if (typeof item.rating === 'number') docData.rating = Math.min(5, Math.max(0, item.rating));
+  if (typeof item.activeGroupsCount === 'number') docData.activeGroupsCount = Math.max(0, item.activeGroupsCount);
+  if (typeof item.activeAthletesCount === 'number') docData.activeAthletesCount = Math.max(0, item.activeAthletesCount);
+  if (typeof item.weeklyHours === 'number') docData.weeklyHours = Math.max(0, item.weeklyHours);
+  if (typeof item.hourlyRate === 'number') docData.hourlyRate = Math.max(0, item.hourlyRate);
+  if (typeof item.monthlySalary === 'number') docData.monthlySalary = Math.max(0, item.monthlySalary);
   if (item.city) docData.city = item.city.slice(0, 80);
-  if (item.avatarUrl) docData.avatarUrl = item.avatarUrl.slice(0, 500);
+  const safeAvatar = sanitizeAvatarUrl(item.avatarUrl);
+  if (safeAvatar) docData.avatarUrl = safeAvatar;
+  if (item.bio) docData.bio = item.bio.slice(0, 1000);
+  if (item.gender) docData.gender = item.gender.slice(0, 32);
+  if (item.address) docData.address = item.address.slice(0, 300);
+  if (item.accountDuration) docData.accountDuration = item.accountDuration.slice(0, 64);
+  if (typeof item.mailEnabled === 'boolean') docData.mailEnabled = item.mailEnabled;
+  if (typeof item.smsEnabled === 'boolean') docData.smsEnabled = item.smsEnabled;
+  if (Array.isArray(item.specialties) && item.specialties.length > 0) {
+    docData.specialties = item.specialties.slice(0, 20).map((s) => String(s).slice(0, 100));
+  }
+  if (item.joinDate) docData.joinDate = item.joinDate.slice(0, 32);
+  if (typeof item.reviewCount === 'number') docData.reviewCount = Math.max(0, item.reviewCount);
+  if (Array.isArray(item.documents) && item.documents.length > 0) {
+    docData.documents = item.documents.slice(0, 50);
+  }
+  if (Array.isArray(item.appointments) && item.appointments.length > 0) {
+    docData.appointments = item.appointments.slice(0, 50);
+  }
 
   return docData;
 }
@@ -352,3 +418,85 @@ export function mapGrupToFirestoreDoc(
 
   return { grupDoc, uyeDocs };
 }
+
+export function mapFirestoreDocToSporcuItem(docData: FirestoreSporcuDoc): SporcuItem {
+  return {
+    id: docData.id,
+    name: docData.name,
+    email: docData.email,
+    code: docData.code,
+    date: docData.registrationDate || new Date().toLocaleDateString('tr-TR'),
+    facility: docData.facility,
+    isActive: Boolean(docData.isActive),
+    avatarUrl: docData.avatarUrl,
+    phone: docData.phone,
+    birthDate: docData.birthDate,
+    branch: docData.branch,
+    teamGroup: docData.teamGroup,
+  };
+}
+
+export function mapFirestoreDocToEgitmenItem(docData: FirestoreEgitmenDoc): EgitmenItem {
+  return {
+    id: docData.id,
+    name: docData.name,
+    email: docData.email,
+    code: docData.code,
+    phone: docData.phone,
+    facility: docData.facility,
+    branch: docData.branch,
+    title: docData.title,
+    gender: docData.gender,
+    city: docData.city,
+    address: docData.address,
+    accountDuration: docData.accountDuration,
+    mailEnabled: docData.mailEnabled,
+    smsEnabled: docData.smsEnabled,
+    avatarUrl: docData.avatarUrl,
+    status: docData.status,
+    experienceYears: docData.experienceYears,
+    rating: docData.rating,
+    reviewCount: docData.reviewCount,
+    activeGroupsCount: docData.activeGroupsCount,
+    activeAthletesCount: docData.activeAthletesCount,
+    weeklyHours: docData.weeklyHours,
+    licenseLevel: docData.licenseLevel,
+    bio: docData.bio,
+    specialties: docData.specialties,
+    assignedGroups: docData.assignedGroups,
+    joinDate: docData.joinDate,
+    hourlyRate: docData.hourlyRate,
+    monthlySalary: docData.monthlySalary,
+    documents: docData.documents,
+    appointments: docData.appointments,
+  };
+}
+
+export function mapFirestoreDocToGrupItem(
+  docData: FirestoreGrupDoc,
+  members: GrupMember[] = []
+): GrupItem {
+  return {
+    id: docData.id,
+    name: docData.name,
+    instructorName: docData.instructorName,
+    memberCount: members.length > 0 ? members.length : docData.memberCount,
+    facility: docData.facility,
+    branch: docData.branch,
+    description: docData.description,
+    category: docData.category,
+    ageGroup: docData.ageGroup,
+    maxCapacity: docData.maxCapacity,
+    monthlyFee: docData.monthlyFee,
+    status: docData.status,
+    schedule: docData.scheduleDays || docData.scheduleTime || docData.scheduleLocation
+      ? {
+          days: docData.scheduleDays || [],
+          time: docData.scheduleTime || '17:00 - 18:30',
+          location: docData.scheduleLocation,
+        }
+      : undefined,
+    members,
+  };
+}
+

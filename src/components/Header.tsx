@@ -27,7 +27,6 @@ import {
   Zap,
   ArrowRight,
   X,
-  Package,
   Crown,
   Trash2,
   CheckCheck,
@@ -35,7 +34,6 @@ import {
   QrCode,
   Camera,
   ShieldCheck,
-  Activity,
 } from 'lucide-react';
 import { QrYoklamaScannerModal } from './modals/QrYoklamaScannerModal';
 import { SportsFlyIcon } from './SportsFlyLogo';
@@ -53,7 +51,6 @@ import {
 } from '../data/subeData';
 import {
   CANONICAL_PACKAGES,
-  PACKAGE_DETAILS,
   getActiveSessionPlan,
   setActiveSessionPlan,
   isGoogleRestrictedUser,
@@ -89,14 +86,12 @@ export const Header: React.FC<HeaderProps> = ({
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
-  const [showPlanMenu, setShowPlanMenu] = useState(false);
   const [isUpdatesModalOpen, setIsUpdatesModalOpen] = useState(false);
   const [notifCategoryFilter, setNotifCategoryFilter] = useState<'all' | 'unread' | 'sporpuan' | 'payment' | 'message' | 'training' | 'system'>('all');
   const notificationRef = useRef<HTMLDivElement>(null);
 
   // Active Package Plan State
   const [activePlan, setActivePlan] = useState<PackagePlanType>(() => getActiveSessionPlan());
-  const planMenuRef = useRef<HTMLDivElement>(null);
 
   // Multi-Branch Switcher State
   const [subeler, setSubeler] = useState<Sube[]>(() => getStoredSubeler());
@@ -281,9 +276,6 @@ export const Header: React.FC<HeaderProps> = ({
       if (themeMenuRef.current && !themeMenuRef.current.contains(event.target as Node)) {
         setShowThemeMenu(false);
       }
-      if (planMenuRef.current && !planMenuRef.current.contains(event.target as Node)) {
-        setShowPlanMenu(false);
-      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('touchstart', handleClickOutside, { passive: true });
@@ -370,6 +362,10 @@ export const Header: React.FC<HeaderProps> = ({
         return 'SportsFly > İtibar Yönetimi > Doğrulamalar';
       case 'sporpuan-raporlar':
         return 'SportsFly > İtibar Yönetimi > Raporlar';
+      case 'entegrasyonlar':
+        return 'SportsFly > Entegrasyonlar';
+      case 'sportsfly-studio':
+        return 'SportsFly > Entegrasyonlar > SportsFly Studio';
       default:
         return 'SportsFly > Anasayfa';
     }
@@ -544,127 +540,6 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
-          {/* Minimal Package Plan Quick Switcher in Header - Sadece Süper Admin için */}
-          {isSuperAdmin && !isUnapprovedOrRestricted && (
-          <div className="relative hidden sm:block" ref={planMenuRef}>
-            <button
-              id="header-package-plan-btn"
-              onClick={() => {
-                setShowPlanMenu(!showPlanMenu);
-                setShowNotifications(false);
-                setShowProfileMenu(false);
-                setShowThemeMenu(false);
-                setShowBranchMenu(false);
-              }}
-              className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 sm:py-2 rounded-xl sm:rounded-2xl border border-indigo-200/90 dark:border-indigo-800/70 bg-indigo-50/70 hover:bg-indigo-100/80 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/70 text-indigo-900 dark:text-indigo-200 text-xs font-bold transition-all shadow-2xs cursor-pointer"
-              title="Aktif Kulüp Paketi ve Hızlı Geçiş"
-            >
-              <Crown className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-              <span className="hidden lg:inline max-w-[110px] truncate">
-                {activePlan === 'Pro Akademi & Çoklu Şube' ? 'Pro Akademi' : activePlan}
-              </span>
-              <span className="text-[10px] bg-indigo-200/80 dark:bg-indigo-900/80 text-indigo-900 dark:text-indigo-200 px-1.5 py-0.5 rounded-md font-extrabold shrink-0">
-                Lvl {PACKAGE_DETAILS[activePlan]?.level || 2}
-              </span>
-              <ChevronDown className="w-3.5 h-3.5 text-indigo-500/80 shrink-0 hidden sm:inline" />
-            </button>
-
-            {/* Plan Switcher Dropdown */}
-            {showPlanMenu && (
-              <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-white dark:bg-[#111c2e] rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 py-3 z-[9999] animate-in fade-in slide-in-from-top-2 duration-150">
-                <div className="px-4 pb-2.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                  <div>
-                    <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
-                      Kulüp Üyelik Paketi
-                    </span>
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                      Hızlı Paket Geçişi
-                    </span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200/50">
-                    Aktif: {activePlan === 'Pro Akademi & Çoklu Şube' ? 'Pro' : activePlan}
-                  </span>
-                </div>
-
-                <div className="p-2 space-y-1">
-                  {CANONICAL_PACKAGES.map((planName) => {
-                    const planInfo = PACKAGE_DETAILS[planName];
-                    const isCurrent = activePlan === planName;
-                    return (
-                      <button
-                        key={planName}
-                        onClick={() => {
-                          setActiveSessionPlan(planName);
-                          setActivePlan(planName);
-                          setShowPlanMenu(false);
-                        }}
-                        className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all cursor-pointer ${
-                          isCurrent
-                            ? 'bg-indigo-50/90 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-950 dark:text-indigo-100 shadow-2xs font-bold'
-                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/70 border border-transparent text-slate-700 dark:text-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div
-                            className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                              isCurrent
-                                ? 'bg-indigo-600 text-white shadow-xs'
-                                : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-                            }`}
-                          >
-                            <Crown className="w-3.5 h-3.5" />
-                          </div>
-                          <div className="truncate">
-                            <div className="text-xs font-bold truncate flex items-center gap-1.5">
-                              <span>{planName}</span>
-                              {isCurrent && (
-                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-200 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 font-extrabold">
-                                  Aktif
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
-                              {planInfo.priceFormatted} &bull; {planInfo.limits.maxBranches} &bull; {planInfo.maxStudents} Sporcu
-                            </div>
-                          </div>
-                        </div>
-                        {isCurrent && (
-                          <Check className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="px-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                  <button
-                    onClick={() => {
-                      setShowPlanMenu(false);
-                      onNavigate?.('paketler');
-                    }}
-                    className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1.5 cursor-pointer py-1"
-                  >
-                    <Package className="w-3.5 h-3.5" />
-                    <span>Tüm Paket & Limit Detayları</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-          )}
-
-          {/* SportsFly Lab & Toplu Karne Quick Access Button */}
-          <button
-            onClick={() => onNavigate?.('sportsfly-lab')}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl sm:rounded-2xl border border-violet-200 dark:border-violet-800 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer whitespace-nowrap"
-            title="SportsFly Lab & Toplu Karne Paneline Git"
-          >
-            <Activity className="w-3.5 h-3.5 text-white shrink-0" />
-            <span className="hidden md:inline">SportsFly Lab & Toplu Karne</span>
-            <span className="md:hidden">Lab</span>
-          </button>
-
           {/* THEME TOGGLE (Açık / Koyu / Sistem Modu) */}
           <div className="relative" ref={themeMenuRef}>
             <button
@@ -775,7 +650,6 @@ export const Header: React.FC<HeaderProps> = ({
                 setShowProfileMenu(false);
                 setShowThemeMenu(false);
                 setShowBranchMenu(false);
-                setShowPlanMenu(false);
               }}
               className={`relative w-10 h-10 rounded-xl transition-all flex items-center justify-center cursor-pointer shadow-2xs ${
                 showNotifications

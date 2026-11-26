@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   BranchType,
   AgeCategory,
@@ -34,6 +34,8 @@ import { CreateTrainingPlanModal } from './egitim/CreateTrainingPlanModal';
 import { AssignToGroupModal } from './egitim/AssignToGroupModal';
 import { CurriculumMatrixView } from './egitim/CurriculumMatrixView';
 import { CompetencyRubricView } from './egitim/CompetencyRubricView';
+import { auth } from '../../firebase';
+import { egitimPlanlariService } from '../../services/operationsFirestoreService';
 
 export const EgitimPlanlamaView: React.FC = () => {
   // Primary Navigation States
@@ -72,6 +74,21 @@ export const EgitimPlanlamaView: React.FC = () => {
     }, 4000);
   };
 
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const unsub = egitimPlanlariService.subscribe((docs) => {
+      if (docs.length === 0) return;
+      const byId = new Map<string, TrainingPlan>();
+      TEMPLATE_TRAINING_PLANS.forEach((tpl) => byId.set(tpl.id, tpl));
+      docs.forEach((docPlan) => byId.set(docPlan.id, docPlan));
+      const customsFirst = Array.from(byId.values()).sort(
+        (a, b) => Number(Boolean(b.isCustom)) - Number(Boolean(a.isCustom))
+      );
+      setAllPlans(customsFirst);
+    });
+    return () => unsub();
+  }, []);
+
   // Current Age Metadata
   const currentMeta = useMemo(() => {
     return (
@@ -101,7 +118,7 @@ export const EgitimPlanlamaView: React.FC = () => {
   }, [allPlans, selectedBranch, selectedAge, searchQuery, selectedDifficulty]);
 
   // Handle Save New Plan
-  const handleSaveNewPlan = (newPlan: TrainingPlan) => {
+  const handleSaveNewPlan = async (newPlan: TrainingPlan) => {
     const updated = [newPlan, ...allPlans];
     setAllPlans(updated);
     try {
@@ -110,14 +127,35 @@ export const EgitimPlanlamaView: React.FC = () => {
     } catch (e) {
       console.error(e);
     }
+    if (auth.currentUser) {
+      try {
+        await egitimPlanlariService.upsert(newPlan);
+      } catch (err) {
+        console.error('Eğitim planı Firestore kaydı hatası:', err);
+      }
+    }
     showToast(`"${newPlan.title}" başarıyla müfredata eklendi!`);
     setSelectedBranch(newPlan.branch);
     setSelectedAge(newPlan.ageCategory);
   };
 
   // Handle Assign to Group
-  const handleAssignSuccess = (groups: string[], scheduledTime: string) => {
+  const handleAssignSuccess = async (groups: string[], scheduledTime: string) => {
     if (assigningPlan) {
+      const existingGroups = assigningPlan.assignedGroups || [];
+      const mergedGroups = Array.from(new Set([...existingGroups, ...groups]));
+      const updatedPlan: TrainingPlan = {
+        ...assigningPlan,
+        assignedGroups: mergedGroups,
+      };
+      setAllPlans((prev) => prev.map((p) => (p.id === updatedPlan.id ? updatedPlan : p)));
+      if (auth.currentUser) {
+        try {
+          await egitimPlanlariService.upsert(updatedPlan);
+        } catch (err) {
+          console.error('Eğitim planı grup ataması Firestore kaydı hatası:', err);
+        }
+      }
       showToast(
         `"${assigningPlan.title}" planı ${groups.join(', ')} gruplarına (${scheduledTime}) başarıyla atandı.`
       );

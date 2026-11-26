@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Plus,
   Search,
@@ -37,6 +37,8 @@ import {
   normalizePlanName,
   setActiveSessionPlan,
 } from '../../data/packagePermissions';
+import { auth } from '../../firebase';
+import { yoneticilerService } from '../../services/operationsFirestoreService';
 
 const YONETICILER_STORAGE_KEY = 'sportsfly_yoneticiler_v2';
 
@@ -91,6 +93,16 @@ export const YoneticilerView: React.FC = () => {
     } catch (e) {}
   };
 
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const unsub = yoneticilerService.subscribe((items) => {
+      if (items.length > 0) {
+        updateYoneticiler(items);
+      }
+    });
+    return () => unsub();
+  }, []);
+
   // Add Manager Form State
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -132,7 +144,7 @@ export const YoneticilerView: React.FC = () => {
   };
 
   // Change manager package directly
-  const handleChangeManagerPackage = (managerId: string, newPlan: PackagePlanType) => {
+  const handleChangeManagerPackage = async (managerId: string, newPlan: PackagePlanType) => {
     const updated = yoneticiler.map((item) => {
       if (item.id === managerId) {
         return { ...item, packageType: newPlan };
@@ -143,6 +155,14 @@ export const YoneticilerView: React.FC = () => {
 
     const targetManager = updated.find((m) => m.id === managerId);
     const targetName = targetManager?.name || 'Yönetici';
+
+    if (auth.currentUser && targetManager) {
+      try {
+        await yoneticilerService.upsert(targetManager);
+      } catch (err) {
+        console.error('Yönetici paket güncelleme Firestore hatası:', err);
+      }
+    }
 
     if (activeImpersonation && activeImpersonation.id === managerId) {
       setActiveImpersonation({ ...activeImpersonation, packageType: newPlan });
@@ -185,8 +205,9 @@ export const YoneticilerView: React.FC = () => {
   };
 
   // Toggle Accessibility
-  const handleToggleAccessibility = (id: string, e?: React.MouseEvent) => {
+  const handleToggleAccessibility = async (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    let updatedManager: YoneticiItem | null = null;
     const updated = yoneticiler.map((item) => {
       if (item.id === id) {
         const nextStatus = item.accessibility === 'Erişilebilir' ? 'Erişilemez' : 'Erişilebilir';
@@ -194,20 +215,35 @@ export const YoneticilerView: React.FC = () => {
           `${item.name} erişilebilirlik durumu "${nextStatus}" olarak güncellendi.`,
           nextStatus === 'Erişilebilir' ? 'success' : 'warning'
         );
-        return { ...item, accessibility: nextStatus as 'Erişilebilir' | 'Erişilemez' };
+        updatedManager = { ...item, accessibility: nextStatus as 'Erişilebilir' | 'Erişilemez' };
+        return updatedManager;
       }
       return item;
     });
     updateYoneticiler(updated);
+    if (auth.currentUser && updatedManager) {
+      try {
+        await yoneticilerService.upsert(updatedManager);
+      } catch (err) {
+        console.error('Yönetici erişilebilirlik Firestore hatası:', err);
+      }
+    }
   };
 
   // Force enable accessibility from modal and login
-  const handleForceEnableAndLogin = (manager: YoneticiItem) => {
+  const handleForceEnableAndLogin = async (manager: YoneticiItem) => {
+    const updated = { ...manager, accessibility: 'Erişilebilir' as const };
     const updatedList = yoneticiler.map((item) =>
-      item.id === manager.id ? { ...item, accessibility: 'Erişilebilir' as const } : item
+      item.id === manager.id ? updated : item
     );
     updateYoneticiler(updatedList);
-    const updated = { ...manager, accessibility: 'Erişilebilir' as const };
+    if (auth.currentUser) {
+      try {
+        await yoneticilerService.upsert(updated);
+      } catch (err) {
+        console.error('Yönetici erişim açma Firestore hatası:', err);
+      }
+    }
     setInaccessibleModalManager(null);
     setActiveImpersonation(updated);
     const plan = normalizePlanName(updated.packageType);
@@ -219,7 +255,7 @@ export const YoneticilerView: React.FC = () => {
   };
 
   // Add Manager
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !newEmail.trim()) {
       showToast('Lütfen yönetici adı ve e-posta adresini giriniz.', 'warning');
@@ -255,6 +291,15 @@ export const YoneticilerView: React.FC = () => {
     setNewPhone('+90 532 ');
     setNewSchoolName('');
     setNewPackageType('Kulüp & Akademi');
+
+    if (auth.currentUser) {
+      try {
+        await yoneticilerService.upsert(newManager);
+      } catch (err) {
+        console.error('Yeni yönetici Firestore kaydı hatası:', err);
+      }
+    }
+
     showToast(`Yeni yönetici "${newManager.name}" (${newPackageType} Paketi) başarıyla eklendi.`, 'success');
   };
 

@@ -43,6 +43,7 @@ export type NavPage =
   | 'kulup-web-sitesi'
   | 'sportsfly-intelligence'
   | 'sportsfly-lab'
+  | 'sportsfly-studio'
   | 'batch-manager'
   | 'eposta-servis-yapilandirmasi';
 

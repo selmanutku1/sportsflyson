@@ -23,6 +23,7 @@ import { sendMutlucellSms } from '../../services/smsService';
 import { getStoredUserProfile } from '../../data/userProfile';
 import { isSuperAdminUser } from '../../data/packagePermissions';
 import { fetchWithTimeout } from '../../utils/networkResilience';
+import { resolveApiUrl } from '../../utils/mobileBridge';
 import { basvurularService, FirestoreSporOkuluBasvurusuDoc } from '../../services/firestoreService';
 import { approveRegisteredUser, rejectRegisteredUser } from '../../services/registeredUsersService';
 
@@ -183,7 +184,7 @@ export const SporOkuluBasvurulariView: React.FC = () => {
         }
       };
 
-      const res = await fetchWithTimeout('/api/demo-requests', { timeoutMs: 7000 });
+      const res = await fetchWithTimeout(resolveApiUrl('/api/demo-requests'), { timeoutMs: 7000 });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.items)) {
@@ -222,7 +223,7 @@ export const SporOkuluBasvurulariView: React.FC = () => {
 
     let eventSource: EventSource | null = null;
     try {
-      eventSource = new EventSource('/api/demo-requests/stream');
+      eventSource = new EventSource(resolveApiUrl('/api/demo-requests/stream'));
       eventSource.onopen = () => {
         setIsLiveConnected(true);
       };
@@ -340,7 +341,7 @@ export const SporOkuluBasvurulariView: React.FC = () => {
       );
 
       try {
-        await fetchWithTimeout(`/api/demo-requests/${id}`, {
+        await fetchWithTimeout(resolveApiUrl(`/api/demo-requests/${id}`), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'onaylandi', sendSms: true }),
@@ -398,7 +399,7 @@ export const SporOkuluBasvurulariView: React.FC = () => {
       );
 
       try {
-        await fetchWithTimeout(`/api/demo-requests/${targetId}`, {
+        await fetchWithTimeout(resolveApiUrl(`/api/demo-requests/${targetId}`), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -433,7 +434,7 @@ export const SporOkuluBasvurulariView: React.FC = () => {
       await basvurularService.update(id, { status: 'askida' });
 
       try {
-        await fetchWithTimeout(`/api/demo-requests/${id}`, {
+        await fetchWithTimeout(resolveApiUrl(`/api/demo-requests/${id}`), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'askida' }),
@@ -455,7 +456,7 @@ export const SporOkuluBasvurulariView: React.FC = () => {
       saveRequestsToStorage(updated);
 
       try {
-        await fetchWithTimeout(`/api/demo-requests/${id}`, {
+        await fetchWithTimeout(resolveApiUrl(`/api/demo-requests/${id}`), {
           method: 'DELETE',
           timeoutMs: 7000,
         });

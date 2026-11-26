@@ -21,6 +21,7 @@ import {
   Info,
 } from 'lucide-react';
 import { SportsFlyLabReport } from '../../data/sportsFlyLabData';
+import { resolveApiUrl } from '../../utils/mobileBridge';
 
 export interface SportsFlyLabAiGrowthForecastCardProps {
   report: SportsFlyLabReport;
@@ -77,7 +78,7 @@ export const SportsFlyLabAiGrowthForecastCard: React.FC<SportsFlyLabAiGrowthFore
   const fetchAiGrowthPrediction = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/ai/growth-prediction', {
+      const res = await fetch(resolveApiUrl('/api/ai/growth-prediction'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

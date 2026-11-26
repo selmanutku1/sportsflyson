@@ -31,6 +31,10 @@ import { QrYoklamaScannerModal } from '../modals/QrYoklamaScannerModal';
 import { YoklamaHatirlatmaModal } from '../modals/YoklamaHatirlatmaModal';
 import { YoklamaRaporExportModal } from '../modals/YoklamaRaporExportModal';
 import { executeYoklamaReminderTrigger, getAutomationConfig } from '../../services/yoklamaHatirlaticiService';
+import { auth } from '../../firebase';
+import { gruplarService, grupUyeleriService } from '../../services/firestoreService';
+import { mapFirestoreDocToGrupItem } from '../../services/firestoreCollectionsSchema';
+import { yoklamalarService } from '../../services/operationsFirestoreService';
 
 // Types for local state
 type AttendanceStatus = 'present' | 'absent' | 'excused' | null;
@@ -76,14 +80,59 @@ export const YoklamaView: React.FC = () => {
     };
   }, []);
 
-  // Groups list
-  const gruplar = INITIAL_GRUPLAR;
+  // Live groups list from Firestore (fallback to INITIAL_GRUPLAR)
+  const [gruplar, setGruplar] = useState<GrupItem[]>(INITIAL_GRUPLAR);
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const unsub = gruplarService.subscribe(async (docs) => {
+      if (docs.length === 0) return;
+      const hydrated = await Promise.all(
+        docs.map(async (g) => {
+          const uyeler = await grupUyeleriService.getByGrupId(g.id).catch(() => []);
+          const members = uyeler.map((u) => ({
+            id: u.id,
+            name: u.name,
+            phone: u.phone || '',
+            code: u.code,
+            birthYear: u.birthYear,
+            parentName: u.parentName,
+            parentPhone: u.parentPhone,
+            attendanceRate: u.attendanceRate,
+            licenseNumber: u.licenseNumber,
+          }));
+          return mapFirestoreDocToGrupItem(g, members);
+        })
+      );
+      setGruplar(hydrated);
+    });
+    return () => unsub();
+  }, []);
+
+  // Load saved attendance from Firestore whenever group or date changes
+  useEffect(() => {
+    if (!selectedGroup || !auth.currentUser) return;
+    const yoklamaId = `${selectedGroup.id}_${attendanceDate}`.replace(/[^a-zA-Z0-9_\-]/g, '-');
+    yoklamalarService
+      .getById(yoklamaId)
+      .then((saved) => {
+        if (saved && Array.isArray(saved.records)) {
+          const nextState: Record<string, AttendanceStatus> = {};
+          selectedGroup.members?.forEach((m) => {
+            const match = saved.records.find((r) => r.memberId === m.id);
+            nextState[m.id] = match ? match.status : null;
+          });
+          setAttendanceState(nextState);
+        }
+      })
+      .catch(() => {});
+  }, [selectedGroup, attendanceDate]);
 
   // Change group
   const handleGroupSelect = (group: GrupItem) => {
     setSelectedGroup(group);
     setIsDropdownOpen(false);
-    
+
     // Reset attendance state when group changes
     const initialState: Record<string, AttendanceStatus> = {};
     group.members?.forEach(m => {
@@ -151,6 +200,28 @@ export const YoklamaView: React.FC = () => {
         channels: config.channels,
         triggeredBy: 'Otomatik Yoklama Kaydetme Tetikleyicisi',
       });
+    }
+
+    // Persist attendance record to Firestore
+    if (auth.currentUser) {
+      const yoklamaId = `${selectedGroup.id}_${attendanceDate}`.replace(/[^a-zA-Z0-9_\-]/g, '-');
+      yoklamalarService
+        .upsert({
+          id: yoklamaId,
+          groupId: selectedGroup.id,
+          groupName: selectedGroup.name,
+          date: attendanceDate,
+          records: selectedGroup.members.map((m) => ({
+            memberId: m.id,
+            memberName: m.name,
+            code: m.code,
+            status: attendanceState[m.id] || null,
+          })),
+          presentCount,
+          absentCount,
+          excusedCount,
+        })
+        .catch((err) => console.warn('[Yoklama] Firestore save warning:', err));
     }
 
     setTimeout(() => {

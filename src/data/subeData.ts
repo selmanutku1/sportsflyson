@@ -1,3 +1,6 @@
+import { auth } from '../firebase';
+import { saveActiveSubeSettingToFirestore } from '../services/operationsFirestoreService';
+
 export type SubeDurum = 'Aktif' | 'Pasif' | 'Tadilatta';
 
 export type TesisTipi =
@@ -160,6 +163,11 @@ export function setActiveSubeId(id: string): void {
   try {
     localStorage.setItem(ACTIVE_SUBE_STORAGE_KEY, id);
     window.dispatchEvent(new CustomEvent('sportsfly_active_sube_changed', { detail: id }));
+    if (auth.currentUser) {
+      saveActiveSubeSettingToFirestore(id).catch((e) =>
+        console.warn('[Subeler] Active sube Firestore sync warning:', e)
+      );
+    }
   } catch (err) {
     console.error('Aktif şube değiştirilirken hata:', err);
   }

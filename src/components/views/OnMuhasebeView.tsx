@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import * as XLSX from 'xlsx';
@@ -42,6 +42,12 @@ import {
   INITIAL_ODEME_PLANI,
 } from '../../data/mockMuhasebeData';
 import { GelirGiderItem, GelirGiderKategoriItem, OdemePlaniItem, NavPage } from '../../types';
+import { auth } from '../../firebase';
+import {
+  muhasebeHareketlerService,
+  muhasebeKategorilerService,
+  odemePlanlariService,
+} from '../../services/operationsFirestoreService';
 
 interface Props {
   initialTab?: 'genel' | 'kategoriler' | 'hareketler' | 'kontrol' | 'planlar';
@@ -74,6 +80,33 @@ export const OnMuhasebeView: React.FC<Props> = ({ initialTab = 'genel', onNaviga
   const [receiptDocType, setReceiptDocType] = useState<'makbuz' | 'fatura'>('makbuz');
   const [nextReceiptNumber, setNextReceiptNumber] = useState<number>(1001);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+
+    const unsubHareketler = muhasebeHareketlerService.subscribe((items) => {
+      if (items.length > 0) setHareketler(items);
+    });
+    const unsubKategoriler = muhasebeKategorilerService.subscribe((items) => {
+      if (items.length > 0) setKategoriler(items);
+    });
+    const unsubPlanlar = odemePlanlariService.subscribe((items) => {
+      if (items.length > 0) {
+        setOdemePlanlari(items);
+        const maxNum = items.reduce((max, p) => {
+          const parsed = parseInt((p.receiptNumber || '').replace(/\D/g, ''), 10);
+          return Number.isFinite(parsed) && parsed > max ? parsed : max;
+        }, 1000);
+        setNextReceiptNumber(Math.max(1001, maxNum + 1));
+      }
+    });
+
+    return () => {
+      unsubHareketler();
+      unsubKategoriler();
+      unsubPlanlar();
+    };
+  }, []);
 
   // Filter States for Ödeme Planları Tab
   const [planSearch, setPlanSearch] = useState('');
@@ -180,7 +213,7 @@ export const OnMuhasebeView: React.FC<Props> = ({ initialTab = 'genel', onNaviga
     setPlanEndDate('');
   };
 
-  const handleOpenReceipt = (plan: OdemePlaniItem) => {
+  const handleOpenReceipt = async (plan: OdemePlaniItem) => {
     const todayStr = new Date().toLocaleDateString('tr-TR');
     let receiptNum = plan.receiptNumber;
     let nextNum = nextReceiptNumber;
@@ -202,6 +235,14 @@ export const OnMuhasebeView: React.FC<Props> = ({ initialTab = 'genel', onNaviga
     );
     setSelectedReceiptPlan(updatedPlan);
     setShowReceiptModal(true);
+
+    if (auth.currentUser && (!plan.receiptNumber || !plan.receiptDate)) {
+      try {
+        await odemePlanlariService.upsert(updatedPlan);
+      } catch (err) {
+        console.error('Makbuz numarası Firestore kaydı hatası:', err);
+      }
+    }
   };
 
   const handlePrintReceipt = () => {
@@ -345,7 +386,7 @@ export const OnMuhasebeView: React.FC<Props> = ({ initialTab = 'genel', onNaviga
     .reduce((acc, p) => acc + p.amount, 0);
 
   // Add Transaction
-  const handleAddTransaction = (e: React.FormEvent) => {
+  const handleAddTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!txTitle.trim() || !txAmount) return;
 
@@ -362,15 +403,39 @@ export const OnMuhasebeView: React.FC<Props> = ({ initialTab = 'genel', onNaviga
     };
 
     setHareketler([newTx, ...hareketler]);
+    const matchingCat = kategoriler.find((k) => k.name === txCategory && k.type === txType);
+    const updatedCat = matchingCat
+      ? {
+          ...matchingCat,
+          itemCount: matchingCat.itemCount + 1,
+          totalAmount: matchingCat.totalAmount + newTx.amount,
+        }
+      : null;
+    if (updatedCat) {
+      setKategoriler((prev) => prev.map((k) => (k.id === updatedCat.id ? updatedCat : k)));
+    }
+
     setShowAddTxModal(false);
     setTxTitle('');
     setTxAmount('');
     setTxPayer('');
+
+    if (auth.currentUser) {
+      try {
+        await muhasebeHareketlerService.upsert(newTx);
+        if (updatedCat) {
+          await muhasebeKategorilerService.upsert(updatedCat);
+        }
+      } catch (err) {
+        console.error('Muhasebe işlemi Firestore kaydı hatası:', err);
+      }
+    }
+
     showToast(`${newTx.type} işlemi (${newTx.amount.toLocaleString('tr-TR')} ₺) kaydedildi.`);
   };
 
   // Add Category
-  const handleAddCategory = (e: React.FormEvent) => {
+  const handleAddCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!catName.trim()) return;
 
@@ -386,11 +451,20 @@ export const OnMuhasebeView: React.FC<Props> = ({ initialTab = 'genel', onNaviga
     setKategoriler([...kategoriler, newCat]);
     setShowAddCatModal(false);
     setCatName('');
+
+    if (auth.currentUser) {
+      try {
+        await muhasebeKategorilerService.upsert(newCat);
+      } catch (err) {
+        console.error('Kategori Firestore kaydı hatası:', err);
+      }
+    }
+
     showToast(`"${newCat.name}" kategorisi başarıyla eklendi.`);
   };
 
   // Add Payment Plan
-  const handleAddPlan = (e: React.FormEvent) => {
+  const handleAddPlan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!planAthlete.trim() || !planAmount) return;
 
@@ -426,22 +500,41 @@ export const OnMuhasebeView: React.FC<Props> = ({ initialTab = 'genel', onNaviga
     setPlanAthlete('');
     setPlanTitle('');
     setPlanAmount('');
+
+    if (auth.currentUser) {
+      try {
+        await Promise.all(newPlans.map((p) => odemePlanlariService.upsert(p)));
+      } catch (err) {
+        console.error('Ödeme planı Firestore kaydı hatası:', err);
+      }
+    }
+
     showToast(`${planAthlete} için ${count} taksitli ödeme planı ve dijital makbuz numaraları oluşturuldu.`);
   };
 
   // Mark plan as paid
-  const handleMarkPaid = (planId: string) => {
+  const handleMarkPaid = async (planId: string) => {
+    const targetPlan = odemePlanlari.find((p) => p.id === planId);
+    const updatedPlan: OdemePlaniItem | null = targetPlan
+      ? {
+          ...targetPlan,
+          status: 'Ödendi',
+          paidDate: new Date().toLocaleDateString('tr-TR'),
+        }
+      : null;
+
     setOdemePlanlari((prev) =>
-      prev.map((p) =>
-        p.id === planId
-          ? {
-              ...p,
-              status: 'Ödendi',
-              paidDate: new Date().toLocaleDateString('tr-TR'),
-            }
-          : p
-      )
+      prev.map((p) => (p.id === planId && updatedPlan ? updatedPlan : p))
     );
+
+    if (auth.currentUser && updatedPlan) {
+      try {
+        await odemePlanlariService.upsert(updatedPlan);
+      } catch (err) {
+        console.error('Taksit tahsilatı Firestore kaydı hatası:', err);
+      }
+    }
+
     showToast('Taksit tahsilatı başarıyla işlendi ve gelir kaydedildi.');
   };
 

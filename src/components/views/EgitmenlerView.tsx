@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Plus,
   Send,
@@ -48,6 +48,12 @@ import { TrainerAssignTrainingModal } from './egitmen/TrainerAssignTrainingModal
 import { TrainerAddDocumentModal } from './egitmen/TrainerAddDocumentModal';
 import { TrainerPdfReportModal } from './egitmen/TrainerPdfReportModal';
 import { TrainerDocumentPreviewModal } from './egitmen/TrainerDocumentPreviewModal';
+import { auth } from '../../firebase';
+import { egitmenlerService } from '../../services/firestoreService';
+import {
+  mapEgitmenToFirestoreDoc,
+  mapFirestoreDocToEgitmenItem,
+} from '../../services/firestoreCollectionsSchema';
 
 // Branch Colors Mapping for clean visual hierarchy
 const BRANCH_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -63,6 +69,29 @@ const BRANCH_COLORS: Record<string, { bg: string; text: string; border: string }
 
 export const EgitmenlerView: React.FC = () => {
   const [egitmenler, setEgitmenler] = useState<EgitmenItem[]>(INITIAL_EGITMENLER);
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const unsub = egitmenlerService.subscribe((docs) => {
+      if (docs.length > 0) {
+        const mapped = docs.map(mapFirestoreDocToEgitmenItem);
+        setEgitmenler(mapped);
+        setSelectedTrainerDetail((prev) =>
+          prev ? mapped.find((t) => t.id === prev.id) || prev : null
+        );
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const persistTrainerUpdate = (updated: EgitmenItem) => {
+    if (!auth.currentUser) return;
+    const mapped = mapEgitmenToFirestoreDoc(updated, auth.currentUser.uid);
+    const { id: _id, ownerId: _ownerId, code: _code, createdAt: _createdAt, updatedAt: _updatedAt, ...updatable } = mapped;
+    egitmenlerService.update(updated.id, updatable).catch((err) =>
+      console.warn('[Egitmenler] Update Firestore warning:', err)
+    );
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -210,53 +239,34 @@ export const EgitmenlerView: React.FC = () => {
     e.preventDefault();
     if (!editingEgitmen) return;
 
+    const updatedTrainer: EgitmenItem = {
+      ...editingEgitmen,
+      name: editName.trim(),
+      title: editTitle.trim(),
+      phone: editPhone.trim(),
+      email: editEmail.trim(),
+      branch: editBranch,
+      status: editStatus,
+      licenseLevel: editLicenseLevel,
+      experienceYears: editExperienceYears,
+      bio: editBio,
+      gender: editGender,
+      city: editCity,
+      address: editAddress,
+      hourlyRate: editHourlyRate,
+      monthlySalary: editMonthlySalary,
+      mailEnabled: editMailEnabled,
+      smsEnabled: editSmsEnabled,
+    };
+
     setEgitmenler((prev) =>
-      prev.map((item) =>
-        item.id === editingEgitmen.id
-          ? {
-              ...item,
-              name: editName.trim(),
-              title: editTitle.trim(),
-              phone: editPhone.trim(),
-              email: editEmail.trim(),
-              branch: editBranch,
-              status: editStatus,
-              licenseLevel: editLicenseLevel,
-              experienceYears: editExperienceYears,
-              bio: editBio,
-              gender: editGender,
-              city: editCity,
-              address: editAddress,
-              hourlyRate: editHourlyRate,
-              monthlySalary: editMonthlySalary,
-              mailEnabled: editMailEnabled,
-              smsEnabled: editSmsEnabled,
-            }
-          : item
-      )
+      prev.map((item) => (item.id === editingEgitmen.id ? updatedTrainer : item))
     );
+    persistTrainerUpdate(updatedTrainer);
 
     // If detail modal is currently showing the same trainer, update it as well
     if (selectedTrainerDetail && selectedTrainerDetail.id === editingEgitmen.id) {
-      setSelectedTrainerDetail({
-        ...selectedTrainerDetail,
-        name: editName.trim(),
-        title: editTitle.trim(),
-        phone: editPhone.trim(),
-        email: editEmail.trim(),
-        branch: editBranch,
-        status: editStatus,
-        licenseLevel: editLicenseLevel,
-        experienceYears: editExperienceYears,
-        bio: editBio,
-        gender: editGender,
-        city: editCity,
-        address: editAddress,
-        hourlyRate: editHourlyRate,
-        monthlySalary: editMonthlySalary,
-        mailEnabled: editMailEnabled,
-        smsEnabled: editSmsEnabled,
-      });
+      setSelectedTrainerDetail(updatedTrainer);
     }
 
     showToast(`"${editName}" eğitmen profili ve çalışma bilgileri güncellendi.`);
@@ -304,6 +314,11 @@ export const EgitmenlerView: React.FC = () => {
     };
 
     setEgitmenler([newTrainer, ...egitmenler]);
+    if (auth.currentUser) {
+      egitmenlerService
+        .add(mapEgitmenToFirestoreDoc(newTrainer, auth.currentUser.uid))
+        .catch((err) => console.warn('[Egitmenler] Add Firestore warning:', err));
+    }
     setShowAddModal(false);
     setNewName('');
     setNewTitle('');
@@ -359,13 +374,15 @@ export const EgitmenlerView: React.FC = () => {
     setEgitmenler((prev) =>
       prev.map((item) => {
         if (item.id === trainerId) {
-          return {
+          const next = {
             ...item,
             assignedGroups: updatedGroups,
             activeGroupsCount: updatedGroups.length,
             activeAthletesCount: updatedAthletesCount,
             weeklyHours: updatedWeeklyHours,
           };
+          persistTrainerUpdate(next);
+          return next;
         }
         return item;
       })
@@ -406,11 +423,13 @@ export const EgitmenlerView: React.FC = () => {
       prev.map((item) => {
         if (item.id === trainerId) {
           const existingApps = item.appointments || [];
-          return {
+          const next = {
             ...item,
             appointments: [training, ...existingApps],
             weeklyHours: (item.weeklyHours || 12) + 2,
           };
+          persistTrainerUpdate(next);
+          return next;
         }
         return item;
       })
@@ -446,10 +465,12 @@ export const EgitmenlerView: React.FC = () => {
       prev.map((item) => {
         if (item.id === trainerId) {
           const existingDocs = item.documents || [];
-          return {
+          const next = {
             ...item,
             documents: [newDoc, ...existingDocs],
           };
+          persistTrainerUpdate(next);
+          return next;
         }
         return item;
       })
@@ -473,10 +494,12 @@ export const EgitmenlerView: React.FC = () => {
       prev.map((item) => {
         if (item.id === trainerId) {
           const filteredDocs = (item.documents || []).filter((d) => d.id !== docId);
-          return {
+          const next = {
             ...item,
             documents: filteredDocs,
           };
+          persistTrainerUpdate(next);
+          return next;
         }
         return item;
       })
@@ -522,10 +545,12 @@ export const EgitmenlerView: React.FC = () => {
     setEgitmenler((prev) =>
       prev.map((t) => {
         if (t.id === trainerId) {
-          return {
+          const next = {
             ...t,
             appointments: [newApp, ...(t.appointments || [])],
           };
+          persistTrainerUpdate(next);
+          return next;
         }
         return t;
       })

@@ -39,6 +39,8 @@ import {
   setActiveSubeId,
 } from '../../data/subeData';
 import { TURKEY_CITIES, getDistrictsForCity } from '../../data/turkeyCitiesData';
+import { auth } from '../../firebase';
+import { subelerService, clubSettingsService } from '../../services/operationsFirestoreService';
 
 interface SubelerViewProps {
   onNavigate?: (page: NavPage) => void;
@@ -101,6 +103,26 @@ export const SubelerView: React.FC<SubelerViewProps> = ({ onNavigate }) => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const unsubSubeler = subelerService.subscribe((items) => {
+      if (items.length > 0) {
+        setSubeler(items);
+        saveStoredSubeler(items);
+      }
+    });
+    const unsubSettings = clubSettingsService.subscribe((docs) => {
+      const activeDoc = docs.find((d) => d.settingKey === 'active_sube_id');
+      if (activeDoc?.activeValue) {
+        setSelectedBranchId(activeDoc.activeValue);
+      }
+    });
+    return () => {
+      unsubSubeler();
+      unsubSettings();
+    };
+  }, []);
+
   const handleBranchSelect = (id: string) => {
     setSelectedBranchId(id);
     setActiveSubeId(id);
@@ -148,7 +170,7 @@ export const SubelerView: React.FC<SubelerViewProps> = ({ onNavigate }) => {
     setIsModalOpen(true);
   };
 
-  const handleSaveSube = (e: React.FormEvent) => {
+  const handleSaveSube = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) {
       showToast('Lütfen şube adını giriniz');
@@ -157,31 +179,34 @@ export const SubelerView: React.FC<SubelerViewProps> = ({ onNavigate }) => {
 
     if (editingSube) {
       // Update existing
-      const updated = subeler.map((s) => {
-        if (s.id === editingSube.id) {
-          return {
-            ...s,
-            ad: formName.trim(),
-            kod: formCode.trim() || s.kod,
-            sehir: formCity,
-            ilce: formDistrict.trim(),
-            adres: formAddress.trim(),
-            telefon: formPhone.trim(),
-            eposta: formEmail.trim(),
-            sorumluYonetici: formManager.trim() || 'Kulüp Müdürü',
-            sorumluAntrenor: formHeadCoach.trim() || 'Baş Antrenör',
-            kapasite: Number(formCapacity) || 40,
-            tesisTipi: formTesisTipi,
-            durum: formStatus,
-            branslar: formSelectedBranslar,
-            ozellikler: formSelectedOzellikler,
-          };
-        }
-        return s;
-      });
+      const updatedSube: Sube = {
+        ...editingSube,
+        ad: formName.trim(),
+        kod: formCode.trim() || editingSube.kod,
+        sehir: formCity,
+        ilce: formDistrict.trim(),
+        adres: formAddress.trim(),
+        telefon: formPhone.trim(),
+        eposta: formEmail.trim(),
+        sorumluYonetici: formManager.trim() || 'Kulüp Müdürü',
+        sorumluAntrenor: formHeadCoach.trim() || 'Baş Antrenör',
+        kapasite: Number(formCapacity) || 40,
+        tesisTipi: formTesisTipi,
+        durum: formStatus,
+        branslar: formSelectedBranslar,
+        ozellikler: formSelectedOzellikler,
+      };
+      const updated = subeler.map((s) => (s.id === editingSube.id ? updatedSube : s));
       setSubeler(updated);
       saveStoredSubeler(updated);
       setIsModalOpen(false);
+      if (auth.currentUser) {
+        try {
+          await subelerService.upsert(updatedSube);
+        } catch (err) {
+          console.error('Şube güncelleme Firestore hatası:', err);
+        }
+      }
       showToast(`✓ "${formName}" şube bilgileri güncellendi.`);
     } else {
       // Create new
@@ -209,20 +234,36 @@ export const SubelerView: React.FC<SubelerViewProps> = ({ onNavigate }) => {
       setSubeler(updated);
       saveStoredSubeler(updated);
       setIsModalOpen(false);
+      if (auth.currentUser) {
+        try {
+          await subelerService.upsert(newSube);
+        } catch (err) {
+          console.error('Yeni şube Firestore kaydı hatası:', err);
+        }
+      }
       showToast(`✓ Yeni şube "${formName}" başarıyla eklendi.`);
     }
   };
 
-  const handleToggleStatus = (subeId: string) => {
+  const handleToggleStatus = async (subeId: string) => {
+    let targetSube: Sube | null = null;
     const updated = subeler.map((s) => {
       if (s.id === subeId) {
         const nextStatus: SubeDurum = s.durum === 'Aktif' ? 'Pasif' : 'Aktif';
-        return { ...s, durum: nextStatus };
+        targetSube = { ...s, durum: nextStatus };
+        return targetSube;
       }
       return s;
     });
     setSubeler(updated);
     saveStoredSubeler(updated);
+    if (auth.currentUser && targetSube) {
+      try {
+        await subelerService.upsert(targetSube);
+      } catch (err) {
+        console.error('Şube durum güncelleme Firestore hatası:', err);
+      }
+    }
     showToast('Şube çalışma durumu güncellendi.');
   };
 

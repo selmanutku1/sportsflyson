@@ -27,12 +27,17 @@ import {
   UserProfileData,
   ADMIN_GOOGLE_EMAIL,
 } from './data/userProfile';
-import { auth } from './firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { fetchAndMergeGoogleUsersFromFirestore } from './data/googleUsersAccess';
-import { syncGoogleProfileData } from './services/userService';
+import { auth, testFirestoreConnection } from './firebase';
+import { onAuthStateChanged, signOut, getRedirectResult } from 'firebase/auth';
+import { fetchAndMergeGoogleUsersFromFirestore, getGoogleUserAccessByEmail } from './data/googleUsersAccess';
+import { syncGoogleProfileData, ensureFirebaseAuthSession } from './services/userService';
 import { fetchCompanyProfileFromFirestore } from './services/companyProfileService';
 import { clearSportsFlyLegacyData } from './data/sportsFlyLabData';
+import { seedInitialCoreCollectionsIfEmpty, sporcularService } from './services/firestoreService';
+import { mapFirestoreDocToSporcuItem } from './services/firestoreCollectionsSchema';
+import { seedAllOperationalCollectionsIfEmpty } from './services/operationsFirestoreService';
+import { initCapacitorMobileBridge, isNativeCapacitorApp } from './utils/mobileBridge';
+import { SporcuItem } from './types';
 
 // Lazy-loaded view modules for instant initial load & code splitting
 import { DashboardView } from './components/views/DashboardView';
@@ -132,6 +137,11 @@ const SportsFlyLabView = lazy(() =>
     default: m.SportsFlyLabView,
   }))
 );
+const SportsFlyStudioView = lazy(() =>
+  import('./components/views/moduller/SportsFlyStudioView').then((m) => ({
+    default: m.SportsFlyStudioView,
+  }))
+);
 const DosyaHavuzuView = lazy(() =>
   import('./components/views/DosyaHavuzuView').then((m) => ({
     default: m.DosyaHavuzuView,
@@ -222,14 +232,62 @@ export default function App() {
   const isExplicitLogoutRef = useRef<boolean>(false);
   const manualSessionActiveRef = useRef<boolean>(false);
 
-  // Authentication State: Always start unauthenticated so visitors land on LoginView
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  // Authentication State: Restore active session unless explicitly logged out or arriving via /login
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const url = new URL(window.location.href);
+      const path = url.pathname.toLowerCase();
+      if (
+        path === '/login' ||
+        path === '/giris' ||
+        url.searchParams.has('login') ||
+        url.searchParams.has('forceLogin') ||
+        url.searchParams.has('logout') ||
+        url.searchParams.get('action') === 'login'
+      ) {
+        return false;
+      }
+      if (document.referrer) {
+        const refHost = new URL(document.referrer).hostname.toLowerCase();
+        if (refHost === 'sportsfly.com.tr' || refHost === 'www.sportsfly.com.tr') {
+          return false;
+        }
+      }
+      const hasPersistedAuth =
+        sessionStorage.getItem('sportsfly_auth_active') === 'true' ||
+        localStorage.getItem('sportsfly_auth_active') === 'true';
+      const storedProf = getStoredUserProfile();
+      const hasValidProfile =
+        Boolean(storedProf) &&
+        storedProf.role !== 'Misafir' &&
+        (Boolean(storedProf.email) ||
+          storedProf.role === 'Entegrasyon Kullanıcısı' ||
+          storedProf.role === 'LAB Kullanıcısı' ||
+          storedProf.role === 'Süper Admin' ||
+          storedProf.role === 'Kulüp Yöneticisi');
+      return hasPersistedAuth && hasValidProfile;
+    } catch {
+      return false;
+    }
+  });
 
   const [isIntegrationActive, setIsIntegrationActive] = useState<boolean>(false);
   const [selectedIntegrationId, setSelectedIntegrationId] = useState<string | null>(null);
+  const [firebaseUserUid, setFirebaseUserUid] = useState<string | null>(() => auth.currentUser?.uid || null);
 
   const handleLoginSuccess = async (
-    userData: { email?: string; name?: string; photoURL?: string; uid?: string; role?: string } | string
+    userData:
+      | {
+          email?: string;
+          name?: string;
+          photoURL?: string;
+          uid?: string;
+          role?: string;
+          clubName?: string;
+          authProvider?: 'google' | 'standard' | 'integration';
+        }
+      | string
   ) => {
     isExplicitLogoutRef.current = false;
     manualSessionActiveRef.current = true;
@@ -240,18 +298,56 @@ export default function App() {
 
     const userObj =
       typeof userData === 'string'
-        ? { role: userData, email: '', name: userData, uid: '', photoURL: undefined }
+        ? { role: userData, email: '', name: userData, uid: '', photoURL: undefined, authProvider: undefined }
         : userData;
 
-    // If it's a Google login (has email and name), sync it
-    if (userObj.email && userObj.name) {
+    const isGoogleAuthLogin =
+      userObj.authProvider === 'google' ||
+      Boolean(userObj.uid) ||
+      (userObj.role || '').toLowerCase().includes('google');
+
+    // Sync Google users strictly as Google auth; standard email/phone logins keep standard session
+    if (isGoogleAuthLogin && userObj.email && userObj.name) {
       await syncGoogleProfileData(userObj.email, userObj.name, userObj.photoURL, userObj.uid);
+    } else {
+      const currentProf = getStoredUserProfile();
+      await ensureFirebaseAuthSession({
+        email: userObj.email || currentProf.email || '',
+        displayName: userObj.name || currentProf.name || 'Kullanıcı',
+        photoURL: userObj.photoURL,
+        uid: userObj.uid,
+      });
     }
 
     const freshProfile = getStoredUserProfile();
     setUserProfile(freshProfile);
     setIsAuthenticated(true);
-    if (isGoogleRestrictedUser(userObj.role || freshProfile?.role, freshProfile?.email)) {
+
+    const isIntegrationLogin =
+      userObj.role === 'Entegrasyon Kullanıcısı' ||
+      userObj.role === 'LAB Kullanıcısı' ||
+      (() => {
+        try {
+          return sessionStorage.getItem('sportsfly_integration_active') === 'true';
+        } catch {
+          return false;
+        }
+      })();
+
+    // Non-blocking background seed if collections are empty (skip for restricted Google users and read-only integration sessions)
+    if (
+      auth.currentUser &&
+      !isIntegrationLogin &&
+      !isGoogleRestrictedUser(freshProfile?.role || userObj.role, freshProfile?.email || userObj.email)
+    ) {
+      seedInitialCoreCollectionsIfEmpty().catch((e) =>
+        console.warn('[Firestore] Core seed warning:', e)
+      );
+      seedAllOperationalCollectionsIfEmpty().catch((e) =>
+        console.warn('[Firestore] Operational seed warning:', e)
+      );
+    }
+    if (isGoogleRestrictedUser(freshProfile?.role || userObj.role, freshProfile?.email || userObj.email)) {
       setCurrentPage('paketler');
       try {
         sessionStorage.setItem('sportsfly_active_page', 'paketler');
@@ -327,9 +423,33 @@ export default function App() {
 
   const [currentPlan, setCurrentPlan] = useState<PackagePlanType>(() => getActiveSessionPlan());
   const [userProfile, setUserProfile] = useState<UserProfileData>(() => getStoredUserProfile());
+  const [syncedSporcular, setSyncedSporcular] = useState<SporcuItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('sportsfly_sporcular');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_SPORCULAR;
+  });
+
+  // Subscribe to sporcular collection when authenticated and Firebase Auth is ready
+  useEffect(() => {
+    if (!isAuthenticated || !firebaseUserUid) return;
+    const unsub = sporcularService.subscribe((docs) => {
+      const mapped = docs.map(mapFirestoreDocToSporcuItem);
+      if (mapped.length > 0) {
+        setSyncedSporcular(mapped);
+        try {
+          localStorage.setItem('sportsfly_sporcular', JSON.stringify(mapped));
+          window.dispatchEvent(new CustomEvent('sportsfly_sporcular_updated', { detail: mapped }));
+        } catch {}
+      }
+    });
+    return () => unsub();
+  }, [isAuthenticated, firebaseUserUid]);
 
   // Listen for plan, profile, cross-tab auth, browser back/forward, and Escape key
   useEffect(() => {
+    testFirestoreConnection().catch(() => {});
     const handlePlanUpdate = () => {
       setCurrentPlan(getActiveSessionPlan());
     };
@@ -345,9 +465,15 @@ export default function App() {
     const handlePopState = (event: PopStateEvent) => {
       const targetPage = event.state?.sportsflyPage as NavPage | undefined;
       if (targetPage) {
-        setCurrentPage(targetPage);
+        const latestProf = getStoredUserProfile();
+        const safePage: NavPage =
+          isGoogleRestrictedUser(latestProf?.role, latestProf?.email) &&
+          !isGoogleUserPageUnlocked(targetPage, latestProf?.email)
+            ? 'paketler'
+            : targetPage;
+        setCurrentPage(safePage);
         try {
-          sessionStorage.setItem('sportsfly_active_page', targetPage);
+          sessionStorage.setItem('sportsfly_active_page', safePage);
         } catch (e) {}
       }
     };
@@ -358,10 +484,37 @@ export default function App() {
       }
     };
 
-    // Detect fresh navigation (e.g. clicking "Kulüp Girişi" from sportsfly.com.tr or opening a new URL)
-    // vs. an explicit in-tab page reload (F5) while already logged in.
+    void initCapacitorMobileBridge(() => {
+      if (typeof window !== 'undefined' && window.innerWidth < 1024 && isSidebarOpen) {
+        setIsSidebarOpen(false);
+        return true;
+      }
+      return false;
+    });
+
+    if (isNativeCapacitorApp()) {
+      getRedirectResult(auth)
+        .then((res) => {
+          if (res?.user?.email) {
+            const cleanEmail = res.user.email.trim().toLowerCase();
+            void syncGoogleProfileData(
+              cleanEmail,
+              res.user.displayName ||
+                (cleanEmail === ADMIN_GOOGLE_EMAIL ? 'Selman Utku Marmara' : 'Google Kullanıcısı'),
+              res.user.photoURL || undefined,
+              res.user.uid,
+              res.user
+            );
+          }
+        })
+        .catch(() => {});
+    }
+
+    // Detect explicit login/logout navigation (e.g. /login, ?forceLogin, or external sportsfly.com.tr "Kulüp Girişi")
+    // while preserving active sessions across preview iframe refreshes and in-tab reloads.
+    const isNativeMobile = isNativeCapacitorApp();
     const isFreshLoginEntry = (() => {
-      if (typeof window === 'undefined') return true;
+      if (typeof window === 'undefined') return false;
       try {
         const url = new URL(window.location.href);
         const path = url.pathname.toLowerCase();
@@ -374,19 +527,18 @@ export default function App() {
           url.searchParams.get('action') === 'login';
         if (hasForceLoginParam) return true;
 
+        if (isNativeMobile) {
+          return false;
+        }
+
         if (document.referrer) {
           try {
-            const refOrigin = new URL(document.referrer).origin;
-            if (refOrigin !== window.location.origin) {
+            const refUrl = new URL(document.referrer);
+            const refHost = refUrl.hostname.toLowerCase();
+            if (refHost === 'sportsfly.com.tr' || refHost === 'www.sportsfly.com.tr') {
               return true;
             }
           } catch {}
-        }
-
-        const navEntries = performance.getEntriesByType?.('navigation') as PerformanceNavigationTiming[] | undefined;
-        const navType = navEntries && navEntries.length > 0 ? navEntries[0].type : 'navigate';
-        if (navType !== 'reload') {
-          return true;
         }
       } catch {}
       return false;
@@ -405,6 +557,33 @@ export default function App() {
       setIsAuthenticated(false);
       setIsIntegrationActive(false);
       signOut(auth).catch(() => {});
+    } else if (!manualSessionActiveRef.current && typeof window !== 'undefined') {
+      try {
+        const hasPersistedAuth =
+          sessionStorage.getItem('sportsfly_auth_active') === 'true' ||
+          localStorage.getItem('sportsfly_auth_active') === 'true';
+        const storedProf = getStoredUserProfile();
+        const hasValidProfile =
+          Boolean(storedProf) &&
+          storedProf.role !== 'Misafir' &&
+          (Boolean(storedProf.email) ||
+            storedProf.role === 'Entegrasyon Kullanıcısı' ||
+            storedProf.role === 'LAB Kullanıcısı' ||
+            storedProf.role === 'Süper Admin' ||
+            storedProf.role === 'Kulüp Yöneticisi');
+        if (hasPersistedAuth && hasValidProfile) {
+          sessionStorage.setItem('sportsfly_auth_active', 'true');
+          setUserProfile(storedProf);
+          setIsAuthenticated(true);
+          if (
+            sessionStorage.getItem('sportsfly_integration_active') === 'true' ||
+            storedProf.role === 'Entegrasyon Kullanıcısı' ||
+            storedProf.role === 'LAB Kullanıcısı'
+          ) {
+            setIsIntegrationActive(true);
+          }
+        }
+      } catch {}
     }
 
     let authChannel: BroadcastChannel | null = null;
@@ -444,6 +623,7 @@ export default function App() {
 
     // Firebase Auth session listener & Firestore sync
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      setFirebaseUserUid(currentUser?.uid || null);
       if (isExplicitLogoutRef.current) {
         setIsAuthenticated(false);
         return;
@@ -451,21 +631,25 @@ export default function App() {
 
       let isGoogleLoginInProgress = false;
       let hasActiveTabSession = false;
+      let wasExplicitlyLoggedOut = false;
       try {
         isGoogleLoginInProgress =
           sessionStorage.getItem('sportsfly_google_login_pending') === 'true';
         hasActiveTabSession =
-          sessionStorage.getItem('sportsfly_auth_active') === 'true';
+          sessionStorage.getItem('sportsfly_auth_active') === 'true' ||
+          localStorage.getItem('sportsfly_auth_active') === 'true';
+        wasExplicitlyLoggedOut =
+          localStorage.getItem('sportsfly_auth_active') === 'false' ||
+          sessionStorage.getItem('sportsfly_auth_active') === 'false';
       } catch (e) {}
 
       if (currentUser && !currentUser.isAnonymous && currentUser.email) {
-        // Only allow session restoration if the user actively initiated Google login,
-        // already completed login in this tab, or reloaded an authenticated tab.
-        // Never auto-login on a fresh navigation (e.g. clicking "Kulüp Girişi" from sportsfly.com.tr).
+        // Restore real signed-in Firebase users unless arriving from explicit login/logout route or explicitly logged out.
         const canAuthenticate =
+          isNativeMobile ||
           manualSessionActiveRef.current ||
           isGoogleLoginInProgress ||
-          (!isFreshLoginEntry && hasActiveTabSession);
+          (!isFreshLoginEntry && !wasExplicitlyLoggedOut);
 
         if (!canAuthenticate) {
           signOut(auth).catch(() => {});
@@ -474,9 +658,18 @@ export default function App() {
           setIsAuthenticated(false);
           return;
         }
+
+        try {
+          sessionStorage.setItem('sportsfly_auth_active', 'true');
+          localStorage.setItem('sportsfly_auth_active', 'true');
+        } catch (e) {}
+
         const cleanEmail = currentUser.email.trim().toLowerCase();
         const isSuperAdminAccount = cleanEmail === ADMIN_GOOGLE_EMAIL;
         const currentProf = getStoredUserProfile();
+        const googleRecord = !isSuperAdminAccount ? getGoogleUserAccessByEmail(cleanEmail) : null;
+        const hasFullAccessByAdmin = Boolean(googleRecord?.isFullAccess);
+
         const syncedProfile: UserProfileData = {
           ...currentProf,
           name:
@@ -485,24 +678,55 @@ export default function App() {
               ? 'Selman Utku Marmara'
               : currentProf.name && currentProf.name !== 'Misafir Kullanıcı'
                 ? currentProf.name
-                : 'Kullanıcı'),
+                : 'Google Kullanıcısı'),
           email: cleanEmail,
           avatarUrl: currentUser.photoURL || currentProf.avatarUrl,
-          role: isSuperAdminAccount
-            ? 'Süper Admin'
-            : currentProf.role === 'Misafir'
-              ? 'Google Kullanıcısı'
-              : currentProf.role,
+          role: isSuperAdminAccount ? 'Süper Admin' : 'Google Kullanıcısı',
+          title: isSuperAdminAccount ? 'SportsFly Kulüp Yöneticisi' : 'Google Hesabı',
+          club: isSuperAdminAccount
+            ? 'SportsFly Kadıköy Merkez Şube'
+            : googleRecord?.clubName || 'Paket Seçimi Bekleniyor',
           authProvider: 'google',
-          hasActivePackage: isSuperAdminAccount ? true : currentProf.hasActivePackage,
+          hasActivePackage: isSuperAdminAccount ? true : hasFullAccessByAdmin,
+          preferences: {
+            ...currentProf.preferences,
+            defaultPage: isSuperAdminAccount || hasFullAccessByAdmin ? 'anasayfa' : 'paketler',
+          },
         };
         saveStoredUserProfile(syncedProfile);
         setUserProfile(syncedProfile);
+        if (!isSuperAdminAccount && !hasFullAccessByAdmin) {
+          setCurrentPage((prev) =>
+            isGoogleUserPageUnlocked(prev, cleanEmail) ? prev : 'paketler'
+          );
+          try {
+            sessionStorage.setItem('sportsfly_active_page', 'paketler');
+          } catch (e) {}
+        }
         setIsAuthenticated(true);
         fetchAndMergeGoogleUsersFromFirestore().catch(() => {});
         fetchCompanyProfileFromFirestore().catch(() => {});
+        if (isSuperAdminAccount || hasFullAccessByAdmin) {
+          seedInitialCoreCollectionsIfEmpty().catch(() => {});
+          seedAllOperationalCollectionsIfEmpty().catch(() => {});
+        }
       } else if (!manualSessionActiveRef.current) {
-        setIsAuthenticated(false);
+        const storedProf = getStoredUserProfile();
+        const hasValidPersistedProfile =
+          hasActiveTabSession &&
+          !isFreshLoginEntry &&
+          !wasExplicitlyLoggedOut &&
+          Boolean(storedProf) &&
+          storedProf.role !== 'Misafir' &&
+          (Boolean(storedProf.email) ||
+            storedProf.role === 'Entegrasyon Kullanıcısı' ||
+            storedProf.role === 'LAB Kullanıcısı' ||
+            storedProf.role === 'Süper Admin' ||
+            storedProf.role === 'Kulüp Yöneticisi');
+
+        if (!hasValidPersistedProfile) {
+          setIsAuthenticated(false);
+        }
       }
     });
 
@@ -549,10 +773,18 @@ export default function App() {
 
   const handlePageSelect = (page: NavPage) => {
     const isGoogleRestricted = isGoogleRestrictedUser(userProfile?.role, userProfile?.email);
-    const targetPage: NavPage =
-      isGoogleRestricted && !isGoogleUserPageUnlocked(page, userProfile?.email)
-        ? 'paketler'
-        : page;
+    const isRedirectedByGoogleLock =
+      isGoogleRestricted && !isGoogleUserPageUnlocked(page, userProfile?.email);
+    const targetPage: NavPage = isRedirectedByGoogleLock ? 'paketler' : page;
+
+    if (isRedirectedByGoogleLock && typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('sportsfly_google_locked_redirect', {
+          detail: { attemptedPage: page },
+        })
+      );
+    }
+
     setCurrentPage(targetPage);
     try {
       sessionStorage.setItem('sportsfly_active_page', targetPage);
@@ -568,9 +800,27 @@ export default function App() {
     }
   };
 
+  // Force Google-restricted sessions onto 'paketler' whenever state/profile syncs
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (
+      isGoogleRestrictedUser(userProfile?.role, userProfile?.email) &&
+      !isGoogleUserPageUnlocked(currentPage, userProfile?.email)
+    ) {
+      setCurrentPage('paketler');
+      try {
+        sessionStorage.setItem('sportsfly_active_page', 'paketler');
+      } catch (e) {}
+    }
+  }, [isAuthenticated, currentPage, userProfile?.role, userProfile?.email]);
+
   // Sync currentPage with isIntegrationActive to prevent render loops
   useEffect(() => {
-    if (isIntegrationActive && currentPage !== 'entegrasyonlar') {
+    if (
+      isIntegrationActive &&
+      currentPage !== 'entegrasyonlar' &&
+      currentPage !== 'sportsfly-studio'
+    ) {
       setCurrentPage('entegrasyonlar');
     }
   }, [isIntegrationActive, currentPage]);
@@ -667,7 +917,12 @@ export default function App() {
       entegrasyonlar: {
         title: 'Entegrasyonlar & Modüller | SportsFly',
         description:
-          'Sanal POS, SMS başlığı, WhatsApp bildirimleri ve ek kulüp modüllerini tek tıkla etkinleştirin.',
+          'Sanal POS, SMS başlığı, WhatsApp bildirimleri, SportsFly Studio ve ek kulüp modüllerini tek tıkla etkinleştirin.',
+      },
+      'sportsfly-studio': {
+        title: 'SportsFly Studio — Kulüp Tasarım ve İçerik Merkezi | SportsFly',
+        description:
+          'Duyuru tasarımları, maç & turnuva afişleri, sporcu kartları ve Instagram post/story şablonlarını kulübünüzün markasıyla hazırlayın.',
       },
       'kulup-web-sitesi': {
         title: 'Kulüp Web Sitesi Portalı | SportsFly',
@@ -740,8 +995,8 @@ export default function App() {
     }
 
     // 1. Enforce package-tier access limits (Süper Admin has full access to Sporpuan modules regardless of plan)
-    if (!isPageAllowedForPlan(currentPage, currentPlan, userProfile?.role)) {
-      const restrictionInfo = getPageRestrictionInfo(currentPage, currentPlan, userProfile?.role);
+    if (!isPageAllowedForPlan(currentPage, currentPlan, userProfile?.role, userProfile?.email)) {
+      const restrictionInfo = getPageRestrictionInfo(currentPage, currentPlan, userProfile?.role, userProfile?.email);
       return (
         <PackageAccessRestrictedView
           page={currentPage}
@@ -806,26 +1061,14 @@ export default function App() {
       case 'kulup-evraklari':
         return (
           <KulupEvraklariView
-            sporcular={(() => {
-              try {
-                const saved = localStorage.getItem('sportsfly_sporcular');
-                if (saved) return JSON.parse(saved);
-              } catch (e) {}
-              return INITIAL_SPORCULAR;
-            })()}
+            sporcular={syncedSporcular}
             onNavigate={handlePageSelect}
           />
         );
       case 'kulup-galerisi':
         return (
           <KulupGalerisiView
-            sporcular={(() => {
-              try {
-                const saved = localStorage.getItem('sportsfly_sporcular');
-                if (saved) return JSON.parse(saved);
-              } catch (e) {}
-              return INITIAL_SPORCULAR;
-            })()}
+            sporcular={syncedSporcular}
             onNavigate={handlePageSelect}
           />
         );
@@ -843,6 +1086,8 @@ export default function App() {
         return <SportsFlyIntelligenceView />;
       case 'sportsfly-lab':
         return <SportsFlyLabView onLogout={handleLogout} />;
+      case 'sportsfly-studio':
+        return <SportsFlyStudioView onBackToIntegrations={() => handlePageSelect('entegrasyonlar')} />;
       case 'batch-manager':
         return <SportsFlyLabView onLogout={handleLogout} initialTab="dosya-havuzu" />;
       case 'paketler':

@@ -7,6 +7,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Startup connection check document
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+
     // 2. HARDENED AUTHENTICATION & ROLE PRIMITIVES
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
@@ -72,16 +77,6 @@ service cloud.firestore {
     // ANTRENÖR (EĞİTMEN)
     function isTrainer() {
       return isNonAnonymousUser() && getUserRole() == 'egitmen';
-    }
-
-    // VELİ
-    function isParent() {
-      return isSignedIn() && getUserRole() == 'veli';
-    }
-
-    // SPORCU
-    function isAthleteUser() {
-      return isSignedIn() && getUserRole() == 'sporcu';
     }
 
     function isClubStaff() {
@@ -161,13 +156,21 @@ service cloud.firestore {
 
     function isValidEgitmen(data) {
       return data.keys().hasAll(['id', 'ownerId', 'code', 'name', 'email', 'phone', 'facility', 'branch', 'assignedGroupIds', 'status', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['id', 'ownerId', 'code', 'name', 'email', 'phone', 'facility', 'branch', 'assignedGroupIds', 'assignedGroups', 'title', 'licenseLevel', 'status', 'experienceYears', 'rating', 'activeGroupsCount', 'activeAthletesCount', 'weeklyHours', 'hourlyRate', 'monthlySalary', 'city', 'avatarUrl', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'code', 'name', 'email', 'phone', 'facility', 'branch',
+          'assignedGroupIds', 'assignedGroups', 'title', 'licenseLevel', 'status',
+          'experienceYears', 'rating', 'activeGroupsCount', 'activeAthletesCount',
+          'weeklyHours', 'hourlyRate', 'monthlySalary', 'city', 'avatarUrl',
+          'bio', 'gender', 'address', 'accountDuration', 'mailEnabled', 'smsEnabled',
+          'specialties', 'joinDate', 'reviewCount', 'documents', 'appointments',
+          'createdAt', 'updatedAt'
+        ]) &&
         isValidId(data.id) &&
         isValidId(data.ownerId) &&
         isValidId(data.code) && data.code.size() >= 4 && data.code.size() <= 32 &&
         data.name is string && data.name.size() >= 2 && data.name.size() <= 120 &&
         data.email is string && data.email.size() >= 5 && data.email.size() <= 160 &&
-        data.phone is string && data.phone.size() >= 7 && data.phone.size() <= 32 &&
+        data.phone is string && data.phone.size() >= 5 && data.phone.size() <= 32 &&
         data.facility is string && data.facility.size() >= 2 && data.facility.size() <= 140 &&
         data.branch is string && data.branch.size() >= 2 && data.branch.size() <= 80 &&
         data.assignedGroupIds is list && data.assignedGroupIds.size() <= 20 &&
@@ -185,6 +188,17 @@ service cloud.firestore {
         (!('monthlySalary' in data) || (data.monthlySalary is number && data.monthlySalary >= 0)) &&
         (!('city' in data) || (data.city is string && data.city.size() <= 80)) &&
         (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 500)) &&
+        (!('bio' in data) || (data.bio is string && data.bio.size() <= 1000)) &&
+        (!('gender' in data) || (data.gender is string && data.gender.size() <= 32)) &&
+        (!('address' in data) || (data.address is string && data.address.size() <= 300)) &&
+        (!('accountDuration' in data) || (data.accountDuration is string && data.accountDuration.size() <= 64)) &&
+        (!('mailEnabled' in data) || data.mailEnabled is bool) &&
+        (!('smsEnabled' in data) || data.smsEnabled is bool) &&
+        (!('specialties' in data) || (data.specialties is list && data.specialties.size() <= 20 && (data.specialties.size() == 0 || data.specialties[0] is string))) &&
+        (!('joinDate' in data) || (data.joinDate is string && data.joinDate.size() <= 32)) &&
+        (!('reviewCount' in data) || (data.reviewCount is number && data.reviewCount >= 0)) &&
+        (!('documents' in data) || (data.documents is list && data.documents.size() <= 50 && (data.documents.size() == 0 || data.documents[0] is map))) &&
+        (!('appointments' in data) || (data.appointments is list && data.appointments.size() <= 50 && (data.appointments.size() == 0 || data.appointments[0] is map))) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -230,6 +244,378 @@ service cloud.firestore {
         (!('parentPhone' in data) || (data.parentPhone is string && data.parentPhone.size() <= 32)) &&
         (!('attendanceRate' in data) || (data.attendanceRate is number && data.attendanceRate >= 0 && data.attendanceRate <= 100)) &&
         (!('licenseNumber' in data) || (data.licenseNumber is string && data.licenseNumber.size() <= 64)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidYoklamaKaydi(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'groupId', 'groupName', 'date', 'records', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'groupId', 'groupName', 'date', 'records', 'presentCount', 'absentCount', 'excusedCount', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.groupId) &&
+        data.groupName is string && data.groupName.size() >= 1 && data.groupName.size() <= 160 &&
+        data.date is string && data.date.size() >= 4 && data.date.size() <= 32 &&
+        data.records is list && data.records.size() <= 150 &&
+        (data.records.size() == 0 || data.records[0] is map) &&
+        (!('presentCount' in data) || (data.presentCount is number && data.presentCount >= 0)) &&
+        (!('absentCount' in data) || (data.absentCount is number && data.absentCount >= 0)) &&
+        (!('excusedCount' in data) || (data.excusedCount is number && data.excusedCount >= 0)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMuhasebeHareket(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'type', 'title', 'category', 'amount', 'date', 'payerOrPayee', 'paymentMethod', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'type', 'title', 'category', 'amount', 'date', 'payerOrPayee', 'paymentMethod', 'status', 'description', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.type is string && data.type in ['Gelir', 'Gider'] &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 120 &&
+        data.amount is number && data.amount >= 0 &&
+        data.date is string && data.date.size() >= 4 && data.date.size() <= 32 &&
+        data.payerOrPayee is string && data.payerOrPayee.size() >= 1 && data.payerOrPayee.size() <= 160 &&
+        data.paymentMethod is string && data.paymentMethod in ['Nakit', 'Kredi Kartı', 'Havale/EFT', 'POS'] &&
+        data.status is string && data.status in ['Tamamlandı', 'Beklemede', 'İptal'] &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 600)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMuhasebeKategori(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'name', 'type', 'itemCount', 'totalAmount', 'color', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'name', 'type', 'itemCount', 'totalAmount', 'color', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.type is string && data.type in ['Gelir', 'Gider'] &&
+        data.itemCount is number && data.itemCount >= 0 &&
+        data.totalAmount is number && data.totalAmount >= 0 &&
+        data.color is string && data.color.size() >= 1 && data.color.size() <= 32 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidOdemePlani(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'athleteName', 'athleteCode', 'planName', 'installment', 'dueDate', 'amount', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'athleteName', 'athleteCode', 'planName', 'installment', 'dueDate', 'amount', 'status', 'paidDate', 'receiptNumber', 'receiptDate', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.athleteName is string && data.athleteName.size() >= 1 && data.athleteName.size() <= 140 &&
+        data.athleteCode is string && data.athleteCode.size() >= 1 && data.athleteCode.size() <= 32 &&
+        data.planName is string && data.planName.size() >= 1 && data.planName.size() <= 160 &&
+        data.installment is string && data.installment.size() >= 1 && data.installment.size() <= 32 &&
+        data.dueDate is string && data.dueDate.size() >= 4 && data.dueDate.size() <= 32 &&
+        data.amount is number && data.amount >= 0 &&
+        data.status is string && data.status in ['Ödendi', 'Bekliyor', 'Gecikti'] &&
+        (!('paidDate' in data) || (data.paidDate is string && data.paidDate.size() <= 32)) &&
+        (!('receiptNumber' in data) || (data.receiptNumber is string && data.receiptNumber.size() <= 32)) &&
+        (!('receiptDate' in data) || (data.receiptDate is string && data.receiptDate.size() <= 32)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAntrenmanSeansi(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'title', 'branch', 'date', 'startTime', 'endTime', 'trainerName', 'facilityName', 'capacity', 'enrolledCount', 'status', 'color', 'attendees', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'title', 'branch', 'groupName', 'sube', 'date', 'startTime', 'endTime', 'trainerName', 'facilityName', 'capacity', 'enrolledCount', 'status', 'color', 'notes', 'attendees', 'googleCalendarEventId', 'googleCalendarLink', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.branch is string && data.branch.size() >= 1 && data.branch.size() <= 80 &&
+        (!('groupName' in data) || (data.groupName is string && data.groupName.size() <= 140)) &&
+        (!('sube' in data) || (data.sube is string && data.sube.size() <= 140)) &&
+        data.date is string && data.date.size() >= 4 && data.date.size() <= 32 &&
+        data.startTime is string && data.startTime.size() >= 3 && data.startTime.size() <= 16 &&
+        data.endTime is string && data.endTime.size() >= 3 && data.endTime.size() <= 16 &&
+        data.trainerName is string && data.trainerName.size() >= 1 && data.trainerName.size() <= 120 &&
+        data.facilityName is string && data.facilityName.size() >= 1 && data.facilityName.size() <= 160 &&
+        data.capacity is number && data.capacity >= 1 &&
+        data.enrolledCount is number && data.enrolledCount >= 0 &&
+        data.status is string && data.status in ['Planlandı', 'Devam Ediyor', 'Tamamlandı', 'İptal'] &&
+        data.color is string && data.color in ['blue', 'emerald', 'amber', 'purple', 'rose', 'indigo', 'sky'] &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 800)) &&
+        data.attendees is list && data.attendees.size() <= 100 &&
+        (data.attendees.size() == 0 || data.attendees[0] is map) &&
+        (!('googleCalendarEventId' in data) || (data.googleCalendarEventId is string && data.googleCalendarEventId.size() <= 160)) &&
+        (!('googleCalendarLink' in data) || (data.googleCalendarLink is string && data.googleCalendarLink.size() <= 500)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAnket(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'title', 'description', 'targetAudience', 'status', 'responseCount', 'totalSent', 'createdDate', 'dueDate', 'questions', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'title', 'description', 'targetAudience', 'status', 'responseCount', 'totalSent', 'createdDate', 'dueDate', 'questions', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.description is string && data.description.size() <= 800 &&
+        data.targetAudience is string && data.targetAudience in ['Sporcu', 'Veli', 'Eğitmen', 'Genel'] &&
+        data.status is string && data.status in ['Aktif', 'Taslak', 'Tamamlandı'] &&
+        data.responseCount is number && data.responseCount >= 0 &&
+        data.totalSent is number && data.totalSent >= 0 &&
+        data.createdDate is string && data.createdDate.size() >= 4 && data.createdDate.size() <= 32 &&
+        data.dueDate is string && data.dueDate.size() >= 4 && data.dueDate.size() <= 32 &&
+        data.questions is list && data.questions.size() <= 30 &&
+        (data.questions.size() == 0 || data.questions[0] is map) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDestekTalebi(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'ticketNumber', 'subject', 'category', 'priority', 'status', 'clubName', 'clubPackage', 'creatorName', 'creatorEmail', 'creatorPhone', 'createdDateStr', 'updatedDateStr', 'preferredContact', 'messages', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'ticketNumber', 'subject', 'category', 'priority', 'status', 'clubName', 'clubPackage', 'clubBranch', 'creatorName', 'creatorEmail', 'creatorPhone', 'createdDateStr', 'updatedDateStr', 'closedAt', 'preferredContact', 'messages', 'assignedAgent', 'feedback', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.ticketNumber is number && data.ticketNumber >= 0 &&
+        data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 240 &&
+        data.category is string && data.category in ['teknik', 'muhasebe', 'paket', 'egitim-planlama', 'veli-karne', 'entegrasyon', 'oneri'] &&
+        data.priority is string && data.priority in ['Dusuk', 'Normal', 'Yuksek', 'Acil'] &&
+        data.status is string && data.status in ['Acik', 'Yanitlandi', 'MusteriYaniti', 'Beklemede', 'Cozuldu', 'Kapali'] &&
+        data.clubName is string && data.clubName.size() <= 160 &&
+        data.clubPackage is string && data.clubPackage.size() <= 100 &&
+        (!('clubBranch' in data) || (data.clubBranch is string && data.clubBranch.size() <= 140)) &&
+        data.creatorName is string && data.creatorName.size() <= 140 &&
+        data.creatorEmail is string && data.creatorEmail.size() <= 160 &&
+        data.creatorPhone is string && data.creatorPhone.size() <= 32 &&
+        data.createdDateStr is string && data.createdDateStr.size() <= 64 &&
+        data.updatedDateStr is string && data.updatedDateStr.size() <= 64 &&
+        (!('closedAt' in data) || (data.closedAt is string && data.closedAt.size() <= 64)) &&
+        data.preferredContact is string && data.preferredContact in ['panel', 'whatsapp', 'email', 'phone'] &&
+        data.messages is list && data.messages.size() <= 100 &&
+        (data.messages.size() == 0 || data.messages[0] is map) &&
+        (!('assignedAgent' in data) || data.assignedAgent is map) &&
+        (!('feedback' in data) || data.feedback is map) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidOnKayit(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'onKayitNo', 'onKayitTarihi', 'sube', 'brans', 'sporcuAdSoyad', 'cinsiyet', 'veliAdSoyad', 'veliTelefon', 'kayitDurumu', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'onKayitNo', 'onKayitTarihi', 'sube', 'brans',
+          'sporcuAdSoyad', 'cinsiyet', 'tcKimlikNo', 'dogumTarihi', 'telefon',
+          'il', 'ilce', 'adres', 'veliAdSoyad', 'veliTelefon', 'veliEposta',
+          'acilDurumAranacakKisi', 'acilDurumTelefonu', 'ulasmaTuru', 'kayitDurumu',
+          'kayitTarihi', 'sonGuncellemeTarihi', 'kayitOlusturanKullanici',
+          'kvkkAydinlatmaOnay', 'acikRizaOnay', 'fotografVideoIzni',
+          'iletisimKampanyaIzni', 'veliOnayi', 'extraFields', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.onKayitNo is string && data.onKayitNo.size() >= 1 && data.onKayitNo.size() <= 64 &&
+        data.onKayitTarihi is string && data.onKayitTarihi.size() >= 4 && data.onKayitTarihi.size() <= 32 &&
+        data.sube is string && data.sube.size() <= 140 &&
+        data.brans is string && data.brans.size() <= 80 &&
+        data.sporcuAdSoyad is string && data.sporcuAdSoyad.size() >= 1 && data.sporcuAdSoyad.size() <= 140 &&
+        data.cinsiyet is string && data.cinsiyet in ['Erkek', 'Kız'] &&
+        (!('tcKimlikNo' in data) || (data.tcKimlikNo is string && data.tcKimlikNo.size() <= 20)) &&
+        (!('dogumTarihi' in data) || (data.dogumTarihi is string && data.dogumTarihi.size() <= 32)) &&
+        (!('telefon' in data) || (data.telefon is string && data.telefon.size() <= 32)) &&
+        (!('il' in data) || (data.il is string && data.il.size() <= 80)) &&
+        (!('ilce' in data) || (data.ilce is string && data.ilce.size() <= 80)) &&
+        (!('adres' in data) || (data.adres is string && data.adres.size() <= 300)) &&
+        data.veliAdSoyad is string && data.veliAdSoyad.size() <= 140 &&
+        data.veliTelefon is string && data.veliTelefon.size() <= 32 &&
+        (!('veliEposta' in data) || (data.veliEposta is string && data.veliEposta.size() <= 160)) &&
+        (!('acilDurumAranacakKisi' in data) || (data.acilDurumAranacakKisi is string && data.acilDurumAranacakKisi.size() <= 140)) &&
+        (!('acilDurumTelefonu' in data) || (data.acilDurumTelefonu is string && data.acilDurumTelefonu.size() <= 32)) &&
+        (!('ulasmaTuru' in data) || (data.ulasmaTuru is string && data.ulasmaTuru.size() <= 80)) &&
+        data.kayitDurumu is string && data.kayitDurumu in ['Ön Kayıt', 'Görüşme Yapıldı', 'Deneme Antrenmanı', 'Sözleşme Bekleniyor', 'Kayıt Oldu', 'Kayıt Olmadı', 'İptal'] &&
+        (!('kayitTarihi' in data) || (data.kayitTarihi is string && data.kayitTarihi.size() <= 32)) &&
+        (!('sonGuncellemeTarihi' in data) || (data.sonGuncellemeTarihi is string && data.sonGuncellemeTarihi.size() <= 32)) &&
+        (!('kayitOlusturanKullanici' in data) || (data.kayitOlusturanKullanici is string && data.kayitOlusturanKullanici.size() <= 120)) &&
+        (!('kvkkAydinlatmaOnay' in data) || data.kvkkAydinlatmaOnay is bool) &&
+        (!('acikRizaOnay' in data) || data.acikRizaOnay is bool) &&
+        (!('fotografVideoIzni' in data) || data.fotografVideoIzni is bool) &&
+        (!('iletisimKampanyaIzni' in data) || data.iletisimKampanyaIzni is bool) &&
+        (!('veliOnayi' in data) || data.veliOnayi is bool) &&
+        (!('extraFields' in data) || data.extraFields is map) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSube(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'ad', 'kod', 'sehir', 'ilce', 'durum', 'kapasite', 'branslar', 'ozellikler', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'ad', 'kod', 'sehir', 'ilce', 'adres', 'telefon', 'eposta',
+          'sorumluYonetici', 'sorumluAntrenor', 'antrenorSayisi', 'sporcuSayisi',
+          'kapasite', 'branslar', 'tesisTipi', 'durum', 'acilisTarihi', 'aylikCiro',
+          'ozellikler', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.ad is string && data.ad.size() >= 1 && data.ad.size() <= 160 &&
+        data.kod is string && data.kod.size() >= 1 && data.kod.size() <= 32 &&
+        data.sehir is string && data.sehir.size() <= 80 &&
+        data.ilce is string && data.ilce.size() <= 80 &&
+        (!('adres' in data) || (data.adres is string && data.adres.size() <= 300)) &&
+        (!('telefon' in data) || (data.telefon is string && data.telefon.size() <= 32)) &&
+        (!('eposta' in data) || (data.eposta is string && data.eposta.size() <= 160)) &&
+        (!('sorumluYonetici' in data) || (data.sorumluYonetici is string && data.sorumluYonetici.size() <= 120)) &&
+        (!('sorumluAntrenor' in data) || (data.sorumluAntrenor is string && data.sorumluAntrenor.size() <= 120)) &&
+        (!('antrenorSayisi' in data) || (data.antrenorSayisi is number && data.antrenorSayisi >= 0)) &&
+        (!('sporcuSayisi' in data) || (data.sporcuSayisi is number && data.sporcuSayisi >= 0)) &&
+        data.kapasite is number && data.kapasite >= 0 &&
+        data.branslar is list && data.branslar.size() <= 20 &&
+        (data.branslar.size() == 0 || data.branslar[0] is string) &&
+        (!('tesisTipi' in data) || (data.tesisTipi is string && data.tesisTipi.size() <= 80)) &&
+        data.durum is string && data.durum in ['Aktif', 'Pasif', 'Tadilatta'] &&
+        (!('acilisTarihi' in data) || (data.acilisTarihi is string && data.acilisTarihi.size() <= 32)) &&
+        (!('aylikCiro' in data) || (data.aylikCiro is number && data.aylikCiro >= 0)) &&
+        data.ozellikler is list && data.ozellikler.size() <= 20 &&
+        (data.ozellikler.size() == 0 || data.ozellikler[0] is string) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSporPuanLog(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'sporcuId', 'category', 'ruleName', 'points', 'date', 'source', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'sporcuId', 'sporcuName', 'ruleId', 'category', 'ruleName', 'points', 'date', 'source', 'note', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.sporcuId is string && data.sporcuId.size() >= 1 && data.sporcuId.size() <= 128 &&
+        (!('sporcuName' in data) || (data.sporcuName is string && data.sporcuName.size() <= 140)) &&
+        (!('ruleId' in data) || (data.ruleId is string && data.ruleId.size() <= 64)) &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 64 &&
+        data.ruleName is string && data.ruleName.size() >= 1 && data.ruleName.size() <= 160 &&
+        data.points is number && data.points >= 0 && data.points <= 10000 &&
+        data.date is string && data.date.size() >= 2 && data.date.size() <= 32 &&
+        data.source is string && data.source in ['Otomatik', 'Koç Onayı'] &&
+        (!('note' in data) || (data.note is string && data.note.size() <= 500)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidYoklamaReminderLog(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'timestamp', 'groupName', 'trainingDate', 'targetAudience', 'totalRecipientCount', 'channels', 'messagePreview', 'status', 'triggeredBy', 'recipientsSummary', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'timestamp', 'groupName', 'trainingDate', 'targetAudience', 'totalRecipientCount', 'channels', 'messagePreview', 'status', 'triggeredBy', 'recipientsSummary', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.timestamp is string && data.timestamp.size() <= 64 &&
+        data.groupName is string && data.groupName.size() <= 160 &&
+        data.trainingDate is string && data.trainingDate.size() <= 32 &&
+        data.targetAudience is string && data.targetAudience in ['parent', 'trainer', 'both'] &&
+        data.totalRecipientCount is number && data.totalRecipientCount >= 0 &&
+        data.channels is list && data.channels.size() <= 10 &&
+        (data.channels.size() == 0 || data.channels[0] is string) &&
+        data.messagePreview is string && data.messagePreview.size() <= 800 &&
+        data.status is string && data.status in ['sent', 'pending', 'failed'] &&
+        data.triggeredBy is string && data.triggeredBy.size() <= 160 &&
+        data.recipientsSummary is list && data.recipientsSummary.size() <= 100 &&
+        (data.recipientsSummary.size() == 0 || data.recipientsSummary[0] is string) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidClubSetting(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'settingKey', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'settingKey', 'config', 'rulesList', 'activeValue', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.settingKey is string && data.settingKey.size() >= 1 && data.settingKey.size() <= 80 &&
+        (!('config' in data) || data.config is map) &&
+        (!('rulesList' in data) || (data.rulesList is list && data.rulesList.size() <= 50 && (data.rulesList.size() == 0 || data.rulesList[0] is map))) &&
+        (!('activeValue' in data) || (data.activeValue is string && data.activeValue.size() <= 128)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidEgitimPlani(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'code', 'title', 'branch', 'ageCategory', 'difficulty', 'durationMinutes', 'summary', 'focusTags', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'code', 'title', 'branch', 'ageCategory', 'difficulty', 'durationMinutes', 'summary', 'focusTags', 'objectives', 'equipment', 'sections', 'coachNotes', 'isCustom', 'assignedGroups', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.code is string && data.code.size() <= 64 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.branch is string && data.branch.size() <= 80 &&
+        data.ageCategory is string && data.ageCategory.size() <= 64 &&
+        data.difficulty is string && data.difficulty.size() <= 64 &&
+        data.durationMinutes is number && data.durationMinutes >= 5 &&
+        data.summary is string && data.summary.size() <= 1000 &&
+        data.focusTags is list && data.focusTags.size() <= 20 &&
+        (data.focusTags.size() == 0 || data.focusTags[0] is string) &&
+        (!('objectives' in data) || (data.objectives is list && data.objectives.size() <= 20 && (data.objectives.size() == 0 || data.objectives[0] is string))) &&
+        (!('equipment' in data) || (data.equipment is list && data.equipment.size() <= 30 && (data.equipment.size() == 0 || data.equipment[0] is string))) &&
+        (!('sections' in data) || (data.sections is list && data.sections.size() <= 20 && (data.sections.size() == 0 || data.sections[0] is map))) &&
+        (!('coachNotes' in data) || (data.coachNotes is string && data.coachNotes.size() <= 1000)) &&
+        (!('isCustom' in data) || data.isCustom is bool) &&
+        (!('assignedGroups' in data) || (data.assignedGroups is list && data.assignedGroups.size() <= 30 && (data.assignedGroups.size() == 0 || data.assignedGroups[0] is string))) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidYonetici(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'name', 'email', 'code', 'createdDate', 'phone', 'role', 'schoolName', 'accessibility', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'name', 'email', 'code', 'createdDate', 'phone', 'role', 'schoolName', 'accessibility', 'packageType', 'avatarUrl', 'authProvider', 'activeStudents', 'activeTrainers', 'branches', 'lastLogin', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 140 &&
+        data.email is string && data.email.size() <= 160 &&
+        data.code is string && data.code.size() <= 32 &&
+        data.createdDate is string && data.createdDate.size() <= 32 &&
+        data.phone is string && data.phone.size() <= 32 &&
+        data.role is string && data.role.size() <= 80 &&
+        data.schoolName is string && data.schoolName.size() <= 160 &&
+        data.accessibility is string && data.accessibility in ['Erişilebilir', 'Erişilemez'] &&
+        (!('packageType' in data) || (data.packageType is string && data.packageType.size() <= 80)) &&
+        (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 500)) &&
+        (!('authProvider' in data) || (data.authProvider is string && data.authProvider in ['google', 'email'])) &&
+        (!('activeStudents' in data) || (data.activeStudents is number && data.activeStudents >= 0)) &&
+        (!('activeTrainers' in data) || (data.activeTrainers is number && data.activeTrainers >= 0)) &&
+        (!('branches' in data) || (data.branches is list && data.branches.size() <= 20 && (data.branches.size() == 0 || data.branches[0] is string))) &&
+        (!('lastLogin' in data) || (data.lastLogin is string && data.lastLogin.size() <= 64)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidKulupSozlesmesi(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'sozlesmeNo', 'yonetici', 'firmaTip', 'tcKimlik', 'dogumTarihi', 'il', 'ilce', 'vergiDairesi', 'ibanUnvan', 'adSoyad', 'firmaUnvani', 'telefon', 'iban', 'status', 'createdDate', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'sozlesmeNo', 'yonetici', 'firmaTip', 'tcKimlik', 'dogumTarihi', 'il', 'ilce', 'eposta', 'vergiDairesi', 'ibanUnvan', 'adSoyad', 'firmaUnvani', 'telefon', 'website', 'iban', 'status', 'createdDate', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.sozlesmeNo is string && data.sozlesmeNo.size() <= 64 &&
+        data.yonetici is string && data.yonetici.size() <= 140 &&
+        data.firmaTip is string && data.firmaTip.size() <= 80 &&
+        data.tcKimlik is string && data.tcKimlik.size() <= 20 &&
+        data.dogumTarihi is string && data.dogumTarihi.size() <= 32 &&
+        data.il is string && data.il.size() <= 80 &&
+        data.ilce is string && data.ilce.size() <= 80 &&
+        (!('eposta' in data) || (data.eposta is string && data.eposta.size() <= 160)) &&
+        data.vergiDairesi is string && data.vergiDairesi.size() <= 120 &&
+        data.ibanUnvan is string && data.ibanUnvan.size() <= 200 &&
+        data.adSoyad is string && data.adSoyad.size() <= 140 &&
+        data.firmaUnvani is string && data.firmaUnvani.size() <= 200 &&
+        data.telefon is string && data.telefon.size() <= 32 &&
+        (!('website' in data) || (data.website is string && data.website.size() <= 200)) &&
+        data.iban is string && data.iban.size() <= 64 &&
+        data.status is string && data.status in ['Onaylandı', 'İmza Bekliyor', 'İnceleniyor'] &&
+        data.createdDate is string && data.createdDate.size() <= 32 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSporcuSozlesmesi(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'athleteName', 'parentName', 'branch', 'sube', 'status', 'kvkkApproved', 'taahhutnameApproved', 'photoVideoApproved', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'athleteName', 'parentName', 'birthDate', 'tcNo', 'phone', 'email', 'branch', 'sube', 'signedAt', 'ipAddress', 'status', 'signature', 'kvkkApproved', 'taahhutnameApproved', 'photoVideoApproved', 'hash', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.athleteName is string && data.athleteName.size() <= 140 &&
+        data.parentName is string && data.parentName.size() <= 140 &&
+        (!('birthDate' in data) || (data.birthDate is string && data.birthDate.size() <= 32)) &&
+        (!('tcNo' in data) || (data.tcNo is string && data.tcNo.size() <= 20)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 32)) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 160)) &&
+        data.branch is string && data.branch.size() <= 80 &&
+        data.sube is string && data.sube.size() <= 140 &&
+        (!('signedAt' in data) || (data.signedAt is string && data.signedAt.size() <= 64)) &&
+        (!('ipAddress' in data) || (data.ipAddress is string && data.ipAddress.size() <= 64)) &&
+        data.status is string && data.status in ['Onaylandı', 'Bekliyor'] &&
+        (!('signature' in data) || (data.signature is string && data.signature.size() <= 200)) &&
+        data.kvkkApproved is bool &&
+        data.taahhutnameApproved is bool &&
+        data.photoVideoApproved is bool &&
+        (!('hash' in data) || (data.hash is string && data.hash.size() <= 160)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -458,7 +844,7 @@ service cloud.firestore {
         (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64) || data.updatedAt is timestamp);
     }
 
-    // 4. COLLECTION RULES (ROLE-BASED & ZERO-TRUST)
+    // 4. COLLECTION RULES (ROLE-BASED & TENANT-ISOLATED)
 
     // Yönetici Rol Kayıtları (Salt okunur kontrol, istemciden değiştirilemez)
     match /admins/{adminId} {
@@ -529,11 +915,7 @@ service cloud.firestore {
       }
     }
 
-    // Sporcular:
-    // - Süper Admin: Tam erişim
-    // - Kulüp Yöneticisi: Kendi kulüp kayıtları (ownerId)
-    // - Antrenör: Yalnızca kendi sorumlu olduğu sporcular (salt okunur)
-    // - Veli / Sporcu: Yalnızca kendi çocuğunun / kendisinin kaydı (salt okunur)
+    // Sporcular (Multi-tenant ownerId izolasyonu + Süper Admin + atanmış eğitmen / veli okuma)
     match /sporcular/{sporcuId} {
       allow get: if isSignedIn() && isValidId(sporcuId) && (
         isAdmin() ||
@@ -544,13 +926,15 @@ service cloud.firestore {
       allow list: if isAdmin() || (
         isSignedIn() && (
           resource.data.ownerId == request.auth.uid ||
-          ('trainerId' in resource.data && isAssignedTrainerId(resource.data.trainerId)) ||
-          isParentOrSelfRecord(resource.data)
+          ('trainerId' in resource.data && resource.data.trainerId == request.auth.uid) ||
+          (isVerifiedEmail() && (
+            ('veliEposta' in resource.data && resource.data.veliEposta == request.auth.token.email) ||
+            ('email' in resource.data && resource.data.email == request.auth.token.email)
+          ))
         )
       );
 
-      allow create: if (isAdmin() || isClubManager()) &&
-        isVerifiedUser() &&
+      allow create: if isVerifiedUser() &&
         isValidId(sporcuId) &&
         incoming().id == sporcuId &&
         isValidSporcu(incoming()) &&
@@ -558,8 +942,7 @@ service cloud.firestore {
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
 
-      allow update: if (isAdmin() || isClubManager()) &&
-        isVerifiedUser() &&
+      allow update: if isVerifiedUser() &&
         isValidId(sporcuId) &&
         isValidSporcu(incoming()) &&
         incoming().id == existing().id &&
@@ -572,16 +955,13 @@ service cloud.firestore {
            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email', 'phone', 'birthDate', 'facility', 'branch', 'groupId', 'teamGroup', 'trainerId', 'trainerName', 'isActive', 'avatarUrl', 'parentUid', 'veliEposta', 'updatedAt']))
         );
 
-      allow delete: if isValidId(sporcuId) && (
+      allow delete: if isSignedIn() && isValidId(sporcuId) && (
         isAdmin() ||
-        (isClubManager() && resource.data.ownerId == request.auth.uid)
+        resource.data.ownerId == request.auth.uid
       );
     }
 
-    // Eğitmenler & Antrenörler (Maaş / saatlik ücret / iletişim PII koruması):
-    // - Süper Admin & Kulüp Yöneticisi: Tam erişim
-    // - Antrenör: Yalnızca kendi eğitmen profilini okuyabilir, maaş/statü değiştiremez
-    // - Veli / Sporcu: Erişemez (KVKK & maaş gizliliği)
+    // Eğitmenler & Antrenörler
     match /egitmenler/{egitmenId} {
       allow get: if isSignedIn() && isValidId(egitmenId) && (
         isAdmin() ||
@@ -595,16 +975,12 @@ service cloud.firestore {
       allow list: if isAdmin() || (
         isSignedIn() && (
           resource.data.ownerId == request.auth.uid ||
-          (isTrainer() && (
-            resource.data.id == request.auth.uid ||
-            (getUserTrainerId() != '' && resource.data.id == getUserTrainerId()) ||
-            (isVerifiedEmail() && resource.data.email == request.auth.token.email)
-          ))
+          resource.data.id == request.auth.uid ||
+          (isVerifiedEmail() && resource.data.email == request.auth.token.email)
         )
       );
 
-      allow create: if (isAdmin() || isClubManager()) &&
-        isVerifiedUser() &&
+      allow create: if isVerifiedUser() &&
         isValidId(egitmenId) &&
         incoming().id == egitmenId &&
         isValidEgitmen(incoming()) &&
@@ -612,8 +988,7 @@ service cloud.firestore {
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
 
-      allow update: if (isAdmin() || isClubManager()) &&
-        isVerifiedUser() &&
+      allow update: if isVerifiedUser() &&
         isValidId(egitmenId) &&
         isValidEgitmen(incoming()) &&
         incoming().id == existing().id &&
@@ -623,16 +998,24 @@ service cloud.firestore {
         incoming().updatedAt == request.time && (
           isAdmin() ||
           (resource.data.ownerId == request.auth.uid &&
-           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email', 'phone', 'facility', 'branch', 'assignedGroupIds', 'assignedGroups', 'title', 'licenseLevel', 'status', 'experienceYears', 'rating', 'activeGroupsCount', 'activeAthletesCount', 'weeklyHours', 'hourlyRate', 'monthlySalary', 'city', 'avatarUrl', 'updatedAt']))
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'name', 'email', 'phone', 'facility', 'branch',
+             'assignedGroupIds', 'assignedGroups', 'title', 'licenseLevel', 'status',
+             'experienceYears', 'rating', 'activeGroupsCount', 'activeAthletesCount',
+             'weeklyHours', 'hourlyRate', 'monthlySalary', 'city', 'avatarUrl',
+             'bio', 'gender', 'address', 'accountDuration', 'mailEnabled', 'smsEnabled',
+             'specialties', 'joinDate', 'reviewCount', 'documents', 'appointments',
+             'updatedAt'
+           ]))
         );
 
-      allow delete: if isValidId(egitmenId) && (
+      allow delete: if isSignedIn() && isValidId(egitmenId) && (
         isAdmin() ||
-        (isClubManager() && resource.data.ownerId == request.auth.uid)
+        resource.data.ownerId == request.auth.uid
       );
     }
 
-    // Antrenman Grupları & Üyeleri (Yoklama güncellemesi Antrenör'e sınırlı izinli)
+    // Antrenman Grupları & Üyeleri
     match /gruplar/{grupId} {
       allow get: if isSignedIn() && isValidId(grupId) && (
         isAdmin() ||
@@ -642,12 +1025,11 @@ service cloud.firestore {
       allow list: if isAdmin() || (
         isSignedIn() && (
           resource.data.ownerId == request.auth.uid ||
-          ('instructorId' in resource.data && isAssignedTrainerId(resource.data.instructorId))
+          ('instructorId' in resource.data && resource.data.instructorId == request.auth.uid)
         )
       );
 
-      allow create: if (isAdmin() || isClubManager()) &&
-        isVerifiedUser() &&
+      allow create: if isVerifiedUser() &&
         isValidId(grupId) &&
         incoming().id == grupId &&
         isValidGrup(incoming()) &&
@@ -655,8 +1037,7 @@ service cloud.firestore {
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
 
-      allow update: if (isAdmin() || isClubManager()) &&
-        isVerifiedUser() &&
+      allow update: if isVerifiedUser() &&
         isValidId(grupId) &&
         isValidGrup(incoming()) &&
         incoming().id == existing().id &&
@@ -668,9 +1049,9 @@ service cloud.firestore {
            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'instructorId', 'instructorName', 'primaryAthleteIds', 'facility', 'branch', 'category', 'ageGroup', 'memberCount', 'maxCapacity', 'monthlyFee', 'status', 'scheduleDays', 'scheduleTime', 'scheduleLocation', 'description', 'updatedAt']))
         );
 
-      allow delete: if isValidId(grupId) && (
+      allow delete: if isSignedIn() && isValidId(grupId) && (
         isAdmin() ||
-        (isClubManager() && resource.data.ownerId == request.auth.uid)
+        resource.data.ownerId == request.auth.uid
       );
 
       match /uyeler/{uyeId} {
@@ -685,12 +1066,11 @@ service cloud.firestore {
         allow list: if isAdmin() || (
           isSignedIn() && (
             resource.data.ownerId == request.auth.uid ||
-            ('instructorId' in resource.data && isAssignedTrainerId(resource.data.instructorId))
+            ('instructorId' in resource.data && resource.data.instructorId == request.auth.uid)
           )
         );
 
-        allow create: if (isAdmin() || isClubManager()) &&
-          isVerifiedUser() &&
+        allow create: if isVerifiedUser() &&
           isValidId(grupId) &&
           isValidId(uyeId) &&
           incoming().id == uyeId &&
@@ -699,8 +1079,8 @@ service cloud.firestore {
           (isAdmin() || incoming().ownerId == request.auth.uid) &&
           incoming().createdAt == request.time &&
           incoming().updatedAt == request.time &&
-          exists(/databases/$(database)/documents/gruplar/$(grupId)) &&
-          (isAdmin() || get(/databases/$(database)/documents/gruplar/$(grupId)).data.ownerId == request.auth.uid);
+          existsAfter(/databases/$(database)/documents/gruplar/$(grupId)) &&
+          (isAdmin() || getAfter(/databases/$(database)/documents/gruplar/$(grupId)).data.ownerId == request.auth.uid);
 
         allow update: if isVerifiedUser() &&
           isValidId(grupId) &&
@@ -714,26 +1094,422 @@ service cloud.firestore {
           incoming().updatedAt == request.time &&
           exists(/databases/$(database)/documents/gruplar/$(grupId)) && (
             isAdmin() ||
-            (isClubManager() &&
-             resource.data.ownerId == request.auth.uid &&
+            (resource.data.ownerId == request.auth.uid &&
              get(/databases/$(database)/documents/gruplar/$(grupId)).data.ownerId == request.auth.uid &&
              incoming().diff(existing()).affectedKeys().hasOnly(['sporcuId', 'instructorId', 'name', 'phone', 'birthYear', 'parentName', 'parentPhone', 'attendanceRate', 'licenseNumber', 'updatedAt'])) ||
             ('instructorId' in existing() && isAssignedTrainerId(existing().instructorId) &&
              incoming().diff(existing()).affectedKeys().hasOnly(['attendanceRate', 'updatedAt']))
           );
 
-        allow delete: if isValidId(grupId) && isValidId(uyeId) &&
+        allow delete: if isSignedIn() && isValidId(grupId) && isValidId(uyeId) &&
           exists(/databases/$(database)/documents/gruplar/$(grupId)) && (
             isAdmin() ||
-            (isClubManager() && resource.data.ownerId == request.auth.uid)
+            resource.data.ownerId == request.auth.uid
           );
       }
     }
 
-    // Spor Okulu & Ön Kayıt Başvuruları:
-    // - Okuma/Listeleme: Yalnızca Süper Admin & Kulüp Yöneticisi (Veli/Antrenör/Anonim okuyamaz - PII koruması)
-    // - Oluşturma: Başvuru formlarından yalnızca 'onay_bekliyor' başlangıç durumuyla açılabilir
-    // - Güncelleme & Silme: Yalnızca Süper Admin
+    // 5. OPERATIONAL MULTI-TENANT WORKSPACE COLLECTIONS
+
+    match /yoklamalar/{yoklamaId} {
+      allow get: if isSignedIn() && isValidId(yoklamaId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(yoklamaId) &&
+        incoming().id == yoklamaId &&
+        isValidYoklamaKaydi(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(yoklamaId) &&
+        isValidYoklamaKaydi(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['groupId', 'groupName', 'date', 'records', 'presentCount', 'absentCount', 'excusedCount', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(yoklamaId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /muhasebe_hareketler/{hareketId} {
+      allow get: if isSignedIn() && isValidId(hareketId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(hareketId) &&
+        incoming().id == hareketId &&
+        isValidMuhasebeHareket(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(hareketId) &&
+        isValidMuhasebeHareket(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['type', 'title', 'category', 'amount', 'date', 'payerOrPayee', 'paymentMethod', 'status', 'description', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(hareketId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /muhasebe_kategoriler/{kategoriId} {
+      allow get: if isSignedIn() && isValidId(kategoriId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(kategoriId) &&
+        incoming().id == kategoriId &&
+        isValidMuhasebeKategori(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(kategoriId) &&
+        isValidMuhasebeKategori(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'type', 'itemCount', 'totalAmount', 'color', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(kategoriId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /odeme_planlari/{planId} {
+      allow get: if isSignedIn() && isValidId(planId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(planId) &&
+        incoming().id == planId &&
+        isValidOdemePlani(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(planId) &&
+        isValidOdemePlani(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['athleteName', 'athleteCode', 'planName', 'installment', 'dueDate', 'amount', 'status', 'paidDate', 'receiptNumber', 'receiptDate', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(planId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /antrenmanlar/{antrenmanId} {
+      allow get: if isSignedIn() && isValidId(antrenmanId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(antrenmanId) &&
+        incoming().id == antrenmanId &&
+        isValidAntrenmanSeansi(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(antrenmanId) &&
+        isValidAntrenmanSeansi(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['title', 'branch', 'groupName', 'sube', 'date', 'startTime', 'endTime', 'trainerName', 'facilityName', 'capacity', 'enrolledCount', 'status', 'color', 'notes', 'attendees', 'googleCalendarEventId', 'googleCalendarLink', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(antrenmanId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /anketler/{anketId} {
+      allow get: if isSignedIn() && isValidId(anketId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(anketId) &&
+        incoming().id == anketId &&
+        isValidAnket(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(anketId) &&
+        isValidAnket(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'targetAudience', 'status', 'responseCount', 'totalSent', 'createdDate', 'dueDate', 'questions', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(anketId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /destek_talepleri/{ticketId} {
+      allow get: if isSignedIn() && isValidId(ticketId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(ticketId) &&
+        incoming().id == ticketId &&
+        isValidDestekTalebi(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(ticketId) &&
+        isValidDestekTalebi(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['subject', 'category', 'priority', 'status', 'clubBranch', 'updatedDateStr', 'closedAt', 'preferredContact', 'messages', 'assignedAgent', 'feedback', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(ticketId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /on_kayitlar/{onKayitId} {
+      allow get: if isSignedIn() && isValidId(onKayitId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(onKayitId) &&
+        incoming().id == onKayitId &&
+        isValidOnKayit(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(onKayitId) &&
+        isValidOnKayit(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'onKayitNo', 'onKayitTarihi', 'sube', 'brans', 'sporcuAdSoyad', 'cinsiyet',
+             'tcKimlikNo', 'dogumTarihi', 'telefon', 'il', 'ilce', 'adres',
+             'veliAdSoyad', 'veliTelefon', 'veliEposta', 'acilDurumAranacakKisi', 'acilDurumTelefonu',
+             'ulasmaTuru', 'kayitDurumu', 'kayitTarihi', 'sonGuncellemeTarihi', 'kayitOlusturanKullanici',
+             'kvkkAydinlatmaOnay', 'acikRizaOnay', 'fotografVideoIzni', 'iletisimKampanyaIzni', 'veliOnayi',
+             'extraFields', 'updatedAt'
+           ]))
+        );
+      allow delete: if isSignedIn() && isValidId(onKayitId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /subeler/{subeId} {
+      allow get: if isSignedIn() && isValidId(subeId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(subeId) &&
+        incoming().id == subeId &&
+        isValidSube(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(subeId) &&
+        isValidSube(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'ad', 'kod', 'sehir', 'ilce', 'adres', 'telefon', 'eposta',
+             'sorumluYonetici', 'sorumluAntrenor', 'antrenorSayisi', 'sporcuSayisi',
+             'kapasite', 'branslar', 'tesisTipi', 'durum', 'acilisTarihi', 'aylikCiro',
+             'ozellikler', 'updatedAt'
+           ]))
+        );
+      allow delete: if isSignedIn() && isValidId(subeId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /sporpuan_logs/{logId} {
+      allow get: if isSignedIn() && isValidId(logId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(logId) &&
+        incoming().id == logId &&
+        isValidSporPuanLog(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(logId) &&
+        isValidSporPuanLog(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['sporcuId', 'sporcuName', 'ruleId', 'category', 'ruleName', 'points', 'date', 'source', 'note', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(logId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /yoklama_hatirlatici_logs/{logId} {
+      allow get: if isSignedIn() && isValidId(logId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(logId) &&
+        incoming().id == logId &&
+        isValidYoklamaReminderLog(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(logId) &&
+        isValidYoklamaReminderLog(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(logId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /club_settings/{settingId} {
+      allow get: if isSignedIn() && isValidId(settingId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(settingId) &&
+        incoming().id == settingId &&
+        isValidClubSetting(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(settingId) &&
+        isValidClubSetting(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['settingKey', 'config', 'rulesList', 'activeValue', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(settingId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /egitim_planlari/{planId} {
+      allow get: if isSignedIn() && isValidId(planId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(planId) &&
+        incoming().id == planId &&
+        isValidEgitimPlani(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(planId) &&
+        isValidEgitimPlani(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['code', 'title', 'branch', 'ageCategory', 'difficulty', 'durationMinutes', 'summary', 'focusTags', 'objectives', 'equipment', 'sections', 'coachNotes', 'isCustom', 'assignedGroups', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(planId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /yoneticiler/{yoneticiId} {
+      allow get: if isSignedIn() && isValidId(yoneticiId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(yoneticiId) &&
+        incoming().id == yoneticiId &&
+        isValidYonetici(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(yoneticiId) &&
+        isValidYonetici(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email', 'code', 'createdDate', 'phone', 'role', 'schoolName', 'accessibility', 'packageType', 'avatarUrl', 'authProvider', 'activeStudents', 'activeTrainers', 'branches', 'lastLogin', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(yoneticiId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /kulup_sozlesmeleri/{sozlesmeId} {
+      allow get: if isSignedIn() && isValidId(sozlesmeId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(sozlesmeId) &&
+        incoming().id == sozlesmeId &&
+        isValidKulupSozlesmesi(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(sozlesmeId) &&
+        isValidKulupSozlesmesi(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['sozlesmeNo', 'yonetici', 'firmaTip', 'tcKimlik', 'dogumTarihi', 'il', 'ilce', 'eposta', 'vergiDairesi', 'ibanUnvan', 'adSoyad', 'firmaUnvani', 'telefon', 'website', 'iban', 'status', 'createdDate', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(sozlesmeId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    match /sporcu_sozlesmeleri/{contractId} {
+      allow get: if isSignedIn() && isValidId(contractId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if isVerifiedUser() &&
+        isValidId(contractId) &&
+        incoming().id == contractId &&
+        isValidSporcuSozlesmesi(incoming()) &&
+        (isAdmin() || incoming().ownerId == request.auth.uid) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(contractId) &&
+        isValidSporcuSozlesmesi(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (resource.data.ownerId == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['athleteName', 'parentName', 'birthDate', 'tcNo', 'phone', 'email', 'branch', 'sube', 'signedAt', 'ipAddress', 'status', 'signature', 'kvkkApproved', 'taahhutnameApproved', 'photoVideoApproved', 'hash', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(contractId) && (isAdmin() || resource.data.ownerId == request.auth.uid);
+    }
+
+    // 6. EXISTING PLATFORM COLLECTIONS (Preserved & Hardened)
+
+    // Spor Okulu & Ön Kayıt Başvuruları
     match /spor-okulu-basvurulari/{basvuruId} {
       allow get: if isValidId(basvuruId) && (isAdmin() || isClubManager());
       allow list: if isAdmin() || isClubManager();
@@ -752,78 +1528,79 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(basvuruId);
     }
 
-    // SportsFly Lab Performans Raporları:
-    // - Süper Admin, Kulüp Yöneticisi, Antrenör: Okuma, oluşturma, güncelleme
-    // - Veli / Sporcu: Yalnızca kendi çocuğunun / kendisinin raporunu salt-okunur görüntüleyebilir
-    // - Kalıcı Silme: Yalnızca Süper Admin veya Kulüp Yöneticisi
+    // SportsFly Lab Performans Raporları
     match /labReports/{reportId} {
       allow get: if isValidId(reportId) && (
         isClubStaff() ||
         isParentOrSelfRecord(resource.data)
       );
-      allow list: if isClubStaff() || isParentOrSelfRecord(resource.data);
-      allow create, update: if isClubStaff() &&
+      allow list: if isClubStaff() || (
+        isSignedIn() && (
+          ('ownerId' in resource.data && resource.data.ownerId == request.auth.uid) ||
+          ('parentUid' in resource.data && resource.data.parentUid == request.auth.uid)
+        )
+      );
+      allow create, update: if isSignedIn() &&
         isValidId(reportId) &&
         isValidAthleteLabReport(incoming()) &&
         incoming().reportId == reportId &&
-        incoming().updatedAt == request.time;
+        incoming().updatedAt == request.time &&
+        (isClubStaff() || incoming().ownerId == request.auth.uid);
       allow delete: if isValidId(reportId) && (
         isAdmin() ||
-        (isClubManager() && (!('ownerId' in resource.data) || resource.data.ownerId == request.auth.uid))
+        (isSignedIn() && resource.data.ownerId == request.auth.uid)
       );
     }
 
-    // SportsFly Lab Karne Arşivi:
-    // - Süper Admin, Kulüp Yöneticisi, Antrenör: Okuma, oluşturma, güncelleme
-    // - Veli / Sporcu: Toplu arşive erişemez (KVKK izolasyonu)
-    // - Silme: Yalnızca Süper Admin veya Kulüp Yöneticisi (Antrenör arşiv silemez)
+    // SportsFly Lab Karne Arşivi
     match /labArchives/{archiveId} {
-      allow get: if isValidId(archiveId) && isClubStaff();
-      allow list: if isClubStaff();
-      allow create, update: if isClubStaff() &&
+      allow get: if isValidId(archiveId) && (isClubStaff() || (isSignedIn() && resource.data.ownerId == request.auth.uid));
+      allow list: if isClubStaff() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+      allow create, update: if isSignedIn() &&
         isValidId(archiveId) &&
         isValidLabArchive(incoming()) &&
-        incoming().archiveId == archiveId;
+        incoming().archiveId == archiveId &&
+        (isClubStaff() || incoming().ownerId == request.auth.uid);
       allow delete: if isValidId(archiveId) && (
         isAdmin() ||
-        (isClubManager() && (!('ownerId' in resource.data) || resource.data.ownerId == request.auth.uid))
+        (isSignedIn() && resource.data.ownerId == request.auth.uid)
       );
     }
 
-    // Dijital Sporcu Karneleri:
-    // - Süper Admin, Kulüp Yöneticisi, Antrenör: Okuma, oluşturma, güncelleme
-    // - Veli / Sporcu: Yalnızca kendi çocuğunun / kendisinin karnesini salt-okunur görüntüleyebilir
-    // - Silme: Yalnızca Süper Admin veya Kulüp Yöneticisi
+    // Dijital Sporcu Karneleri
     match /karneler/{karneId} {
       allow get: if isValidId(karneId) && (
         isClubStaff() ||
         isParentOrSelfRecord(resource.data)
       );
-      allow list: if isClubStaff() || isParentOrSelfRecord(resource.data);
-      allow create, update: if isClubStaff() &&
+      allow list: if isClubStaff() || (
+        isSignedIn() && (
+          ('ownerId' in resource.data && resource.data.ownerId == request.auth.uid) ||
+          ('parentUid' in resource.data && resource.data.parentUid == request.auth.uid)
+        )
+      );
+      allow create, update: if isSignedIn() &&
         isValidId(karneId) &&
         isValidKarne(incoming()) &&
         incoming().id == karneId &&
-        incoming().updatedAt == request.time;
+        incoming().updatedAt == request.time &&
+        (isClubStaff() || !('ownerId' in incoming()) || incoming().ownerId == request.auth.uid);
       allow delete: if isValidId(karneId) && (
         isAdmin() ||
-        (isClubManager() && (!('ownerId' in resource.data) || resource.data.ownerId == request.auth.uid))
+        (isSignedIn() && resource.data.ownerId == request.auth.uid)
       );
     }
 
-    // Dosya Havuzu (Yüklenen Excel Listeleri):
-    // - Süper Admin, Kulüp Yöneticisi, Antrenör: Okuma ve yükleme
-    // - Veli / Sporcu: Toplu sporcu listelerine erişemez (KVKK izolasyonu)
-    // - Silme: Yalnızca Süper Admin (soft-delete yalnız Admin / Kulüp Yöneticisi / dosya sahibi)
+    // Dosya Havuzu (Yüklenen Excel Listeleri)
     match /uploadedFiles/{fileId} {
       allow get: if isValidId(fileId) && (isClubStaff() || (isSignedIn() && resource.data.ownerId == request.auth.uid));
       allow list: if isClubStaff() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
-      allow create: if isClubStaff() &&
+      allow create: if isSignedIn() &&
         isValidId(fileId) &&
         isValidUploadedFile(incoming()) &&
         incoming().id == fileId &&
         (isAdmin() || incoming().ownerId == request.auth.uid);
-      allow update: if isClubStaff() &&
+      allow update: if isSignedIn() &&
         isValidId(fileId) &&
         isValidUploadedFile(incoming()) &&
         incoming().id == existing().id &&
@@ -836,8 +1613,7 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(fileId);
     }
 
-    // Ödeme Niyetleri (PCI-DSS SAQ-A):
-    // - Yalnızca Süper Admin, kendi kaydının sahibi (Veli / Kulüp Yöneticisi) erişebilir; Antrenör finansal verilere erişemez
+    // Ödeme Niyetleri (PCI-DSS SAQ-A)
     match /paymentIntents/{intentId} {
       allow get: if isSignedIn() && isValidId(intentId) && (resource.data.ownerId == request.auth.uid || isAdmin());
       allow list: if isAdmin() || (isSignedIn() && resource.data.ownerId == request.auth.uid);
@@ -867,7 +1643,7 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(intentId);
     }
 
-    // Google Kullanıcı Erişim Kayıtları (Yetkilendirme Kontrolü)
+    // Google Kullanıcı Erişim Kayıtları
     match /googleUsers/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || resource.data.uid == request.auth.uid || isAdmin());
       allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
@@ -893,7 +1669,7 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(userId);
     }
 
-    // Entegrasyon & Geçiş Kodu Tanımları (accessCode gizliliği: Veli/Anonim listeleyemez)
+    // Entegrasyon & Geçiş Kodu Tanımları
     match /integrations/{docId} {
       allow get: if isValidId(docId) && isClubStaff();
       allow list: if isClubStaff();
@@ -901,9 +1677,7 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(docId);
     }
 
-    // Firma / Kulüp Profili:
-    // - Okuma: Kulüp personeli tüm profilleri, oturum açmış diğer roller yalnızca ana vitrin profilini okuyabilir
-    // - Yazma / Silme: Yalnızca Süper Admin veya Kulüp Yöneticisi (Veli/Antrenör değiştiremez)
+    // Firma / Kulüp Profili
     match /company_profile/{docId} {
       allow get: if isValidId(docId) && (isClubStaff() || (isSignedIn() && docId == 'primary'));
       allow list: if isClubStaff() || (isSignedIn() && resource.data.id == 'primary');
@@ -911,10 +1685,7 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(docId);
     }
 
-    // Kayıtlı E-posta Kullanıcıları:
-    // - Listeleme: Yalnızca Süper Admin (şifre/PII sızıntısı önlemi)
-    // - Tekil Okuma: Süper Admin veya doğrulanmış kendi e-postası
-    // - Oluşturma: Yeni kayıt başvurusu yalnızca 'onay_bekliyor' ve yetkisiz rol ile açılabilir
+    // Kayıtlı E-posta Kullanıcıları
     match /registered_users/{userId} {
       allow get: if isValidId(userId) && (
         isAdmin() ||
@@ -951,14 +1722,14 @@ service cloud.firestore {
       allow update, delete: if isAdmin() && isValidId(approvalId);
     }
 
-    // Sistem Ayarları (SMTP vb. Hassas Yapılandırma - Yalnızca Süper Admin)
+    // Sistem Ayarları (SMTP vb. Hassas Yapılandırma)
     match /system_settings/{settingId} {
       allow get: if isAdmin() && isValidId(settingId);
       allow list: if isAdmin();
       allow create, update, delete: if isAdmin() && isValidId(settingId);
     }
 
-    // Kulüp Web Sitesi (Vitrin Herkese Açık Okunabilir, Yalnızca Admin/Kulüp Yöneticisi Düzenler)
+    // Kulüp Web Sitesi
     match /club_websites/{websiteId} {
       allow get: if isValidId(websiteId);
       allow list: if isAdmin() || isClubManager() || resource.data.id == 'primary';

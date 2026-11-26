@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { openExternalUrl, isNativeCapacitorApp } from '../../utils/mobileBridge';
 import {
   Check,
   PhoneCall,
@@ -218,11 +219,17 @@ export const PaketlerView: React.FC = () => {
       if (e.detail?.plan) setActivePlan(normalizePlanName(e.detail.plan));
     };
 
+    const handleLockedRedirect = () => {
+      triggerToast('Seçtiğiniz kategori veya modül kilitlidir. Yalnızca Paketler sayfasına erişebilirsiniz.');
+    };
+
     window.addEventListener('sportsfly_profile_updated', handleProfileUpdate);
     window.addEventListener('sportsfly_plan_updated', handlePlanUpdate);
+    window.addEventListener('sportsfly_google_locked_redirect', handleLockedRedirect);
     return () => {
       window.removeEventListener('sportsfly_profile_updated', handleProfileUpdate);
       window.removeEventListener('sportsfly_plan_updated', handlePlanUpdate);
+      window.removeEventListener('sportsfly_google_locked_redirect', handleLockedRedirect);
     };
   }, []);
 
@@ -252,7 +259,11 @@ export const PaketlerView: React.FC = () => {
     // If a direct PayTR link exists, use it
     const paymentLink = PAYTR_LINKS[pkg.name]?.[billingCycle];
     if (paymentLink) {
-      window.open(paymentLink, '_blank');
+      if (isNativeCapacitorApp()) {
+        void openExternalUrl(paymentLink);
+      } else {
+        window.open(paymentLink, '_blank');
+      }
       return;
     }
 
@@ -368,6 +379,23 @@ export const PaketlerView: React.FC = () => {
       )}
 
 
+
+      {/* Google Restricted Session Banner */}
+      {isGoogleRestricted && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3 shadow-2xs">
+          <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+            <Lock className="w-4 h-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-extrabold text-amber-950">
+              Paket Seçimi Gerekli — Yalnızca Paketler Sayfası Aktif
+            </h2>
+            <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
+              Google hesabınızla giriş yaptığınız için paket aktivasyonu tamamlanana kadar yalnızca <strong>Paketler</strong> sayfasını görüntüleyebilirsiniz. Diğer tüm modül ve kategorilere tıklandığında otomatik olarak bu sayfaya yönlendirilirsiniz.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Top Header & Overview */}
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs">

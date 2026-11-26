@@ -881,5 +881,321 @@ export async function downloadReportsAsPdfZip(options: {
   downloadBlob(zipBlob, zipFileName);
 }
 
+/* ==========================================================================
+ * MOBİL & WHATSAPP UYUMLU HAFİF PDF MOTORU (JPEG /DCTDecode + TEMİZ DOSYA ADI)
+ * Mevcut yüksek çözünürlüklü PNG PDF akışını değiştirmeden ayrı erişim sunar.
+ * ========================================================================== */
+
+const TURKISH_CHAR_MAP: Record<string, string> = {
+  Ç: 'C',
+  ç: 'c',
+  Ğ: 'G',
+  ğ: 'g',
+  İ: 'I',
+  I: 'I',
+  ı: 'i',
+  Ö: 'O',
+  ö: 'o',
+  Ş: 'S',
+  ş: 's',
+  Ü: 'U',
+  ü: 'u',
+};
+
+/**
+ * Produces an ASCII-only, WhatsApp/Android/iOS-safe `.pdf` filename
+ * with no Turkish diacritics, spaces, or special punctuation.
+ */
+export function sanitizeMobileSafePdfFileName(
+  rawName: string,
+  prefix: string = 'SportsFly_Mobil'
+): string {
+  const withoutExt = (rawName || 'Karne').replace(/\.pdf$/i, '');
+  const mapped = withoutExt
+    .split('')
+    .map((ch) => TURKISH_CHAR_MAP[ch] ?? ch)
+    .join('')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_+/g, '_')
+    .slice(0, 64);
+
+  const cleanPrefix = (prefix || '')
+    .split('')
+    .map((ch) => TURKISH_CHAR_MAP[ch] ?? ch)
+    .join('')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  const base = mapped || 'Rapor';
+  const combined =
+    cleanPrefix && !base.toLowerCase().startsWith(cleanPrefix.toLowerCase())
+      ? `${cleanPrefix}_${base}`
+      : base;
+
+  return `${combined}.pdf`;
+}
+
+/**
+ * Flattens an HTMLCanvasElement onto an opaque white canvas and encodes it as RGB JPEG
+ * so jsPDF embeds a native /DCTDecode stream with ZERO alpha channel (/SMask),
+ * cutting file size 5x-12x and ensuring instant rendering on WhatsApp/iOS/Android viewers.
+ */
+function canvasToOpaqueJpegDataUrl(
+  sourceCanvas: HTMLCanvasElement,
+  jpegQuality: number = 0.86
+): string {
+  const opaque = document.createElement('canvas');
+  opaque.width = sourceCanvas.width;
+  opaque.height = sourceCanvas.height;
+  const ctx = opaque.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, opaque.width, opaque.height);
+    ctx.drawImage(sourceCanvas, 0, 0);
+    return opaque.toDataURL('image/jpeg', jpegQuality);
+  }
+  return sourceCanvas.toDataURL('image/jpeg', jpegQuality);
+}
+
+/**
+ * Appends a rendered canvas onto a jsPDF A4 portrait document using lightweight RGB JPEG
+ * (/DCTDecode, no /SMask) for instant WhatsApp & mobile PDF viewer compatibility.
+ */
+function appendCanvasToMobileA4Pdf(
+  pdf: jsPDF,
+  canvas: HTMLCanvasElement,
+  blockBreakYsPx: number[],
+  hasExistingPages: boolean,
+  forceSinglePage: boolean = true,
+  jpegQuality: number = 0.86
+): number {
+  const pdfWidth = pdf.internal.pageSize.getWidth(); // 210 mm
+  const pdfHeight = pdf.internal.pageSize.getHeight(); // 297 mm
+
+  if (forceSinglePage) {
+    const scale = Math.min(pdfWidth / canvas.width, pdfHeight / canvas.height);
+    const renderW = canvas.width * scale;
+    const renderH = canvas.height * scale;
+    const offsetX = Math.max(0, (pdfWidth - renderW) / 2);
+    const offsetY = Math.max(0, (pdfHeight - renderH) / 2);
+
+    if (hasExistingPages) {
+      pdf.addPage();
+    }
+    const imgData = canvasToOpaqueJpegDataUrl(canvas, jpegQuality);
+    pdf.addImage(imgData, 'JPEG', offsetX, offsetY, renderW, renderH, undefined, 'MEDIUM');
+    return 1;
+  }
+
+  const fullCtx = canvas.getContext('2d');
+  const marginMm = 4;
+  const usableW = pdfWidth - marginMm * 2;
+  const usableH = pdfHeight - marginMm * 2;
+  const pxPerMm = canvas.width / usableW;
+  const maxPageSlicePx = Math.floor(usableH * pxPerMm);
+
+  let yOffsetPx = 0;
+  let pagesAdded = 0;
+
+  while (yOffsetPx < canvas.height - 20) {
+    const remainingPx = canvas.height - yOffsetPx;
+    let sliceHeightPx = remainingPx;
+
+    if (remainingPx > maxPageSlicePx) {
+      const idealCutY = yOffsetPx + maxPageSlicePx;
+      const minCutY = yOffsetPx + Math.floor(maxPageSlicePx * 0.65);
+
+      let targetCutY = idealCutY;
+      const matchingBlocks = blockBreakYsPx.filter((by) => by >= minCutY && by <= idealCutY);
+      if (matchingBlocks.length > 0) {
+        targetCutY = matchingBlocks[matchingBlocks.length - 1];
+      }
+
+      const safeCutY = fullCtx
+        ? findCleanHorizontalCutRow(fullCtx, canvas.width, targetCutY, minCutY)
+        : targetCutY;
+      sliceHeightPx = Math.max(200, safeCutY - yOffsetPx);
+    }
+
+    const pageCanvas = document.createElement('canvas');
+    pageCanvas.width = canvas.width;
+    pageCanvas.height = sliceHeightPx;
+    const pageCtx = pageCanvas.getContext('2d');
+
+    if (pageCtx) {
+      pageCtx.fillStyle = '#ffffff';
+      pageCtx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      pageCtx.drawImage(
+        canvas,
+        0,
+        yOffsetPx,
+        canvas.width,
+        sliceHeightPx,
+        0,
+        0,
+        canvas.width,
+        sliceHeightPx
+      );
+
+      const sliceImg = pageCanvas.toDataURL('image/jpeg', jpegQuality);
+      const sliceMmH = sliceHeightPx / pxPerMm;
+
+      if (hasExistingPages || pagesAdded > 0) {
+        pdf.addPage();
+      }
+      pdf.addImage(sliceImg, 'JPEG', marginMm, marginMm, usableW, sliceMmH, undefined, 'MEDIUM');
+      pagesAdded++;
+    }
+
+    yOffsetPx += sliceHeightPx;
+  }
+
+  return pagesAdded;
+}
+
+export interface MobilePdfExportResult {
+  fileName: string;
+  sizeBytes: number;
+  pageCount: number;
+}
+
+/**
+ * Exports A4 report pages into a lightweight, WhatsApp & mobile-compatible PDF:
+ * - RGB JPEG (/DCTDecode) with zero alpha channel /SMask
+ * - Optimal 1.75x pixel ratio & 0.86 quality (~5x-10x smaller than PNG)
+ * - Clean ASCII-only filename safe for WhatsApp, Android, and iOS viewers
+ */
+export async function exportReportPagesToMobileA4Pdf(options: {
+  pageIds: string[];
+  rawName: string;
+  filePrefix?: string;
+  pixelRatio?: number;
+  jpegQuality?: number;
+  forceSinglePagePerElement?: boolean;
+  onPageProgress?: (pageIndex: number, totalPages: number) => void;
+}): Promise<MobilePdfExportResult> {
+  const {
+    pageIds,
+    rawName,
+    filePrefix = 'SportsFly_Mobil',
+    pixelRatio = 1.75,
+    jpegQuality = 0.86,
+    forceSinglePagePerElement = true,
+    onPageProgress,
+  } = options;
+
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+    compress: true,
+  });
+
+  let addedPages = 0;
+
+  for (let i = 0; i < pageIds.length; i++) {
+    if (onPageProgress) {
+      onPageProgress(i + 1, pageIds.length);
+    }
+
+    const pageId = pageIds[i];
+    const pageEl = document.getElementById(pageId);
+    if (!pageEl) {
+      console.warn(`[Mobile PDF] Element with id "${pageId}" not found in DOM, skipping.`);
+      continue;
+    }
+
+    try {
+      const { canvas, blockBreakYsPx } = await captureElementToCleanCanvas(
+        pageEl,
+        1120,
+        forceSinglePagePerElement,
+        pixelRatio
+      );
+      addedPages += appendCanvasToMobileA4Pdf(
+        pdf,
+        canvas,
+        blockBreakYsPx,
+        addedPages > 0,
+        forceSinglePagePerElement,
+        jpegQuality
+      );
+    } catch (pageErr) {
+      console.error(`[Mobile PDF] Error rendering page "${pageId}":`, pageErr);
+    }
+  }
+
+  if (addedPages === 0) {
+    throw new Error('Karne sayfaları bulunamadı veya mobil PDF için görselleştirilemedi.');
+  }
+
+  const safeFileName = sanitizeMobileSafePdfFileName(rawName, filePrefix);
+  const pdfBlob = pdf.output('blob');
+  downloadBlob(pdfBlob, safeFileName);
+
+  return {
+    fileName: safeFileName,
+    sizeBytes: pdfBlob.size,
+    pageCount: addedPages,
+  };
+}
+
+/**
+ * Exports a single tall container (e.g. Executive Team Summary or full scroll container)
+ * into a lightweight, multi-page mobile/WhatsApp-friendly JPEG PDF with clean ASCII filename.
+ */
+export async function exportContainerToMobileSmartA4Pdf(options: {
+  containerEl: HTMLElement;
+  rawName: string;
+  filePrefix?: string;
+  pixelRatio?: number;
+  jpegQuality?: number;
+}): Promise<MobilePdfExportResult> {
+  const {
+    containerEl,
+    rawName,
+    filePrefix = 'SportsFly_Mobil',
+    pixelRatio = 1.75,
+    jpegQuality = 0.86,
+  } = options;
+
+  const { canvas, blockBreakYsPx } = await captureElementToCleanCanvas(
+    containerEl,
+    1120,
+    false,
+    pixelRatio
+  );
+
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+    compress: true,
+  });
+
+  const pageCount = appendCanvasToMobileA4Pdf(
+    pdf,
+    canvas,
+    blockBreakYsPx,
+    false,
+    false,
+    jpegQuality
+  );
+
+  const safeFileName = sanitizeMobileSafePdfFileName(rawName, filePrefix);
+  const pdfBlob = pdf.output('blob');
+  downloadBlob(pdfBlob, safeFileName);
+
+  return {
+    fileName: safeFileName,
+    sizeBytes: pdfBlob.size,
+    pageCount,
+  };
+}
+
+
 
 

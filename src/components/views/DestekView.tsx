@@ -42,6 +42,8 @@ import { getActiveSessionPlan, PACKAGE_DETAILS, isSuperAdminUser } from '../../d
 import { NewTicketModal } from './destek/NewTicketModal';
 import { TicketDetailModal } from './destek/TicketDetailModal';
 import { FAQKnowledgeBaseView } from './destek/FAQKnowledgeBaseView';
+import { auth } from '../../firebase';
+import { destekTalepleriService } from '../../services/operationsFirestoreService';
 
 export const DestekView: React.FC = () => {
   const [userProfile, setUserProfile] = useState(() => getStoredUserProfile());
@@ -85,7 +87,7 @@ export const DestekView: React.FC = () => {
   const [selectedTicket, setSelectedTicket] = useState<SupportTicketFull | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Sync with storage events
+  // Sync with storage events & Firestore realtime listener
   useEffect(() => {
     const handleSupportUpdate = (e: any) => {
       if (e.detail) {
@@ -93,8 +95,23 @@ export const DestekView: React.FC = () => {
       }
     };
     window.addEventListener('sportsfly_support_updated', handleSupportUpdate);
+
+    let unsubFirestore = () => {};
+    if (auth.currentUser) {
+      unsubFirestore = destekTalepleriService.subscribe((items) => {
+        if (items.length > 0) {
+          setTickets(items);
+          saveStoredSupportTickets(items);
+          setSelectedTicket((prev) =>
+            prev ? items.find((item) => item.id === prev.id) || prev : prev
+          );
+        }
+      });
+    }
+
     return () => {
       window.removeEventListener('sportsfly_support_updated', handleSupportUpdate);
+      unsubFirestore();
     };
   }, []);
 
@@ -103,30 +120,50 @@ export const DestekView: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const handleCreateTicket = (newTicket: SupportTicketFull) => {
+  const handleCreateTicket = async (newTicket: SupportTicketFull) => {
     const updated = [newTicket, ...tickets];
     setTickets(updated);
     saveStoredSupportTickets(updated);
     triggerToast(`"${newTicket.subject}" konulu destek talebiniz başarıyla oluşturuldu.`);
 
-    // Automatically schedule an initial confirmation/reply from specialist after 1.5s
-    setTimeout(() => {
+    if (auth.currentUser) {
+      try {
+        await destekTalepleriService.upsert(newTicket);
+      } catch (err) {
+        console.error('Destek talebi Firestore kaydı hatası:', err);
+      }
+    }
+
+    // Automatically schedule an initial confirmation/reply from specialist after 2s
+    setTimeout(async () => {
       const autoReply = generateSpecialistAutoReply(newTicket, newTicket.messages[0].message);
       const ticketsNow = getStoredSupportTickets();
       const target = ticketsNow.find((t) => t.id === newTicket.id);
       if (target) {
-        target.messages.push(autoReply);
-        target.status = 'Yanitlandi';
-        target.updatedAt = autoReply.createdAt;
-        saveStoredSupportTickets([...ticketsNow]);
+        const nextTarget: SupportTicketFull = {
+          ...target,
+          messages: [...target.messages, autoReply],
+          status: 'Yanitlandi',
+          updatedAt: autoReply.createdAt,
+        };
+        const nextList = ticketsNow.map((t) => (t.id === nextTarget.id ? nextTarget : t));
+        saveStoredSupportTickets(nextList);
+        if (auth.currentUser) {
+          try {
+            await destekTalepleriService.updatePartial(nextTarget.id, nextTarget);
+          } catch (err) {
+            console.error('Destek otomatik yanıt Firestore kaydı hatası:', err);
+          }
+        }
       }
     }, 2000);
   };
 
-  const handleSendMessage = (ticketId: string, messageText: string, attachments?: SupportAttachment[]) => {
+  const handleSendMessage = async (ticketId: string, messageText: string, attachments?: SupportAttachment[]) => {
     const now = new Date();
     const timeStr = `${now.getDate().toString().padStart(2, '0')}.${(now.getMonth() + 1).toString().padStart(2, '0')}.${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
+    let updatedTicketTarget: SupportTicketFull | null = null;
     const updated = tickets.map((t) => {
       if (t.id === ticketId) {
         const isSystem = isSuperAdmin;
@@ -146,12 +183,9 @@ export const DestekView: React.FC = () => {
           updatedAt: timeStr,
           messages: [...t.messages, newMsg],
         };
+        updatedTicketTarget = updatedTicket;
         if (selectedTicket?.id === ticketId) {
           setSelectedTicket(updatedTicket);
-        }
-
-        if (isSystem) {
-          // If a superadmin responds, message is updated in the ticket thread
         }
 
         return updatedTicket;
@@ -161,6 +195,14 @@ export const DestekView: React.FC = () => {
 
     setTickets(updated);
     saveStoredSupportTickets(updated);
+
+    if (auth.currentUser && updatedTicketTarget) {
+      try {
+        await destekTalepleriService.updatePartial(ticketId, updatedTicketTarget);
+      } catch (err) {
+        console.error('Destek mesajı Firestore kaydı hatası:', err);
+      }
+    }
 
     if (isSuperAdmin) {
       triggerToast('Yanıtınız kulüp yöneticisine iletildi ve anlık bildirim gönderildi.');
@@ -169,13 +211,14 @@ export const DestekView: React.FC = () => {
     }
   };
 
-  const handleTriggerSimulatedAgentReply = (ticketId: string) => {
+  const handleTriggerSimulatedAgentReply = async (ticketId: string) => {
     const targetTicket = tickets.find((t) => t.id === ticketId);
     if (!targetTicket) return;
 
     const lastMsg = targetTicket.messages[targetTicket.messages.length - 1];
     const autoReply = generateSpecialistAutoReply(targetTicket, lastMsg?.message || targetTicket.subject);
 
+    let updatedTicketTarget: SupportTicketFull | null = null;
     const updated = tickets.map((t) => {
       if (t.id === ticketId) {
         const updatedTicket: SupportTicketFull = {
@@ -184,6 +227,7 @@ export const DestekView: React.FC = () => {
           updatedAt: autoReply.createdAt,
           messages: [...t.messages, autoReply],
         };
+        updatedTicketTarget = updatedTicket;
         if (selectedTicket?.id === ticketId) {
           setSelectedTicket(updatedTicket);
         }
@@ -194,14 +238,24 @@ export const DestekView: React.FC = () => {
 
     setTickets(updated);
     saveStoredSupportTickets(updated);
+
+    if (auth.currentUser && updatedTicketTarget) {
+      try {
+        await destekTalepleriService.updatePartial(ticketId, updatedTicketTarget);
+      } catch (err) {
+        console.error('Destek temsilcisi yanıtı Firestore kaydı hatası:', err);
+      }
+    }
+
     triggerToast('SportsFly uzmanından yeni bir yanıt geldi.');
   };
 
-  const handleUpdateStatus = (
+  const handleUpdateStatus = async (
     ticketId: string,
     newStatus: SupportTicketStatus,
     feedback?: { rating: number; comment?: string; submittedAt: string }
   ) => {
+    let updatedTicketTarget: SupportTicketFull | null = null;
     const updated = tickets.map((t) => {
       if (t.id === ticketId) {
         const updatedTicket: SupportTicketFull = {
@@ -210,6 +264,7 @@ export const DestekView: React.FC = () => {
           closedAt: newStatus === 'Cozuldu' || newStatus === 'Kapali' ? new Date().toLocaleDateString('tr-TR') : undefined,
           feedback: feedback || t.feedback,
         };
+        updatedTicketTarget = updatedTicket;
         if (selectedTicket?.id === ticketId) {
           setSelectedTicket(updatedTicket);
         }
@@ -220,6 +275,15 @@ export const DestekView: React.FC = () => {
 
     setTickets(updated);
     saveStoredSupportTickets(updated);
+
+    if (auth.currentUser && updatedTicketTarget) {
+      try {
+        await destekTalepleriService.updatePartial(ticketId, updatedTicketTarget);
+      } catch (err) {
+        console.error('Destek talep durumu Firestore kaydı hatası:', err);
+      }
+    }
+
     triggerToast(`Talep durumu "${newStatus === 'Cozuldu' ? 'Çözüldü' : newStatus}" olarak güncellendi.`);
   };
 

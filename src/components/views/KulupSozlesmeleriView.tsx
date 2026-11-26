@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileText,
   Plus,
@@ -29,6 +29,11 @@ import {
 import { KulupSozlesmesi } from '../../types';
 import { INITIAL_YONETICILER } from '../../data/mockData';
 import { TURKEY_CITIES, getDistrictsForCity } from '../../data/turkeyCitiesData';
+import { auth } from '../../firebase';
+import {
+  kulupSozlesmeleriService,
+  sporcuSozlesmeleriService,
+} from '../../services/operationsFirestoreService';
 
 export interface AthleteContract {
   id: string;
@@ -244,6 +249,32 @@ export const KulupSozlesmeleriView: React.FC = () => {
   const [athleteSearchQuery, setAthleteSearchQuery] = useState('');
   const [athleteStatusFilter, setAthleteStatusFilter] = useState<'Tümü' | 'Onaylandı' | 'Bekliyor'>('Tümü');
 
+  useEffect(() => {
+    if (!auth.currentUser) return;
+
+    void Promise.allSettled([
+      kulupSozlesmeleriService.seedIfEmpty(INITIAL_SOZLESMELER),
+      sporcuSozlesmeleriService.seedIfEmpty(INITIAL_ATHLETE_CONTRACTS),
+    ]);
+
+    const unsubClub = kulupSozlesmeleriService.subscribe((items) => {
+      if (items.length > 0) setSozlesmeler(items);
+    });
+    const unsubAthlete = sporcuSozlesmeleriService.subscribe((items) => {
+      if (items.length > 0) {
+        setAthleteContracts(items);
+        setSelectedAthleteContract((prev) =>
+          prev ? items.find((c) => c.id === prev.id) || items[0] : items[0]
+        );
+      }
+    });
+
+    return () => {
+      unsubClub();
+      unsubAthlete();
+    };
+  }, []);
+
   // Form State matching the exact fields in user's image
   const [formData, setFormData] = useState({
     yonetici: '',
@@ -276,7 +307,7 @@ export const KulupSozlesmeleriView: React.FC = () => {
     if (errorMessage) setErrorMessage(null);
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Validation for required fields with asterisk in the screenshot
@@ -351,6 +382,13 @@ export const KulupSozlesmeleriView: React.FC = () => {
     };
 
     setSozlesmeler([newSozlesme, ...sozlesmeler]);
+    if (auth.currentUser) {
+      try {
+        await kulupSozlesmeleriService.upsert(newSozlesme);
+      } catch (err) {
+        console.error('Kulüp sözleşmesi Firestore kaydı hatası:', err);
+      }
+    }
     setSuccessMessage(`"${newSozlesme.firmaUnvani}" için kulüp sözleşmesi başarıyla kaydedildi.`);
 
     // Reset form
@@ -376,9 +414,16 @@ export const KulupSozlesmeleriView: React.FC = () => {
     }, 4500);
   };
 
-  const handleDelete = (id: string, name: string) => {
+  const handleDelete = async (id: string, name: string) => {
     if (confirm(`"${name}" sözleşmesini silmek istediğinize emin misiniz?`)) {
       setSozlesmeler((prev) => prev.filter((s) => s.id !== id));
+      if (auth.currentUser) {
+        try {
+          await kulupSozlesmeleriService.delete(id);
+        } catch (err) {
+          console.error('Kulüp sözleşmesi silme Firestore hatası:', err);
+        }
+      }
     }
   };
 

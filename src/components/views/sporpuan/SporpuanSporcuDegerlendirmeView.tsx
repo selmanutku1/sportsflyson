@@ -63,6 +63,13 @@ import {
 import { getStoredUserProfile } from '../../../data/userProfile';
 import { addSporPuanNotification } from '../../../data/notifications';
 import { QuickPointAwardModal } from '../../modals/QuickPointAwardModal';
+import { auth } from '../../../firebase';
+import {
+  sporpuanLogsService,
+  clubSettingsService,
+  saveSporpuanRulesToFirestore,
+  SporPuanLogItem,
+} from '../../../services/operationsFirestoreService';
 
 interface SporcuDegerlendirmeViewProps {
   onNavigate?: (page: NavPage) => void;
@@ -181,6 +188,43 @@ export const SporpuanSporcuDegerlendirmeView: React.FC<SporcuDegerlendirmeViewPr
     }
   }, [sporpuanRules]);
 
+  useEffect(() => {
+    const handleLogsSync = () => {
+      const saved = localStorage.getItem('sportsfly_sporpuan_logs_new');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) setSporpuanLogs(parsed);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    };
+    window.addEventListener('sportsfly_sporpuan_updated', handleLogsSync);
+
+    let unsubLogs = () => {};
+    let unsubSettings = () => {};
+    if (auth.currentUser) {
+      unsubLogs = sporpuanLogsService.subscribe((items) => {
+        if (items.length > 0) {
+          setSporpuanLogs(items as SporPuanLog[]);
+        }
+      });
+      unsubSettings = clubSettingsService.subscribe((docs) => {
+        const rulesDoc = docs.find((d) => d.settingKey === 'sporpuan_rules');
+        if (rulesDoc?.rulesList && rulesDoc.rulesList.length > 0) {
+          setSporpuanRules(rulesDoc.rulesList);
+        }
+      });
+    }
+
+    return () => {
+      window.removeEventListener('sportsfly_sporpuan_updated', handleLogsSync);
+      unsubLogs();
+      unsubSettings();
+    };
+  }, []);
+
   // Filter & Search states
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBranch, setSelectedBranch] = useState<string>('Tümü');
@@ -221,7 +265,14 @@ export const SporpuanSporcuDegerlendirmeView: React.FC<SporcuDegerlendirmeViewPr
   const [selectedRuleId, setSelectedRuleId] = useState<string>('r1');
   const [sporpuanNote, setSporpuanNote] = useState<string>('');
 
-  const handleAwardPoints = () => {
+  const persistRules = (nextRules: any[]) => {
+    if (!auth.currentUser) return;
+    void saveSporpuanRulesToFirestore(nextRules as Record<string, unknown>[]).catch((err) =>
+      console.error('SporPuan kuralları Firestore kaydı hatası:', err)
+    );
+  };
+
+  const handleAwardPoints = async () => {
     if (!currentEdit) return;
     const rule = sporpuanRules.find((r) => r.id === selectedRuleId);
     if (!rule) return;
@@ -250,6 +301,14 @@ export const SporpuanSporcuDegerlendirmeView: React.FC<SporcuDegerlendirmeViewPr
     setSporpuanLogs([newLog, ...sporpuanLogs]);
     setSporpuanNote('');
 
+    if (auth.currentUser) {
+      try {
+        await sporpuanLogsService.upsert(newLog as SporPuanLogItem);
+      } catch (err) {
+        console.error('SporPuan kaydı Firestore hatası:', err);
+      }
+    }
+
     // Trigger notification center update and instant push/toast alert
     addSporPuanNotification({
       sporcuId: currentEdit.id,
@@ -263,10 +322,17 @@ export const SporpuanSporcuDegerlendirmeView: React.FC<SporcuDegerlendirmeViewPr
     showToast(`${currentEdit.adSoyad} için +${rule.points} SP puanı başarıyla tanımlandı ve bildirim merkezine iletildi!`);
   };
 
-  const handleDeleteLog = (logId: string) => {
+  const handleDeleteLog = async (logId: string) => {
     if (window.confirm('Bu puan kazanım kaydını silmek istediğinize emin misiniz?')) {
       const updated = sporpuanLogs.filter(log => log.id !== logId);
       setSporpuanLogs(updated);
+      if (auth.currentUser) {
+        try {
+          await sporpuanLogsService.delete(logId);
+        } catch (err) {
+          console.error('SporPuan kaydı silme Firestore hatası:', err);
+        }
+      }
       showToast('Puan kaydı başarıyla silindi.');
     }
   };
@@ -277,7 +343,11 @@ export const SporpuanSporcuDegerlendirmeView: React.FC<SporcuDegerlendirmeViewPr
       showToast('Hata: Bu işlemi yapmak için Süper Admin yetkisine sahip olmalısınız.');
       return;
     }
-    setSporpuanRules(prev => prev.map(r => r.id === ruleId ? { ...r, points: Math.max(0, newPoints) } : r));
+    setSporpuanRules(prev => {
+      const next = prev.map(r => r.id === ruleId ? { ...r, points: Math.max(0, newPoints) } : r);
+      persistRules(next);
+      return next;
+    });
   };
 
   const handleUpdateRuleMonthlyLimit = (ruleId: string, limitVal: number) => {
@@ -285,17 +355,29 @@ export const SporpuanSporcuDegerlendirmeView: React.FC<SporcuDegerlendirmeViewPr
       showToast('Hata: Bu işlemi yapmak için Süper Admin yetkisine sahip olmalısınız.');
       return;
     }
-    setSporpuanRules(prev => prev.map(r => r.id === ruleId ? { ...r, monthlyLimit: limitVal > 0 ? limitVal : undefined } : r));
+    setSporpuanRules(prev => {
+      const next = prev.map(r => r.id === ruleId ? { ...r, monthlyLimit: limitVal > 0 ? limitVal : undefined } : r);
+      persistRules(next);
+      return next;
+    });
   };
 
   const handleUpdateRuleLimitText = (ruleId: string, limitText: string) => {
     if (!isSuperAdmin) return;
-    setSporpuanRules(prev => prev.map(r => r.id === ruleId ? { ...r, limit: limitText } : r));
+    setSporpuanRules(prev => {
+      const next = prev.map(r => r.id === ruleId ? { ...r, limit: limitText } : r);
+      persistRules(next);
+      return next;
+    });
   };
 
   const handleUpdateRuleTriggerText = (ruleId: string, triggerText: string) => {
     if (!isSuperAdmin) return;
-    setSporpuanRules(prev => prev.map(r => r.id === ruleId ? { ...r, trigger: triggerText } : r));
+    setSporpuanRules(prev => {
+      const next = prev.map(r => r.id === ruleId ? { ...r, trigger: triggerText } : r);
+      persistRules(next);
+      return next;
+    });
   };
 
   const handleUpdateRuleSource = (ruleId: string, sourceVal: 'Otomatik' | 'Koç Onayı') => {
@@ -303,7 +385,11 @@ export const SporpuanSporcuDegerlendirmeView: React.FC<SporcuDegerlendirmeViewPr
       showToast('Hata: Bu işlemi yapmak için Süper Admin yetkisine sahip olmalısınız.');
       return;
     }
-    setSporpuanRules(prev => prev.map(r => r.id === ruleId ? { ...r, source: sourceVal } : r));
+    setSporpuanRules(prev => {
+      const next = prev.map(r => r.id === ruleId ? { ...r, source: sourceVal } : r);
+      persistRules(next);
+      return next;
+    });
   };
 
   const handleResetRulesToDefault = () => {
@@ -313,6 +399,7 @@ export const SporpuanSporcuDegerlendirmeView: React.FC<SporcuDegerlendirmeViewPr
     }
     if (window.confirm('Tüm puanlama kriterlerini başlangıç ayarlarına sıfırlamak istediğinize emin misiniz?')) {
       setSporpuanRules(SPORPUAN_RULES);
+      persistRules(SPORPUAN_RULES);
       showToast('Puan kriterleri başarıyla varsayılan ayarlara sıfırlandı.');
     }
   };
@@ -339,7 +426,9 @@ export const SporpuanSporcuDegerlendirmeView: React.FC<SporcuDegerlendirmeViewPr
       source: newRuleSource
     };
 
-    setSporpuanRules([...sporpuanRules, newRule]);
+    const nextRules = [...sporpuanRules, newRule];
+    setSporpuanRules(nextRules);
+    persistRules(nextRules);
     setShowAddRuleModal(false);
     setNewRuleName('');
     showToast(`Yeni kural "${newRule.ruleName}" puan matrisine başarıyla eklendi!`);
@@ -351,7 +440,11 @@ export const SporpuanSporcuDegerlendirmeView: React.FC<SporcuDegerlendirmeViewPr
       return;
     }
     if (window.confirm('Bu puanlama kuralını matristen silmek istediğinize emin misiniz?')) {
-      setSporpuanRules(prev => prev.filter(r => r.id !== ruleId));
+      setSporpuanRules(prev => {
+        const next = prev.filter(r => r.id !== ruleId);
+        persistRules(next);
+        return next;
+      });
       showToast('Kriter başarıyla matristen kaldırıldı.');
     }
   };
@@ -2902,7 +2995,11 @@ export const SporpuanSporcuDegerlendirmeView: React.FC<SporcuDegerlendirmeViewPr
                             disabled={!isSuperAdmin}
                             onChange={(e) => {
                               const updatedName = e.target.value;
-                              setSporpuanRules(prev => prev.map(r => r.id === rule.id ? { ...r, ruleName: updatedName } : r));
+                              setSporpuanRules(prev => {
+                                const next = prev.map(r => r.id === rule.id ? { ...r, ruleName: updatedName } : r);
+                                persistRules(next);
+                                return next;
+                              });
                             }}
                             className={`w-full bg-transparent border-b border-transparent font-bold outline-none pb-0.5 ${
                               isSuperAdmin ? 'hover:border-slate-300 focus:border-blue-500 text-slate-800' : 'text-slate-500 cursor-not-allowed'

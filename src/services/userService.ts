@@ -80,36 +80,59 @@ export async function persistUserToFirestore(
   const hasActivePackage = isAdmin ? true : Boolean(customProfile?.hasActivePackage);
 
   const cleanUid = uid.replace(/[^a-zA-Z0-9_\-]/g, '-').slice(0, 128);
+  const safeAvatarUrl =
+    photoURL && !photoURL.startsWith('data:') && photoURL.trim().length <= 500
+      ? photoURL.trim()
+      : null;
+  const safePhone = (user.phoneNumber || customProfile?.phone || '+90 532 000 00 00').slice(0, 32);
+  const lastLoginStr =
+    new Date().toLocaleDateString('tr-TR') +
+    ' ' +
+    new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
 
   // 1. Save or Update in /googleUsers/{uid} (Admin panel yetkilendirme listesi)
   try {
+    const { updateDoc } = await import('firebase/firestore');
     const googleUserDocRef = doc(db, 'googleUsers', cleanUid);
-    await setDoc(
-      googleUserDocRef,
-      {
+    const existingGoogleSnap = await getDoc(googleUserDocRef);
+
+    if (!existingGoogleSnap.exists()) {
+      await setDoc(googleUserDocRef, {
         id: cleanUid,
         uid: cleanUid,
         name: displayName.slice(0, 120),
         email: email.slice(0, 160),
-        avatarUrl: photoURL ? photoURL.slice(0, 500) : null,
+        avatarUrl: safeAvatarUrl,
         clubName: clubName.slice(0, 140),
-        phone: (user.phoneNumber || customProfile?.phone || '+90 532 000 00 00').slice(0, 32),
+        phone: safePhone,
         assignedPlan: isAdmin ? 'Pro Akademi & Çoklu Şube' : 'Paket Seçilmedi',
         allowedPages: isAdmin
           ? ['anasayfa', 'sporcular', 'gruplar', 'egitmenler', 'yoklama', 'sporcu-karnesi', 'on-muhasebe', 'paketler', 'yetkilendirmeler']
           : ['paketler'],
         isFullAccess: isAdmin,
-        lastLoginAt: new Date().toLocaleDateString('tr-TR') + ' ' + new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
+        firstLoginAt: lastLoginStr,
+        lastLoginAt: lastLoginStr,
         updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+      });
+    } else {
+      await updateDoc(googleUserDocRef, {
+        name: displayName.slice(0, 120),
+        email: email.slice(0, 160),
+        avatarUrl: safeAvatarUrl,
+        clubName: clubName.slice(0, 140),
+        phone: safePhone,
+        lastLoginAt: lastLoginStr,
+        updatedAt: serverTimestamp(),
+      });
+    }
   } catch (err) {
     console.warn('[Firestore] googleUsers sync failed, continuing:', err);
   }
 
   // 2. Save public profile to /users/{uid}
+  let userDocExists = false;
   try {
+    const { updateDoc } = await import('firebase/firestore');
     const userDocRef = doc(db, 'users', cleanUid);
     const existingSnap = await getDoc(userDocRef);
     const mappedRole = isAdmin ? 'kulup_yoneticisi' : 'sporcu';
@@ -124,40 +147,42 @@ export async function persistUserToFirestore(
         updatedAt: serverTimestamp(),
       });
     } else {
-      const existingData = existingSnap.data();
-      await setDoc(
-        userDocRef,
-        {
-          uid: cleanUid,
-          displayName: displayName.slice(0, 100),
-          clubName: clubName.slice(0, 140),
-          role: existingData?.role || mappedRole,
-          createdAt: existingData?.createdAt || serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+      await updateDoc(userDocRef, {
+        displayName: displayName.slice(0, 100),
+        clubName: clubName.slice(0, 140),
+        updatedAt: serverTimestamp(),
+      });
     }
+    userDocExists = true;
   } catch (err) {
     console.warn('[Firestore] /users public profile sync failed:', err);
   }
 
-  // 3. Save private info to /users/{uid}/private/info
-  try {
-    const privateInfoRef = doc(db, 'users', cleanUid, 'private', 'info');
-    await setDoc(
-      privateInfoRef,
-      {
-        ownerId: cleanUid,
-        email: email.slice(0, 160),
-        phone: (user.phoneNumber || customProfile?.phone || '+90 532 000 00 00').slice(0, 32),
-        kvkkConsentAccepted: true,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
-  } catch (err) {
-    console.warn('[Firestore] /users private info sync failed:', err);
+  // 3. Save private info to /users/{uid}/private/info (only if parent /users/{uid} exists)
+  if (userDocExists) {
+    try {
+      const { updateDoc } = await import('firebase/firestore');
+      const privateInfoRef = doc(db, 'users', cleanUid, 'private', 'info');
+      const existingPrivateSnap = await getDoc(privateInfoRef);
+
+      if (!existingPrivateSnap.exists()) {
+        await setDoc(privateInfoRef, {
+          ownerId: cleanUid,
+          email: email.slice(0, 160),
+          phone: safePhone,
+          kvkkConsentAccepted: true,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(privateInfoRef, {
+          email: email.slice(0, 160),
+          phone: safePhone,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (err) {
+      console.warn('[Firestore] /users private info sync failed:', err);
+    }
   }
 
   // 4. Update local registry and stored profile

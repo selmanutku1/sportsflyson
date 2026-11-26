@@ -1,12 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { resolveApiUrl } from '../../../utils/mobileBridge';
 import {
   exportReportPagesToA4Pdf,
   exportContainerToSmartA4Pdf,
+  exportReportPagesToMobileA4Pdf,
+  exportContainerToMobileSmartA4Pdf,
   BatchA4PdfBuilder,
   downloadPageAsJpeg,
   downloadPagesAsJpegZip,
   downloadReportsAsPdfZip,
 } from '../../../utils/pdfExportHelper';
+import {
+  downloadCategorizedKarneExcel,
+  downloadBatchCategorizedKarneExcel,
+} from '../../../utils/sportsFlyLabExcelExport';
 import { SomatotypeRadarAndChart } from '../../charts/SomatotypeRadarAndChart';
 import {
   Activity,
@@ -64,6 +71,7 @@ import {
   BookOpen,
   ArrowUpDown,
   Filter,
+  Smartphone,
 } from 'lucide-react';
 import { SportsFlyVectorMark } from '../../SportsFlyLogo';
 import {
@@ -159,6 +167,7 @@ import {
   saveLabSchoolBrandingToFirestore,
 } from '../../../services/karneFirestoreService';
 import { DosyaHavuzuView } from '../DosyaHavuzuView';
+import { SportsFlyLabTeamSummaryView } from './SportsFlyLabTeamSummaryView';
 import {
   ExcelDataAuditModal,
   auditImportedAthletes,
@@ -552,8 +561,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       });
   }, []);
 
-  // Main module tab: 'studio', 'batch', 'dosya-havuzu', 'archive', or 'company-profile' (Company Profile only in integration entry)
-  const [activeLabTab, setActiveLabTab] = useState<'studio' | 'batch' | 'dosya-havuzu' | 'archive' | 'company-profile'>(
+  // Main module tab: 'studio', 'batch', 'team-summary', 'dosya-havuzu', 'archive', or 'company-profile'
+  const [activeLabTab, setActiveLabTab] = useState<'studio' | 'batch' | 'team-summary' | 'dosya-havuzu' | 'archive' | 'company-profile'>(
     initialTab || 'studio'
   );
 
@@ -703,7 +712,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
   const handleSyncWebhookAthletes = async (silentIfEmpty: boolean = false) => {
     setIsSyncingWebhook(true);
     try {
-      const res = await fetch('/api/webhooks/sportsfly-lab');
+      const res = await fetch(resolveApiUrl('/api/webhooks/sportsfly-lab'));
       if (!res.ok) throw new Error('Webhook uç noktasına ulaşılamadı.');
       const data = await res.json();
       const athletes = (Array.isArray(data?.athletes) ? data.athletes : []).filter(
@@ -747,7 +756,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         });
         if (directRes.ok) {
           const directJson = await directRes.json();
-          const postRes = await fetch('/api/webhooks/sportsfly-lab', {
+          const postRes = await fetch(resolveApiUrl('/api/webhooks/sportsfly-lab'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(directJson),
@@ -767,7 +776,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       }
 
       if (!directSuccess) {
-        const proxyRes = await fetch('/api/webhooks/sportsfly-lab/pull', {
+        const proxyRes = await fetch(resolveApiUrl('/api/webhooks/sportsfly-lab/pull'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sourceUrl: trimmedUrl }),
@@ -799,7 +808,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     setIsSyncingWebhook(true);
     try {
       const parsed = JSON.parse(raw);
-      const res = await fetch('/api/webhooks/sportsfly-lab', {
+      const res = await fetch(resolveApiUrl('/api/webhooks/sportsfly-lab'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(parsed),
@@ -826,7 +835,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
   const handleClearWebhookQueue = async () => {
     setIsSyncingWebhook(true);
     try {
-      await fetch('/api/webhooks/sportsfly-lab', { method: 'DELETE' });
+      await fetch(resolveApiUrl('/api/webhooks/sportsfly-lab'), { method: 'DELETE' });
       setWebhookReceivedCount(0);
       setLastWebhookSyncAt(null);
       setReports((prev) => {
@@ -864,7 +873,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
     let es: EventSource | null = null;
     try {
-      es = new EventSource('/api/webhooks/sportsfly-lab/stream');
+      es = new EventSource(resolveApiUrl('/api/webhooks/sportsfly-lab/stream'));
       es.addEventListener('webhook_athletes', (event: MessageEvent) => {
         try {
           const parsed = JSON.parse(event.data || '{}');
@@ -941,6 +950,8 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
   const [pdfZoom, setPdfZoom] = useState<number>(100);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState<boolean>(false);
   const [pdfProgressPage, setPdfProgressPage] = useState<number | null>(null);
+  const [isGeneratingMobilePDF, setIsGeneratingMobilePDF] = useState<boolean>(false);
+  const [mobilePdfProgressPage, setMobilePdfProgressPage] = useState<number | null>(null);
 
   // JPEG indirme ve sayfa seçimi modalı state'leri
   const [showJpegModal, setShowJpegModal] = useState<boolean>(false);
@@ -964,7 +975,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
   const [hideSectionNumbers, setHideSectionNumbers] = useState<boolean>(true);
   const [hideScaleLegend, setHideScaleLegend] = useState<boolean>(true);
   const [showBodyMapInfographic, setShowBodyMapInfographic] = useState<boolean>(true);
-  const [showMeasurementDatesBar, setShowMeasurementDatesBar] = useState<boolean>(true);
+  const [showMeasurementDatesBar, setShowMeasurementDatesBar] = useState<boolean>(false);
   const [showTrainingPlanFrequency, setShowTrainingPlanFrequency] = useState<boolean>(() => {
     try {
       return localStorage.getItem('sportsfly_lab_show_training_freq_v1') === 'true';
@@ -1225,7 +1236,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         : activePaletteObj.secondaryHex;
 
   const [openHeaderMenu, setOpenHeaderMenu] = useState<
-    'excel' | 'karne' | 'panels' | 'export' | 'report-download' | 'batchSamples' | 'templates' | 'clubColors' | null
+    'excel' | 'karne' | 'panels' | 'export' | 'report-download' | 'batchSamples' | 'templates' | 'clubColors' | 'pages' | null
   >(null);
   const [isAnalyzingAI, setIsAnalyzingAI] = useState<boolean>(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -2152,7 +2163,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
         reader.readAsDataURL(file);
         const dataUrl = await base64Promise;
 
-        const resp = await fetch('/api/ai/ocr-athlete-sheet', {
+        const resp = await fetch(resolveApiUrl('/api/ai/ocr-athlete-sheet'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -3109,6 +3120,101 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     }
   };
 
+  // Dedicated WhatsApp & Mobile-Friendly Lightweight JPEG PDF Download (separate from standard PNG PDF)
+  const handleDownloadMobilePDF = async () => {
+    if (isGeneratingMobilePDF || isGeneratingPDF) return;
+    setIsGeneratingMobilePDF(true);
+    setMobilePdfProgressPage(1);
+
+    const previousMode = viewMode;
+    const previousZoom = pdfZoom;
+    const previousTab = activeLabTab;
+
+    if (activeLabTab !== 'studio' || viewMode !== 'all' || pdfZoom !== 100) {
+      setActiveLabTab('studio');
+      setViewMode('all');
+      setPdfZoom(100);
+      setIsPdfPreviewMode(true);
+      await new Promise((r) => setTimeout(r, 450));
+    } else {
+      await new Promise((r) => setTimeout(r, 120));
+    }
+
+    const formatBytes = (bytes: number) =>
+      bytes >= 1024 * 1024
+        ? `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+        : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+    try {
+      let pageIds: string[] = [];
+      let filePrefix = 'SportsFly_Mobil';
+
+      if (reportCardFormat === 'parent-athlete') {
+        pageIds = ['sportsfly-lab-parent-athlete-page'];
+        filePrefix = 'SportsFly_Veli_Mobil';
+      } else if (reportCardFormat === 'coach-club') {
+        pageIds = ['sportsfly-lab-coach-club-page'];
+        filePrefix = 'SportsFly_Antrenor_Mobil';
+      } else {
+        const candidatePageIds = [
+          'sportsfly-lab-page-bodymap',
+          'sportsfly-lab-page-1',
+          'sportsfly-lab-page-2',
+          'sportsfly-lab-page-3',
+          'sportsfly-lab-page-5',
+        ];
+        pageIds = candidatePageIds.filter((id) => document.getElementById(id) !== null);
+
+        if (pageIds.length === 0) {
+          await new Promise((r) => setTimeout(r, 350));
+          pageIds = candidatePageIds.filter((id) => document.getElementById(id) !== null);
+        }
+
+        if (pageIds.length === 0) {
+          const printArea = document.getElementById('sportsfly-lab-print-area');
+          if (printArea) {
+            const res = await exportContainerToMobileSmartA4Pdf({
+              containerEl: printArea,
+              rawName: currentReport.athleteName,
+              filePrefix: 'SportsFly_Mobil',
+              pixelRatio: 1.75,
+              jpegQuality: 0.86,
+            });
+            notify(
+              `Mobil/WhatsApp PDF indirildi: ${res.fileName} (${formatBytes(res.sizeBytes)}, ${res.pageCount} sayfa)`
+            );
+            return;
+          }
+          throw new Error('Karne sayfaları DOM üzerinde bulunamadı.');
+        }
+      }
+
+      const res = await exportReportPagesToMobileA4Pdf({
+        pageIds,
+        rawName: currentReport.athleteName,
+        filePrefix,
+        pixelRatio: 1.75,
+        jpegQuality: 0.86,
+        onPageProgress: (pageIdx) => setMobilePdfProgressPage(pageIdx),
+      });
+
+      notify(
+        `Mobil/WhatsApp uyumlu hafif PDF indirildi: ${res.fileName} (${formatBytes(res.sizeBytes)}, ${res.pageCount} sayfa)`
+      );
+    } catch (err: any) {
+      console.error('Mobil PDF oluşturma hatası:', err);
+      notify(err?.message || 'Mobil PDF oluşturulurken bir hata meydana geldi.');
+    } finally {
+      setIsGeneratingMobilePDF(false);
+      setMobilePdfProgressPage(null);
+      setViewMode(previousMode);
+      setPdfZoom(previousZoom);
+      if (previousTab !== 'studio') {
+        setActiveLabTab(previousTab);
+      }
+    }
+  };
+
 
   // Trigger clean A4 Print / Browser PDF Output using @media print styles
   const handlePrintA4 = async () => {
@@ -3394,6 +3500,44 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
     } catch (err) {
       console.error(err);
       notify('CSV oluşturulurken bir hata meydana geldi.');
+    }
+  };
+
+  // Download Categorized Karne Excel (.xlsx) mirroring the full downloadable karne layout
+  const handleDownloadCategorizedKarneExcel = () => {
+    try {
+      const peerPool = isIntraGroupComparisonEnabled ? intraGroupComparisonPool : reports;
+      const fileName = downloadCategorizedKarneExcel(currentReport, {
+        peerReports: peerPool,
+      });
+      notify(
+        `${currentReport.athleteName} kategorili karne tablosu 5 sayfalık Excel (.xlsx) olarak indirildi (${fileName}).`
+      );
+    } catch (err) {
+      console.error('Kategorili karne Excel indirme hatası:', err);
+      notify('Kategorili karne Excel dosyası oluşturulurken bir hata meydana geldi.');
+    }
+  };
+
+  // Download Multi-Athlete Categorized Batch Karne Excel (.xlsx)
+  const handleDownloadBatchCategorizedExcel = () => {
+    const targetReports =
+      selectedBatchReports.length > 0 ? selectedBatchReports : batchReports;
+    if (targetReports.length === 0) {
+      notify('Excel indirmek için en az 1 sporcu karnesi seçin.');
+      return;
+    }
+    try {
+      const fileName = downloadBatchCategorizedKarneExcel(
+        targetReports,
+        batchGroupTitle || `${targetReports.length} Sporcu`
+      );
+      notify(
+        `${targetReports.length} sporcunun kategorili karne tablosu Excel (.xlsx) olarak indirildi (${fileName}).`
+      );
+    } catch (err) {
+      console.error('Toplu kategorili Excel indirme hatası:', err);
+      notify('Toplu kategorili Excel dosyası oluşturulurken bir hata meydana geldi.');
     }
   };
 
@@ -7739,89 +7883,37 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
           />
         )}
 
-        {/* ROW 1: Brand Title + Primary Workspace Mode Tabs + Grouped PDF/Print Menu */}
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
-          {/* Left: Brand & Active School Summary (Dynamic: Integration Company Identity vs SportsFly LAB Default) */}
-          {isIntegrationEntry && activeCompanyProfile ? (
-            <div className="flex items-center gap-3 min-w-0">
-              <div
+        {/* ROW 1: Workspace Mode Tabs + Primary Export Dropdown & Main Download CTA */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          {/* Left: Integration Company Badge (when applicable) + Primary Module Section Tabs */}
+          <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+            {isIntegrationEntry && activeCompanyProfile && (
+              <button
+                type="button"
                 onClick={() => setActiveLabTab(activeLabTab === 'company-profile' ? 'studio' : 'company-profile')}
-                className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 p-1 shadow-xs cursor-pointer hover:border-indigo-400 transition-colors overflow-hidden group"
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 transition-colors cursor-pointer shrink-0"
                 title="Firma Profilini Görüntüle / Kapat"
               >
-                {effectiveAnalysisFirmLogo ? (
-                  <img
-                    src={effectiveAnalysisFirmLogo}
-                    alt={activeCompanyProfile.companyName}
-                    className="w-full h-full object-contain"
-                  />
-                ) : activeCompanyProfile.companyType === 'spor_kulubu' ? (
-                  <Trophy className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600 dark:text-emerald-400" />
-                ) : (
-                  <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-600 dark:text-indigo-400" />
-                )}
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h1 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white tracking-tight leading-snug truncate">
-                    {activeCompanyProfile.companyName}
-                  </h1>
-                  <span
-                    className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
-                      activeCompanyProfile.companyType === 'spor_kulubu'
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                        : activeCompanyProfile.companyType === 'spor_okulu'
-                        ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300 border-sky-200 dark:border-sky-800'
-                        : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
-                    }`}
-                  >
-                    {activeCompanyProfile.companyType === 'spor_kulubu'
-                      ? 'Spor Kulübü'
-                      : activeCompanyProfile.companyType === 'spor_okulu'
-                      ? 'Spor Okulu'
-                      : 'Analiz Firması'}
-                  </span>
+                <div className="w-6 h-6 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center p-0.5 overflow-hidden shrink-0">
+                  {effectiveAnalysisFirmLogo ? (
+                    <img
+                      src={effectiveAnalysisFirmLogo}
+                      alt={activeCompanyProfile.companyName}
+                      className="w-full h-full object-contain"
+                    />
+                  ) : activeCompanyProfile.companyType === 'spor_kulubu' ? (
+                    <Trophy className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <Activity className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  )}
                 </div>
-                <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  <span className="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800/60">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Doğrulanmış Entegrasyon
-                  </span>
-                  <span className="text-slate-300 dark:text-slate-600 hidden sm:inline">·</span>
-                  <span className="text-slate-500 dark:text-slate-400 hidden sm:inline font-medium">
-                    SportsFly LAB Performans Altyapısı
-                  </span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-              <SportsFlyVectorMark className="w-9 h-9 sm:w-10 sm:h-10 shrink-0" />
-              <div className="min-w-0">
-                <h1 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white tracking-tight leading-snug truncate">
-                  SportsFly Lab — Atletik Performans &amp; Beden Kompozisyonu Karnesi
-                </h1>
-                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  <span className="font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[180px] sm:max-w-xs">
-                    {effectiveClubName}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="truncate max-w-[140px] sm:max-w-[160px]">{effectiveBranchName}</span>
-                  <span aria-hidden="true">·</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowBrandingSettings((prev) => !prev)}
-                    className="text-sky-600 dark:text-sky-400 hover:underline font-bold inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <span>{showBrandingSettings ? 'Okul Ayarlarını Gizle' : 'Okul & Logo Ayarları'}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+                <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate max-w-[160px]">
+                  {activeCompanyProfile.companyName}
+                </span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" title="Doğrulanmış Entegrasyon" />
+              </button>
+            )}
 
-          {/* Right: Workspace Mode Tabs + Primary Action Buttons + Logout */}
-          <div className="flex flex-wrap items-center justify-between xl:justify-end gap-2 shrink-0">
             {/* Primary Module Section Tabs */}
             <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/90 rounded-xl border border-slate-200/80 dark:border-slate-700 overflow-x-auto scrollbar-none max-w-full">
               <button
@@ -7860,6 +7952,20 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
               <button
                 type="button"
+                onClick={() => setActiveLabTab('team-summary')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                  activeLabTab === 'team-summary'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="Takım ve kulüp bazlı yönetici özet raporunu görüntüleyin ve PDF/Excel indirin"
+              >
+                <BarChart3 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Yönetici Özeti</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setActiveLabTab('dosya-havuzu')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
                   activeLabTab === 'dosya-havuzu'
@@ -7872,7 +7978,6 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 <span>Dosya Havuzu</span>
               </button>
 
-              {/* Arşiv Sekmesi (Yalnızca Süper Admin veya kayıtlı arşiv raporları varsa) */}
               {(isSuperAdmin || (!isIntegrationEntry && archivedReports.length > 0)) && (
                 <button
                   type="button"
@@ -7892,7 +7997,6 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 </button>
               )}
 
-              {/* FİRMA PROFİLİ BUTONU */}
               {activeCompanyProfile && (
                 <button
                   type="button"
@@ -7909,131 +8013,233 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 </button>
               )}
             </div>
+          </div>
 
-            {/* Grup İçi Kıyaslama Toggle (En Üst Kontrol Alanı — Sıralama Yazmaz) */}
+          {/* Right: Clean Consolidated Export Dropdown + Primary PDF Download CTA */}
+          <div className="flex items-center gap-2 shrink-0 ml-auto">
+            {/* Grouped Export, Print, Preview & Guide Dropdown */}
+            <div className={`relative ${openHeaderMenu === 'export' ? 'z-[9995]' : ''}`}>
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenHeaderMenu((prev) => (prev === 'export' ? null : 'export'))
+                }
+                className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                  openHeaderMenu === 'export' || isPdfPreviewMode
+                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200'
+                    : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100'
+                }`}
+                title="Excel, JPEG, A4 Yazdır, PDF Önizleme ve Karne Kılavuzu seçenekleri"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Dışa Aktar &amp; Önizle</span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              </button>
+
+              {openHeaderMenu === 'export' && (
+                <div className="absolute right-0 top-full mt-1.5 w-[min(19.5rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    İndirme &amp; Çıktı Formatları
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      void handleDownloadPDF();
+                    }}
+                    disabled={isGeneratingPDF}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <FileDown className="w-4 h-4 text-sky-600 shrink-0" />
+                    <div>
+                      <div>Tüm Karneyi PDF İndir (.pdf)</div>
+                      <div className="text-[10px] font-normal text-slate-500">
+                        Yüksek çözünürlüklü tam A4 sporcu karnesi
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      void handleDownloadMobilePDF();
+                    }}
+                    disabled={isGeneratingMobilePDF || isGeneratingPDF}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-emerald-900 dark:text-emerald-200 bg-emerald-50/70 dark:bg-emerald-950/35 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 flex items-center gap-2.5 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <Smartphone className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <div>Mobil / WhatsApp PDF İndir (Hafif .pdf)</div>
+                      <div className="text-[10px] font-normal text-emerald-700/90 dark:text-emerald-300/80">
+                        JPEG sıkıştırmalı, düşük boyutlu, temiz dosya adı
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      handleDownloadCategorizedKarneExcel();
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-emerald-900 dark:text-emerald-200 bg-emerald-50/70 dark:bg-emerald-950/35 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <div>Kategorili Karne Excel İndir (.xlsx)</div>
+                      <div className="text-[10px] font-normal text-emerald-700/90 dark:text-emerald-300/80">
+                        Kimlik, Veli/PHV, Antropometri, Motor &amp; Uzman (5 Sayfa)
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      handleOpenJpegModal();
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                  >
+                    <ImageIcon className="w-4 h-4 text-teal-600 shrink-0" />
+                    <div>
+                      <div>JPEG Görsel İndir (Tekil / ZIP)</div>
+                      <div className="text-[10px] font-normal text-slate-500">
+                        Sayfaları tek tek veya toplu yüksek kalite JPEG al
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      handlePrintA4();
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4 text-slate-600 dark:text-slate-300 shrink-0" />
+                    <div>
+                      <div>A4 Yazdır</div>
+                      <div className="text-[10px] font-normal text-slate-500">
+                        Tarayıcı yazdırma diyaloğu ile doğrudan çıktı al
+                      </div>
+                    </div>
+                  </button>
+
+                  <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                  <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    İnceleme &amp; Kılavuz
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      handleTogglePdfPreview();
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Eye className="w-4 h-4 text-rose-600 shrink-0" />
+                      <div>
+                        <div>PDF Önizleme Modu</div>
+                        <div className="text-[10px] font-normal text-slate-500">
+                          Gerçek A4 baskı mizanpajında görüntüle
+                        </div>
+                      </div>
+                    </div>
+                    <span
+                      className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded ${
+                        isPdfPreviewMode
+                          ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                          : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                      }`}
+                    >
+                      {isPdfPreviewMode ? 'Açık' : 'Kapalı'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      setShowKarneGuideModal(true);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                  >
+                    <BookOpen className="w-4 h-4 text-amber-500 shrink-0" />
+                    <div>
+                      <div>Karne Kılavuzu &amp; Terimler</div>
+                      <div className="text-[10px] font-normal text-slate-500">
+                        Ölçüm protokolleri ve başlık açıklamaları
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Separate CTA: Mobile / WhatsApp Lightweight JPEG PDF */}
             <button
               type="button"
-              onClick={handleToggleIntraGroupComparison}
-              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 border transition-all cursor-pointer whitespace-nowrap ${
-                isIntraGroupComparisonEnabled
-                  ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs ring-2 ring-indigo-300/50'
-                  : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
-              }`}
-              title="Aktif olduğunda grup ortalaması yalnızca seçili/yüklü toplu karne grubu kendi içinde hesaplanır (karnede sıralama gösterilmez)"
+              onClick={handleDownloadMobilePDF}
+              disabled={isGeneratingMobilePDF || isGeneratingPDF}
+              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap shadow-xs"
+              title="JPEG sıkıştırmalı, düşük boyutlu ve Türkçe karaktersiz dosya adıyla WhatsApp ve telefonlarda anında açılan PDF indirin"
             >
-              <Users className={`w-3.5 h-3.5 shrink-0 ${isIntraGroupComparisonEnabled ? 'text-white' : 'text-indigo-600'}`} />
-              <span>Grup İçi Kıyaslama</span>
-              <span
-                className={`px-1.5 py-0.5 rounded text-[10px] font-black tabular-nums ${
-                  isIntraGroupComparisonEnabled
-                    ? 'bg-white/20 text-white'
-                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                }`}
-              >
-                {isIntraGroupComparisonEnabled ? `Açık (${intraGroupComparisonPool.length})` : 'Kapalı'}
+              {isGeneratingMobilePDF ? (
+                <div className="w-3.5 h-3.5 border-2 border-emerald-200 border-t-white rounded-full animate-spin shrink-0" />
+              ) : (
+                <Smartphone className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span>
+                {isGeneratingMobilePDF
+                  ? `Mobil (${mobilePdfProgressPage || 1}/5)...`
+                  : 'Mobil PDF'}
               </span>
             </button>
 
-            {/* Primary Action Buttons: PDF Preview + A4 Print + Download PDF + Logout */}
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <button
-                type="button"
-                onClick={handleTogglePdfPreview}
-                className={`px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer whitespace-nowrap ${
-                  isPdfPreviewMode
-                    ? 'bg-rose-600 hover:bg-rose-700 text-white ring-2 ring-rose-400/40'
-                    : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100'
-                }`}
-                title="Sporcu karnesini web üzerinde gerçek A4 baskı formatında inceleyin"
-              >
-                <Eye className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${isPdfPreviewMode ? 'text-white' : 'text-rose-600'} shrink-0`} />
-                <span className="hidden sm:inline">{isPdfPreviewMode ? 'PDF Görünümünü Kapat' : 'PDF Olarak Görüntüle'}</span>
-                <span className="sm:hidden">{isPdfPreviewMode ? 'PDF Kapat' : 'PDF'}</span>
-                {isPdfPreviewMode && (
-                  <span className="px-1.5 py-0.5 rounded text-[9px] font-sans tabular-nums font-black bg-white/20 text-white hidden sm:inline">
-                    Açık
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowKarneGuideModal(true)}
-                className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer whitespace-nowrap"
-                title="SportsFly Lab karne kılavuzu, terimler sözlüğü ve başlık açıklamaları"
-              >
-                <BookOpen className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-950 shrink-0" />
-                <span className="hidden sm:inline">Karne Kılavuzu</span>
-                <span className="sm:hidden">Kılavuz</span>
-              </button>
-
-
-              <button
-                type="button"
-                onClick={handlePrintA4}
-                className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer whitespace-nowrap"
-                title="A4 formatında yazdırın veya tarayıcıdan PDF olarak kaydedin"
-              >
-                <Printer className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 shrink-0" />
-                <span className="hidden sm:inline">A4 Yazdır</span>
-                <span className="sm:hidden">Yazdır</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleOpenJpegModal()}
-                className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer whitespace-nowrap"
-                title="Karne sayfalarını tek tek seçerek veya tümünü birden yüksek çözünürlüklü JPEG olarak indirin"
-              >
-                <ImageIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-200 shrink-0" />
-                <span className="hidden sm:inline">JPEG İndir</span>
-                <span className="sm:hidden">JPEG</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDownloadPDF}
-                disabled={isGeneratingPDF}
-                className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white text-xs font-extrabold flex items-center gap-1.5 sm:gap-2 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap shadow-xs"
-                title="5 sayfalık sporcu karnesinin tamamını yüksek çözünürlüklü A4 PDF olarak indirin"
-              >
-                {isGeneratingPDF ? (
-                  <div className="w-3.5 h-3.5 sm:w-4 sm:h-4 border-2 border-slate-400 border-t-white rounded-full animate-spin shrink-0" />
-                ) : (
-                  <FileDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400 dark:text-white shrink-0" />
-                )}
-                <span>
-                  {isGeneratingPDF
-                    ? `İndiriliyor (${pdfProgressPage || 1}/5)...`
-                    : (
-                      <>
-                        <span className="hidden sm:inline">Tüm Karneyi İndir</span>
-                        <span className="sm:hidden">İndir</span>
-                      </>
-                    )}
-                </span>
-              </button>
-
-              {/* Entegrasyon Oturumundan Çıkış Yap Butonu (SportsFly Lab Başlığına Entegre) */}
-              {isIntegrationEntry && onLogout && (
-                <button
-                  type="button"
-                  onClick={onLogout}
-                  className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-2xs border border-red-200/60 dark:border-red-900/40"
-                  title="Entegrasyon Oturumunu Kapat"
-                >
-                  <LogOut className="w-3.5 h-3.5 shrink-0" />
-                  <span className="hidden sm:inline">Çıkış Yap</span>
-                </button>
+            {/* Primary CTA: Download Full Karne PDF (unchanged standard export) */}
+            <button
+              type="button"
+              onClick={handleDownloadPDF}
+              disabled={isGeneratingPDF || isGeneratingMobilePDF}
+              className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap shadow-xs"
+              title="Sporcu karnesinin tamamını yüksek çözünürlüklü A4 PDF olarak indirin"
+            >
+              {isGeneratingPDF ? (
+                <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-white rounded-full animate-spin shrink-0" />
+              ) : (
+                <FileDown className="w-3.5 h-3.5 text-sky-400 dark:text-white shrink-0" />
               )}
-            </div>
+              <span>
+                {isGeneratingPDF
+                  ? `İndiriliyor (${pdfProgressPage || 1}/5)...`
+                  : 'PDF İndir'}
+              </span>
+            </button>
+
+            {isIntegrationEntry && onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                className="px-2.5 py-2 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap border border-red-200/60 dark:border-red-900/40"
+                title="Entegrasyon Oturumunu Kapat"
+              >
+                <LogOut className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Çıkış Yap</span>
+              </button>
+            )}
           </div>
         </div>
 
-        {/* ROW 2: Athlete Selector + Action Dropdowns */}
-        <div className="mt-3 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-3 flex flex-col xl:flex-row xl:items-center justify-between gap-3 shadow-2xs">
-          {/* Left: Active Athlete Selector + Action Dropdowns */}
-          <div className="flex flex-wrap items-center gap-2">
+        {/* ROW 2: Athlete Selector + 3 Consolidated Control Dropdowns + Compact Page Switcher */}
+        <div className="mt-2.5 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+          {/* Left: Athlete Selector + 3 Clean Grouped Dropdowns */}
+          <div className="flex flex-wrap items-center gap-2 min-w-0">
             {/* Athlete Selector */}
             <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 min-w-0 max-w-full">
               <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -8043,7 +8249,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               <select
                 value={selectedReportId}
                 onChange={(e) => setSelectedReportId(e.target.value)}
-                className="min-w-0 max-w-[150px] xs:max-w-[190px] sm:max-w-[260px] bg-transparent text-xs font-extrabold text-slate-900 dark:text-white focus:outline-none truncate cursor-pointer"
+                className="min-w-0 max-w-[160px] sm:max-w-[230px] bg-transparent text-xs font-extrabold text-slate-900 dark:text-white focus:outline-none truncate cursor-pointer"
               >
                 {reports.map((rep) => (
                   <option key={rep.id} value={rep.id}>
@@ -8053,162 +8259,28 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
               </select>
             </div>
 
-            {/* DROPDOWN 1: Excel & Veri İşlemleri */}
+            {/* DROPDOWN 1: Veri & Karne (Combines Karne İşlemleri + Excel & Veri İşlemleri) */}
             <div className={`relative ${openHeaderMenu === 'excel' ? 'z-[9995]' : ''}`}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setOpenHeaderMenu((prev) => (prev === 'excel' ? null : 'excel'))
-                  }
-                  className={`px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                    openHeaderMenu === 'excel'
-                      ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200'
-                      : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
-                  }`}
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span className="hidden sm:inline">Excel &amp; Veri İşlemleri</span>
-                  <span className="sm:hidden">Excel</span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                </button>
-
-                {openHeaderMenu === 'excel' && (
-                  <div className="absolute left-0 top-full mt-1.5 w-[min(20rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
-                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      Excel Yükleme &amp; Şablon İşlemleri
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenHeaderMenu(null);
-                        fileInputRef.current?.click();
-                      }}
-                      className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                    >
-                      <Upload className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <div>
-                        <div>Excel Verisi Yükle (.xlsx / .csv)</div>
-                        <div className="text-[10px] font-normal text-slate-500">
-                          Mevcut karne içeriğine uygun parametre veya çoklu sporcu dosyası yükle
-                        </div>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenHeaderMenu(null);
-                        fileInputRef.current?.click();
-                      }}
-                      className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                    >
-                      <Camera className="w-4 h-4 text-sky-600 shrink-0" />
-                      <div>
-                        <div>Ekran Görüntüsü Yükle (PNG / JPEG)</div>
-                        <div className="text-[10px] font-normal text-slate-500">
-                          Excel tablosu ekran görüntüsünü yapay zeka ile tara ve aktar
-                        </div>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenHeaderMenu(null);
-                        setActiveLabTab('batch');
-                      }}
-                      className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                    >
-                      <Users className="w-4 h-4 text-violet-600 shrink-0" />
-                      <div>
-                        <div>Toplu Karne Oluşturma Alanı</div>
-                        <div className="text-[10px] font-normal text-slate-500">
-                          Çoklu sporcu tablosu, sütun eşleştirme ve toplu PDF üretimi
-                        </div>
-                      </div>
-                    </button>
-
-                    <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenHeaderMenu(null);
-                        downloadSportsFlyLabExcelTemplate(currentReport);
-                      }}
-                      className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                    >
-                      <Download className="w-4 h-4 text-sky-600 shrink-0" />
-                      <div>
-                        <div>Örnek Excel Şablonu İndir (.xlsx)</div>
-                        <div className="text-[10px] font-normal text-slate-500">
-                          Mevcut karne parametreleri + Toplu sporcu listesi (3 Sayfa)
-                        </div>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenHeaderMenu(null);
-                        downloadBatchSportsFlyLabExcelTemplate(currentReport);
-                      }}
-                      className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                    >
-                      <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <div>
-                        <div>Toplu Sporcu Excel Şablonu İndir (.xlsx)</div>
-                        <div className="text-[10px] font-normal text-slate-500">
-                          Her satırda 1 sporcunun tüm karne verileri (Çoklu liste)
-                        </div>
-                      </div>
-                    </button>
-
-                    <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenHeaderMenu(null);
-                        setActiveLabTab('batch');
-                        handleLoadSampleBatchData();
-                      }}
-                      className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
-                    >
-                      <RefreshCw className="w-4 h-4 text-violet-600 shrink-0" />
-                      <div>
-                        <div>Örnek Sporcu Veri Seti Yükle (6 Sporcu)</div>
-                        <div className="text-[10px] font-normal text-slate-500">
-                          Farklı branşlardan hazır karne verileri ile hemen test et
-                        </div>
-                      </div>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-            {/* DROPDOWN 2: Karne İşlemleri (Yeni Karne, Düzenle, Arşive Kaydet) */}
-            <div className={`relative ${openHeaderMenu === 'karne' ? 'z-[9995]' : ''}`}>
               <button
                 type="button"
                 onClick={() =>
-                  setOpenHeaderMenu((prev) => (prev === 'karne' ? null : 'karne'))
+                  setOpenHeaderMenu((prev) => (prev === 'excel' ? null : 'excel'))
                 }
-                className={`px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                  openHeaderMenu === 'karne'
-                    ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/50 text-sky-900 dark:text-sky-200'
+                className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                  openHeaderMenu === 'excel'
+                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200'
                     : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
                 }`}
               >
-                <Edit3 className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                <span>Karne İşlemleri</span>
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Veri &amp; Karne</span>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               </button>
 
-              {openHeaderMenu === 'karne' && (
-                <div className="absolute left-0 top-full mt-1.5 w-[min(18rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
+              {openHeaderMenu === 'excel' && (
+                <div className="absolute left-0 top-full mt-1.5 w-[min(21rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
                   <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Sporcu &amp; Karne Yönetimi
+                    Karne Yönetimi
                   </div>
                   <button
                     type="button"
@@ -8237,9 +8309,9 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                   >
                     <Edit3 className="w-4 h-4 text-blue-600 shrink-0" />
                     <div>
-                      <div>Verileri Düzenle</div>
+                      <div>Ölçüm Verilerini Düzenle</div>
                       <div className="text-[10px] font-normal text-slate-500">
-                        Aktif sporcunun ölçümlerini güncelle
+                        Aktif sporcunun test değerlerini güncelle
                       </div>
                     </div>
                   </button>
@@ -8260,33 +8332,151 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       </div>
                     </div>
                   </button>
+
+                  <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                  <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Excel Yükleme &amp; Şablonlar
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      fileInputRef.current?.click();
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                  >
+                    <Upload className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <div>Excel Verisi Yükle (.xlsx / .csv)</div>
+                      <div className="text-[10px] font-normal text-slate-500">
+                        Tekli veya toplu sporcu ölçüm dosyası aktar
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      fileInputRef.current?.click();
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                  >
+                    <Camera className="w-4 h-4 text-sky-600 shrink-0" />
+                    <div>
+                      <div>Ekran Görüntüsü Yükle (PNG / JPEG)</div>
+                      <div className="text-[10px] font-normal text-slate-500">
+                        Tablo görüntüsünü yapay zeka ile tara ve aktar
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      handleDownloadCategorizedKarneExcel();
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-extrabold text-emerald-900 dark:text-emerald-200 bg-emerald-50/80 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 border border-emerald-200/80 dark:border-emerald-800/70 flex items-center gap-2.5 transition-colors cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <div>
+                      <div>Kategorili Karne Excel İndir (.xlsx)</div>
+                      <div className="text-[10px] font-medium text-emerald-700/90 dark:text-emerald-300/80">
+                        Mevcut karne yerleşimi (5 Kategorili Sayfa)
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      downloadSportsFlyLabExcelTemplate(currentReport);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 text-sky-600 shrink-0" />
+                    <div>
+                      <div>Örnek Excel Şablonu İndir (.xlsx)</div>
+                      <div className="text-[10px] font-normal text-slate-500">
+                        Parametre şablonu + Toplu sporcu listesi
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      downloadBatchSportsFlyLabExcelTemplate(currentReport);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                  >
+                    <Users className="w-4 h-4 text-violet-600 shrink-0" />
+                    <div>
+                      <div>Toplu Sporcu Excel Şablonu (.xlsx)</div>
+                      <div className="text-[10px] font-normal text-slate-500">
+                        Her satırda 1 sporcu (Çoklu karne şablonu)
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenHeaderMenu(null);
+                      setActiveLabTab('batch');
+                      handleLoadSampleBatchData();
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className="w-4 h-4 text-violet-600 shrink-0" />
+                    <div>
+                      <div>Örnek Sporcu Seti Yükle (6 Sporcu)</div>
+                      <div className="text-[10px] font-normal text-slate-500">
+                        Hazır veri setiyle toplu karneyi hemen test et
+                      </div>
+                    </div>
+                  </button>
                 </div>
               )}
             </div>
 
-            {/* DROPDOWN 3: Karne Tasarım Şablonu Seçici */}
+            {/* DROPDOWN 2: Tasarım & Tema (Combines PDF Şablonu + Kulüp Rengi + Okul/Logo + Vücut Haritası) */}
             <div className={`relative ${openHeaderMenu === 'templates' ? 'z-[9995]' : ''}`}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setOpenHeaderMenu((prev) => (prev === 'templates' ? null : 'templates'))
-                  }
-                  className={`px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                    openHeaderMenu === 'templates'
-                      ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200'
-                      : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
-                  }`}
-                >
-                  <FileText className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span className="hidden sm:inline">PDF Şablonu: {activeTemplate.name}</span>
-                  <span className="sm:hidden">Şablon</span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenHeaderMenu((prev) => (prev === 'templates' ? null : 'templates'))
+                }
+                className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                  openHeaderMenu === 'templates' || showBrandingSettings
+                    ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200'
+                    : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
+                }`}
+              >
+                <span className="flex items-center -space-x-1 shrink-0">
+                  <span
+                    className="w-3 h-3 rounded-full border border-white shadow-2xs inline-block"
+                    style={{ backgroundColor: effectivePrimaryHex }}
+                  />
+                  <span
+                    className="w-3 h-3 rounded-full border border-white shadow-2xs inline-block"
+                    style={{ backgroundColor: effectiveSecondaryHex }}
+                  />
+                </span>
+                <span>Tasarım &amp; Tema</span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              </button>
 
-                {openHeaderMenu === 'templates' && (
-                  <div className="absolute left-0 top-full mt-1.5 w-[min(20rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
-                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      3 Profesyonel PDF Karne Şablonu (Tam A4)
+              {openHeaderMenu === 'templates' && (
+                <div className="absolute left-0 top-full mt-1.5 w-[min(22rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-2 z-[9999] space-y-2 animate-in fade-in zoom-in-95 duration-150">
+                  {/* Section A: PDF Şablonu */}
+                  <div className="space-y-1">
+                    <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      PDF Karne Şablonu
                     </div>
                     {KARNE_TEMPLATES.map((tpl) => {
                       const isSelected = tpl.id === karneTemplate;
@@ -8296,19 +8486,16 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                           type="button"
                           onClick={() => {
                             handleSelectKarneTemplate(tpl.id);
-                            setOpenHeaderMenu(null);
                             notify(`Karne PDF şablonu "${tpl.name}" olarak güncellendi.`);
                           }}
-                          className={`w-full px-3 py-2 rounded-lg text-left text-xs font-bold flex items-start justify-between gap-2 transition-colors cursor-pointer ${
+                          className={`w-full px-2.5 py-2 rounded-lg text-left text-xs font-bold flex items-start justify-between gap-2 transition-colors cursor-pointer ${
                             isSelected
                               ? 'bg-slate-900 text-white dark:bg-slate-800'
                               : 'text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
                           }`}
                         >
                           <div>
-                            <div className="flex items-center gap-1.5">
-                              <span>{tpl.shortName}</span>
-                            </div>
+                            <div>{tpl.shortName}</div>
                             <div
                               className={`text-[10px] font-normal mt-0.5 ${
                                 isSelected ? 'text-slate-300' : 'text-slate-500'
@@ -8323,122 +8510,67 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                         </button>
                       );
                     })}
-
-                    <div className="pt-1.5 mt-1 border-t border-slate-200 dark:border-slate-800 px-2 py-1.5 flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                        Anatomik Vücut Haritası (B)
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowBodyMapInfographic((prev) => !prev);
-                          notify(
-                            !showBodyMapInfographic
-                              ? 'Sayfa 1 Anatomik Vücut Haritası İnfografiği aktif edildi.'
-                              : 'Anatomik Vücut Haritası gizlendi.'
-                          );
-                        }}
-                        className={`px-2.5 py-1 rounded-lg text-[10px] font-sans tabular-nums font-bold cursor-pointer ${
-                          showBodyMapInfographic
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-                        }`}
-                      >
-                        {showBodyMapInfographic ? 'AÇIK' : 'KAPALI'}
-                      </button>
-                    </div>
                   </div>
-                )}
-              </div>
 
-            {/* DROPDOWN 3.5 (C): Dinamik Kulüp Renk Paleti Seçici */}
-            <div className={`relative ${openHeaderMenu === 'clubColors' ? 'z-[9995]' : ''}`}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setOpenHeaderMenu((prev) => (prev === 'clubColors' ? null : 'clubColors'))
-                  }
-                  className={`px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                    openHeaderMenu === 'clubColors'
-                      ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/50 text-sky-900 dark:text-sky-200'
-                      : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
-                  }`}
-                >
-                  <span className="flex items-center -space-x-1 shrink-0">
-                    <span
-                      className="w-3.5 h-3.5 rounded-full border border-white shadow-2xs inline-block"
-                      style={{ backgroundColor: effectivePrimaryHex }}
-                    />
-                    <span
-                      className="w-3.5 h-3.5 rounded-full border border-white shadow-2xs inline-block"
-                      style={{ backgroundColor: effectiveSecondaryHex }}
-                    />
-                  </span>
-                  <span className="hidden sm:inline">Kulüp Rengi: {activePaletteObj.shortName}</span>
-                  <span className="sm:hidden">Renk</span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                </button>
-
-                {openHeaderMenu === 'clubColors' && (
-                  <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-1.5 w-[min(20rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-2 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
-                    <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      Dinamik Kulüp Renk Paleti (C)
+                  {/* Section B: Kulüp Renk Paleti */}
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
+                    <div className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Kulüp Renk Paleti ({activePaletteObj.shortName})
                     </div>
-                    {CLUB_COLOR_PALETTES.map((pal) => {
-                      const isSelected = pal.id === clubColorPalette;
-                      const pHex =
-                        pal.id === 'custom'
-                          ? customPrimaryHex
-                          : pal.id === 'template-default'
-                            ? activeTemplate.defaultPrimaryHex
-                            : pal.primaryHex;
-                      const sHex =
-                        pal.id === 'custom'
-                          ? customSecondaryHex
-                          : pal.id === 'template-default'
-                            ? activeTemplate.defaultSecondaryHex
-                            : pal.secondaryHex;
+                    <div className="grid grid-cols-2 gap-1">
+                      {CLUB_COLOR_PALETTES.map((pal) => {
+                        const isSelected = pal.id === clubColorPalette;
+                        const pHex =
+                          pal.id === 'custom'
+                            ? customPrimaryHex
+                            : pal.id === 'template-default'
+                              ? activeTemplate.defaultPrimaryHex
+                              : pal.primaryHex;
+                        const sHex =
+                          pal.id === 'custom'
+                            ? customSecondaryHex
+                            : pal.id === 'template-default'
+                              ? activeTemplate.defaultSecondaryHex
+                              : pal.secondaryHex;
 
-                      return (
-                        <button
-                          key={pal.id}
-                          type="button"
-                          onClick={() => {
-                            handleSelectClubColorPalette(pal.id);
-                            if (pal.id !== 'custom') {
-                              setOpenHeaderMenu(null);
-                            }
-                            notify(`Kulüp renk teması "${pal.name}" olarak uygulandı.`);
-                          }}
-                          className={`w-full px-2.5 py-2 rounded-lg text-left text-xs font-bold flex items-center justify-between gap-2 transition-colors cursor-pointer ${
-                            isSelected
-                              ? 'bg-slate-900 text-white dark:bg-slate-800'
-                              : 'text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <span className="flex items-center -space-x-1 shrink-0">
-                              <span
-                                className="w-4 h-4 rounded-full border border-white shadow-2xs inline-block"
-                                style={{ backgroundColor: pHex }}
-                              />
-                              <span
-                                className="w-4 h-4 rounded-full border border-white shadow-2xs inline-block"
-                                style={{ backgroundColor: sHex }}
-                              />
-                            </span>
-                            <span>{pal.name}</span>
-                          </div>
-                          {isSelected && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
-                        </button>
-                      );
-                    })}
+                        return (
+                          <button
+                            key={pal.id}
+                            type="button"
+                            onClick={() => {
+                              handleSelectClubColorPalette(pal.id);
+                              notify(`Kulüp renk teması "${pal.name}" olarak uygulandı.`);
+                            }}
+                            className={`px-2 py-1.5 rounded-lg text-left text-[11px] font-bold flex items-center justify-between gap-1.5 transition-colors cursor-pointer ${
+                              isSelected
+                                ? 'bg-slate-900 text-white dark:bg-slate-800'
+                                : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200/70 dark:border-slate-700/70'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="flex items-center -space-x-1 shrink-0">
+                                <span
+                                  className="w-3.5 h-3.5 rounded-full border border-white shadow-2xs inline-block"
+                                  style={{ backgroundColor: pHex }}
+                                />
+                                <span
+                                  className="w-3.5 h-3.5 rounded-full border border-white shadow-2xs inline-block"
+                                  style={{ backgroundColor: sHex }}
+                                />
+                              </span>
+                              <span className="truncate">{pal.shortName}</span>
+                            </div>
+                            {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
 
                     {clubColorPalette === 'custom' && (
-                      <div className="pt-2 mt-1 border-t border-slate-200 dark:border-slate-800 px-2 py-1.5 grid grid-cols-2 gap-2">
+                      <div className="pt-2 px-1 grid grid-cols-2 gap-2">
                         <div>
                           <label className="block text-[10px] font-bold text-slate-500 mb-1">
-                            Ana Kulüp Rengi
+                            Ana Renk
                           </label>
                           <input
                             type="color"
@@ -8451,7 +8583,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                                 // ignore
                               }
                             }}
-                            className="w-full h-8 rounded cursor-pointer border border-slate-300"
+                            className="w-full h-7 rounded cursor-pointer border border-slate-300"
                           />
                         </div>
                         <div>
@@ -8469,58 +8601,118 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                                 // ignore
                               }
                             }}
-                            className="w-full h-8 rounded cursor-pointer border border-slate-300"
+                            className="w-full h-7 rounded cursor-pointer border border-slate-300"
                           />
                         </div>
                       </div>
                     )}
                   </div>
-                )}
-              </div>
 
-            {/* DROPDOWN 4: Görünüm, Analiz & Ayarlar (Her zaman net açılır, ekrandan taşmaz) */}
+                  {/* Section C: Okul, Logo & Vücut Haritası */}
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
+                    <div className="px-2 py-1 flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                        Anatomik Vücut Haritası
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowBodyMapInfographic((prev) => !prev);
+                          notify(
+                            !showBodyMapInfographic
+                              ? 'Sayfa 1 Anatomik Vücut Haritası aktif edildi.'
+                              : 'Anatomik Vücut Haritası gizlendi.'
+                          );
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer ${
+                          showBodyMapInfographic
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        {showBodyMapInfographic ? 'AÇIK' : 'KAPALI'}
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenHeaderMenu(null);
+                        setShowBrandingSettings((prev) => !prev);
+                      }}
+                      className="w-full px-2.5 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Building2 className="w-4 h-4 text-sky-600 shrink-0" />
+                        <div className="min-w-0">
+                          <div>Okul Adı &amp; Logo Ayarları</div>
+                          <div className="text-[10px] font-normal text-slate-500 truncate">
+                            {effectiveClubName} · {effectiveBranchName}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold text-sky-600 shrink-0">
+                        {showBrandingSettings ? 'Gizle' : 'Aç'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* DROPDOWN 3: Analiz & Seçenekler (Combines Grup İçi Kıyaslama + Grafikler + AI + Kılavuz) */}
             <div className={`relative ${openHeaderMenu === 'panels' ? 'z-[9995]' : ''}`}>
               <button
                 type="button"
                 onClick={() =>
                   setOpenHeaderMenu((prev) => (prev === 'panels' ? null : 'panels'))
                 }
-                className={`px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                  openHeaderMenu === 'panels' || showBrandingSettings
+                className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                  openHeaderMenu === 'panels' || isIntraGroupComparisonEnabled || showChartsPanel || showAiPanel
                     ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-900 dark:text-indigo-200'
                     : 'border-slate-200 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
                 }`}
               >
                 <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                <span>Analiz &amp; Ayarlar</span>
+                <span>Analiz &amp; Seçenekler</span>
+                {(isIntraGroupComparisonEnabled || showChartsPanel || showAiPanel) && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 shrink-0" />
+                )}
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               </button>
 
               {openHeaderMenu === 'panels' && (
-                <div className="absolute right-0 sm:left-0 sm:right-auto top-full mt-1.5 w-[min(20rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                <div className="absolute left-0 top-full mt-1.5 w-[min(21rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
                   <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Gelişmiş Analiz &amp; Paneller
+                    Kıyaslama &amp; Ek Analiz Panelleri
                   </div>
 
                   <button
                     type="button"
                     onClick={() => {
-                      setOpenHeaderMenu(null);
-                      setShowBrandingSettings((prev) => !prev);
+                      handleToggleIntraGroupComparison();
                     }}
                     className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between gap-2 transition-colors cursor-pointer"
                   >
                     <div className="flex items-center gap-2.5">
-                      <Building2 className="w-4 h-4 text-sky-600 shrink-0" />
+                      <Users className="w-4 h-4 text-indigo-600 shrink-0" />
                       <div>
-                        <div>Okul Adı, Logo &amp; Şablon Ayarları</div>
+                        <div>Grup İçi Kıyaslama</div>
                         <div className="text-[10px] font-normal text-slate-500">
-                          Kulüp başlığı, logo ve 4 karne tasarım şablonu
+                          Grup ortalamasını yalnızca seçili havuzdan hesapla
                         </div>
                       </div>
                     </div>
-                    <span className="text-[10px] font-sans tabular-nums text-slate-500">
-                      {showBrandingSettings ? 'Açık' : 'Kapalı'}
+                    <span
+                      className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded shrink-0 ${
+                        isIntraGroupComparisonEnabled
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                      }`}
+                    >
+                      {isIntraGroupComparisonEnabled
+                        ? `Açık (${intraGroupComparisonPool.length})`
+                        : 'Kapalı'}
                     </span>
                   </button>
 
@@ -8543,7 +8735,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       </div>
                     </div>
                     <span
-                      className={`text-[10px] font-sans tabular-nums font-bold ${
+                      className={`text-[10px] font-bold ${
                         showChartsPanel ? 'text-emerald-600' : 'text-slate-400'
                       }`}
                     >
@@ -8570,7 +8762,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                       </div>
                     </div>
                     <span
-                      className={`text-[10px] font-sans tabular-nums font-bold ${
+                      className={`text-[10px] font-bold ${
                         showAiPanel ? 'text-indigo-600' : 'text-slate-400'
                       }`}
                     >
@@ -8582,114 +8774,156 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
             </div>
           </div>
 
-          {/* Right: Clean Single-Line Page Switcher (without duplicate mode tabs) */}
-          <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/90 rounded-xl overflow-x-auto scrollbar-none max-w-full">
-            <button
-              type="button"
-              onClick={() => {
-                setActiveLabTab('studio');
-                setViewMode('all');
-              }}
-              className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                activeLabTab === 'studio' && viewMode === 'all'
-                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <span className="hidden sm:inline">{totalReportPages} Sayfa Tam Görünüm</span>
-              <span className="sm:hidden">Tam Görünüm</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveLabTab('studio');
-                setViewMode('single');
-                setActivePage(1);
-              }}
-              title="Endomorfi, Mezomorfi, Ektomorfi Somatotip Değişim Tablosuna Git"
-              className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 ${
-                activeLabTab === 'studio' && viewMode === 'single' && activePage === 1
-                  ? 'bg-indigo-600 text-white shadow-2xs'
-                  : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-              <span className="hidden sm:inline">Somatotip Değişim Tablosu</span>
-              <span className="sm:hidden">Somatotip</span>
-            </button>
-            {showBodyMapInfographic && (
+          {/* Right: Compact Tarih & Branş Toggle + Zero-Overflow Sayfa Seçici Dropdown */}
+          <div className="flex items-center gap-2 shrink-0 ml-auto">
+            {activeLabTab === 'studio' && (
               <button
                 type="button"
-                onClick={() => {
-                  setActiveLabTab('studio');
-                  setViewMode('single');
-                  setActivePage(0);
-                }}
-                title="Tam Sayfa Anatomik Vücut Haritası & Bölgesel Antropometri İnfografiği"
-                className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                  activeLabTab === 'studio' && viewMode === 'single' && activePage === 0
-                    ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-2xs'
-                    : 'text-emerald-700 dark:text-emerald-400 hover:text-slate-900 dark:hover:text-white'
+                onClick={() => setShowMeasurementDatesBar((prev) => !prev)}
+                className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                  showMeasurementDatesBar
+                    ? 'bg-sky-600 text-white border-sky-600 shadow-2xs'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
                 }`}
+                title="Ölçüm tarihleri, doğum tarihi, spor branşı ve cinsiyet düzenleme çubuğunu aç/kapat"
               >
-                1. Vücut Haritası
+                <Calendar className={`w-3.5 h-3.5 shrink-0 ${showMeasurementDatesBar ? 'text-white' : 'text-sky-600'}`} />
+                <span>Tarih &amp; Branş</span>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 shrink-0 transition-transform ${
+                    showMeasurementDatesBar ? 'rotate-180 text-white' : 'text-slate-400'
+                  }`}
+                />
               </button>
             )}
-            {PAGE_TITLES.map((p) => (
+
+            {/* Compact Page View Dropdown (Replaces Clipped 8-Button Horizontal Strip) */}
+            <div className={`relative ${openHeaderMenu === 'pages' ? 'z-[9995]' : ''}`}>
               <button
-                key={p.page}
                 type="button"
-                onClick={() => {
-                  setActiveLabTab('studio');
-                  setViewMode('single');
-                  setActivePage(p.page);
-                }}
-                title={p.full}
-                className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                  activeLabTab === 'studio' && viewMode === 'single' && activePage === p.page
-                    ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                {showBodyMapInfographic
-                  ? `${p.page + 1}. ${p.short.replace(/^\d+\.\s*/, '')}`
-                  : p.short}
-              </button>
-            ))}
-
-            <button
-              type="button"
-              onClick={() => setShowMeasurementDatesBar((prev) => !prev)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 shrink-0 cursor-pointer ${
-                showMeasurementDatesBar
-                  ? 'bg-sky-600 text-white border-sky-600 shadow-2xs'
-                  : 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800 hover:bg-sky-100'
-              }`}
-              title="Ölçüm tarihlerini manuel düzenle ve antrenman planı tavsiyesini aç/kapat"
-            >
-              <Calendar className="w-3.5 h-3.5 shrink-0" />
-              <span>Ölçüm Tarihleri &amp; Plan Tavsiyesi</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                let targetId: string | undefined;
-                if (viewMode === 'single') {
-                  if (activePage === 0 && showBodyMapInfographic) targetId = 'sportsfly-lab-page-bodymap';
-                  else if (activePage === 1) targetId = 'sportsfly-lab-page-1';
-                  else if (activePage === 2) targetId = 'sportsfly-lab-page-2';
-                  else if (activePage === 3) targetId = 'sportsfly-lab-page-3';
-                  else if (activePage === 4) targetId = 'sportsfly-lab-page-5';
+                onClick={() =>
+                  setOpenHeaderMenu((prev) => (prev === 'pages' ? null : 'pages'))
                 }
-                handleOpenJpegModal(targetId);
-              }}
-              className="ml-auto px-2.5 py-1 rounded-lg text-xs font-bold bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-900/40 border border-teal-200 dark:border-teal-800 transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
-              title="Karne sayfalarını JPEG formatında indir (tekil sayfa veya toplu ZIP)"
-            >
-              <ImageIcon className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-              <span className="hidden sm:inline">JPEG İndir</span>
-            </button>
+                className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                  openHeaderMenu === 'pages'
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/50 text-blue-900 dark:text-blue-200'
+                    : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/90 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-100'
+                }`}
+                title="Tam görünüm veya tekil karne sayfası seçin"
+              >
+                <Layers className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span>
+                  {viewMode === 'all'
+                    ? `${totalReportPages} Sayfa Tam Görünüm`
+                    : activePage === 0 && showBodyMapInfographic
+                      ? '1. Vücut Haritası'
+                      : (() => {
+                          const found = PAGE_TITLES.find((p) => p.page === activePage);
+                          if (!found) return `${totalReportPages} Sayfa Tam Görünüm`;
+                          return showBodyMapInfographic
+                            ? `${found.page + 1}. ${found.short.replace(/^\d+\.\s*/, '')}`
+                            : found.short;
+                        })()}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              </button>
+
+              {openHeaderMenu === 'pages' && (
+                <div className="absolute right-0 top-full mt-1.5 w-[min(19rem,calc(100vw-2rem))] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 z-[9999] space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Karne Sayfa Görünümü
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveLabTab('studio');
+                      setViewMode('all');
+                      setOpenHeaderMenu(null);
+                    }}
+                    className={`w-full px-3 py-2 rounded-lg text-left text-xs font-bold flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                      activeLabTab === 'studio' && viewMode === 'all'
+                        ? 'bg-slate-900 text-white dark:bg-slate-800'
+                        : 'text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <span>{totalReportPages} Sayfa Tam Görünüm</span>
+                    {activeLabTab === 'studio' && viewMode === 'all' && (
+                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveLabTab('studio');
+                      setViewMode('single');
+                      setActivePage(1);
+                      setOpenHeaderMenu(null);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-left text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50/70 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span>Somatotip Değişim Tablosu</span>
+                  </button>
+
+                  <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                  <div className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Tekil Sayfalar
+                  </div>
+
+                  {showBodyMapInfographic && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveLabTab('studio');
+                        setViewMode('single');
+                        setActivePage(0);
+                        setOpenHeaderMenu(null);
+                      }}
+                      className={`w-full px-3 py-1.5 rounded-lg text-left text-xs font-bold flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                        activeLabTab === 'studio' && viewMode === 'single' && activePage === 0
+                          ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <span>1. Vücut Haritası</span>
+                      {viewMode === 'single' && activePage === 0 && (
+                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      )}
+                    </button>
+                  )}
+
+                  {PAGE_TITLES.map((p) => {
+                    const isSelected = activeLabTab === 'studio' && viewMode === 'single' && activePage === p.page;
+                    const label = showBodyMapInfographic
+                      ? `${p.page + 1}. ${p.short.replace(/^\d+\.\s*/, '')}`
+                      : p.short;
+                    return (
+                      <button
+                        key={p.page}
+                        type="button"
+                        onClick={() => {
+                          setActiveLabTab('studio');
+                          setViewMode('single');
+                          setActivePage(p.page);
+                          setOpenHeaderMenu(null);
+                        }}
+                        title={p.full}
+                        className={`w-full px-3 py-1.5 rounded-lg text-left text-xs font-bold flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        <span>{label}</span>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -9251,6 +9485,29 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
             }}
           />
         </div>
+      )}
+
+      {/* TAKIM / KULÜP YÖNETİCİ ÖZET RAPORU TAB VIEW */}
+      {activeLabTab === 'team-summary' && (
+        <SportsFlyLabTeamSummaryView
+          batchReports={batchReports}
+          studioReports={reports}
+          archivedReports={archivedReports}
+          schoolBranding={schoolBranding}
+          onOpenReport={(targetReport) => {
+            setReports((prev) => {
+              if (prev.some((r) => r.id === targetReport.id)) return prev;
+              const next = [targetReport, ...prev];
+              saveStoredLabReports(next);
+              return next;
+            });
+            setSelectedReportId(targetReport.id);
+            setActiveLabTab('studio');
+            setViewMode('all');
+          }}
+          onGoToBatch={() => setActiveLabTab('batch')}
+          onNotify={notify}
+        />
       )}
 
       {/* TOPLU KARNE OLUŞTURMA (EXCEL TOPLU SPORCU VERİSİ) TAB VIEW */}
@@ -10013,6 +10270,17 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
                 <span>
                   Tek Birleşik PDF İndir ({selectedBatchReports.length * 5} Sayfa)
                 </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadBatchCategorizedExcel}
+                disabled={selectedBatchReports.length === 0 || isGeneratingBatchPDF}
+                className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+                title="Seçili tüm sporcuların karne verilerini kategorili çok sayfalı Excel (.xlsx) tablosu olarak indir"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-teal-100 shrink-0" />
+                <span>Kategorili Excel İndir ({selectedBatchReports.length} Sporcu)</span>
               </button>
 
               <button
@@ -11860,6 +12128,17 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
 
             <button
               type="button"
+              onClick={handleDownloadCategorizedKarneExcel}
+              className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs whitespace-nowrap"
+              title="Karne yerleşimindeki tüm verileri kategorili Excel (.xlsx) tablosu olarak indirin"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-100 shrink-0" />
+              <span className="hidden sm:inline">Excel İndir</span>
+              <span className="sm:hidden">Excel</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => handleOpenJpegModal()}
               className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs whitespace-nowrap"
               title="Sayfaları tek tek seçerek veya tümünü birden JPEG olarak indirin"
@@ -11909,7 +12188,7 @@ export const SportsFlyLabView: React.FC<SportsFlyLabViewProps> = ({ onToast, onL
       {/* Report Card Pages Container (Wrapped with #sportsfly-lab-print-area for @media print A4 output) */}
       <div
         className={`relative z-0 ${
-          (activeLabTab === 'archive' || activeLabTab === 'batch' || activeLabTab === 'company-profile') && !isGeneratingBatchPDF
+          (activeLabTab === 'archive' || activeLabTab === 'batch' || activeLabTab === 'company-profile' || activeLabTab === 'team-summary' || activeLabTab === 'dosya-havuzu') && !isGeneratingBatchPDF
             ? 'hidden print:block'
             : ''
         } ${

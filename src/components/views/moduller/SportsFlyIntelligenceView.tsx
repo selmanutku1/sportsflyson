@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { resolveApiUrl } from '../../../utils/mobileBridge';
 import {
   TrendingUp,
   Send,
@@ -607,7 +608,7 @@ export const SportsFlyIntelligenceView: React.FC<SportsFlyIntelligenceViewProps>
     setIsAnalyzing(true);
 
     try {
-      const res = await fetch('/api/ai/intelligence', {
+      const res = await fetch(resolveApiUrl('/api/ai/intelligence'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

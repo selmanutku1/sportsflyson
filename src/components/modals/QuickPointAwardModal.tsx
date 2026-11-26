@@ -19,6 +19,8 @@ import {
 import { addSporPuanNotification } from '../../data/notifications';
 import { getAthleteAutomationStats } from '../../utils/sporpuanAutomation';
 import { syncQuickPointToKarne } from '../../utils/sporpuanKarneBridge';
+import { auth } from '../../firebase';
+import { sporpuanLogsService } from '../../services/operationsFirestoreService';
 
 export interface QuickPointSporcu {
   id: string;
@@ -174,10 +176,17 @@ export const QuickPointAwardModal: React.FC<QuickPointAwardModalProps> = ({
         ruleName: ruleTitle,
         points: activePoints,
         date: 'Bugün',
-        source: 'Koç Onayı',
+        source: 'Koç Onayı' as const,
         note: note.trim() || undefined,
       };
       localStorage.setItem('sportsfly_sporpuan_logs_new', JSON.stringify([newEntry, ...currentLogs]));
+      window.dispatchEvent(new Event('sportsfly_sporpuan_updated'));
+
+      if (auth.currentUser) {
+        void sporpuanLogsService.upsert(newEntry).catch((err) => {
+          console.error('Hızlı puan Firestore kaydı hatası:', err);
+        });
+      }
 
       // 3. Dynamically balance & sync into Sporcu Karnesi (timeline observation & score recalculation)
       syncQuickPointToKarne(
