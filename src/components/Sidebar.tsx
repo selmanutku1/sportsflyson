@@ -41,7 +41,6 @@ import {
   Sparkles,
   Mail,
   Database,
-  Palette,
   Crown,
   Check,
   ArrowRight,
@@ -568,26 +567,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 >
                   <Blocks className="w-4 h-4" />
                   {isRestricted('entegrasyonlar') && (
-                    <Lock className="w-2.5 h-2.5 text-amber-500 absolute top-1 right-1" />
-                  )}
-                </button>
-              )}
-
-              {/* SportsFly Studio */}
-              {shouldShowItem('sportsfly-studio') && (
-                <button
-                  onClick={() => handleNavClick('sportsfly-studio', 'SportsFly Studio')}
-                  title={isRestricted('sportsfly-studio') ? 'SportsFly Studio (Kilitli)' : 'SportsFly Studio'}
-                  className={`p-2.5 rounded-xl transition-all relative cursor-pointer ${
-                    !isGoogleRestricted && currentPage === 'sportsfly-studio'
-                      ? 'bg-[#0F2444] text-white shadow-xs'
-                      : isRestricted('sportsfly-studio')
-                      ? 'text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800/40 opacity-75'
-                      : 'text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <Palette className="w-4 h-4" />
-                  {isRestricted('sportsfly-studio') && (
                     <Lock className="w-2.5 h-2.5 text-amber-500 absolute top-1 right-1" />
                   )}
                 </button>
@@ -1380,36 +1359,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     Yeni
                   </span>
                 )}
-              </button>
-            </div>
-          )}
-
-          {/* SPORTSFLY STUDIO */}
-          {shouldShowItem('sportsfly-studio') && (
-            <div className="pt-1.5">
-              <button
-                onClick={() => handleNavClick('sportsfly-studio', 'SportsFly Studio')}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg font-medium transition-all cursor-pointer ${
-                  !isGoogleRestricted && currentPage === 'sportsfly-studio'
-                    ? 'text-white bg-[#0F2444] dark:bg-sky-700 font-bold shadow-xs'
-                    : isRestricted('sportsfly-studio')
-                    ? 'text-slate-400 dark:text-slate-500 bg-slate-50/70 dark:bg-slate-800/30 hover:bg-slate-100/80 dark:hover:bg-slate-800/50'
-                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Palette
-                    className={`w-4 h-4 shrink-0 ${
-                      !isGoogleRestricted && currentPage === 'sportsfly-studio'
-                        ? 'text-white'
-                        : isRestricted('sportsfly-studio')
-                        ? 'text-slate-400'
-                        : 'text-sky-600 dark:text-sky-400'
-                    }`}
-                  />
-                  <span className="font-semibold">SportsFly Studio</span>
-                </div>
-                {isRestricted('sportsfly-studio') && renderLockedPill()}
               </button>
             </div>
           )}

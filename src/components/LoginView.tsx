@@ -39,6 +39,7 @@ import {
   Fingerprint,
   Package,
   Trophy,
+  User as UserIcon,
 } from 'lucide-react';
 import { SportsFlyVectorMark } from './SportsFlyLogo';
 import { signInWithPopup, signInWithRedirect, GoogleAuthProvider, User, sendPasswordResetEmail } from 'firebase/auth';
@@ -103,6 +104,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [countryCode, setCountryCode] = useState('+90');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [loginIdentifier, setLoginIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -810,17 +812,26 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     }
   };
 
-  // Handle Standard Login (Email & Password or Phone)
+  // Handle Standard Login (Unified Email or Phone + Password)
   const handleStandardLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
-    const rawInput = loginMode === 'phone' ? phone : email;
-    if (!rawInput || !rawInput.trim()) {
-      setLoginError(loginMode === 'phone' ? 'Lütfen geçerli bir telefon numarası giriniz.' : 'Lütfen geçerli bir e-posta adresi giriniz.');
+    const trimmedInput = loginIdentifier.trim();
+    if (!trimmedInput) {
+      setLoginError('Lütfen geçerli bir e-posta adresi veya telefon numarası giriniz.');
       return;
     }
 
-    const identifier = loginMode === 'phone' ? `${countryCode} ${phone.replace(/\s+/g, '')}` : email.trim();
+    const isEmailInput = trimmedInput.includes('@');
+    const detectedMode: 'email' | 'phone' = isEmailInput ? 'email' : 'phone';
+    setLoginMode(detectedMode);
+    if (isEmailInput) {
+      setEmail(trimmedInput);
+    } else {
+      setPhone(trimmedInput);
+    }
+
+    const identifier = isEmailInput ? trimmedInput : trimmedInput.replace(/\s+/g, '');
     const injectionCheck = detectInjectionAttempt(identifier);
     if (injectionCheck.detected) {
       recordSecurityAuditEvent(
@@ -833,21 +844,21 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       return;
     }
 
-    // 1. If Email Login Mode -> Authenticate directly with Firestore / Local registered users
-    if (loginMode === 'email') {
+    // 1. If Email Login -> Authenticate directly with Firestore / Local registered users
+    if (isEmailInput) {
       setIsLoading(true);
       setLoadingText('Kullanıcı hesabı ve şifre doğrulanıyor...');
       setLoginError(null);
 
       try {
-        const authResult = await authenticateWithEmailPassword(email, password);
+        const authResult = await authenticateWithEmailPassword(trimmedInput, password);
 
         if (!authResult.ok) {
           setIsLoading(false);
           if (authResult.code === 'PENDING_APPROVAL') {
             setPendingApprovalInfo({
-              clubName: authResult.user?.clubName || 'Spor Okulu',
-              email: authResult.user?.email || email,
+              clubName: authResult.user?.clubName || 'Spor Kulübü',
+              email: authResult.user?.email || trimmedInput,
               phone: authResult.user?.phone || '',
               applicationId: authResult.user?.id || 'reg_pending',
             });
@@ -882,7 +893,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           setIsLoading(false);
           onLoginSuccess({
             role: authResult.user?.role || 'Kulüp Yöneticisi',
-            email: authResult.user?.email || email,
+            email: authResult.user?.email || trimmedInput,
             name: authResult.user?.managerName || 'Kulüp Yöneticisi',
             clubName: authResult.user?.clubName || 'Spor Kulübü',
             authProvider: 'standard',
@@ -896,18 +907,18 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       }
     }
 
-    // 2. If Phone Login Mode -> Authenticate Phone & Password against registered users
+    // 2. If Phone Login -> Authenticate Phone & Password against registered users
     setIsLoading(true);
     setLoadingText('Telefon numarası ve şifre doğrulanıyor...');
     setLoginError(null);
 
     try {
-      const authResult = await authenticateWithPhonePassword(phone, password);
+      const authResult = await authenticateWithPhonePassword(trimmedInput, password);
       if (!authResult.ok) {
         setIsLoading(false);
         if (authResult.code === 'PENDING_APPROVAL') {
           setPendingApprovalInfo({
-            clubName: authResult.user?.clubName || 'Spor Okulu',
+            clubName: authResult.user?.clubName || 'Spor Kulübü',
             email: authResult.user?.email || '',
             phone: authResult.user?.phone || identifier,
             applicationId: authResult.user?.id || 'reg_pending',
@@ -1032,502 +1043,615 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   });
 
   return (
-    <div className="min-h-screen min-h-[100dvh] w-full bg-[#f3f6fb] flex flex-col items-center justify-center py-6 px-4 font-sans text-slate-800 relative selection:bg-blue-100 selection:text-blue-900 overflow-x-hidden">
-      
-      {/* Soft Background Grid Accent */}
-      <div 
-        className="absolute inset-0 pointer-events-none opacity-[0.035]"
-        style={{
-          backgroundImage: `radial-gradient(#1e40af 1px, transparent 1px)`,
-          backgroundSize: '24px 24px'
-        }}
-      />
+    <div className="min-h-screen min-h-[100dvh] w-full grid grid-cols-1 lg:grid-cols-2 font-sans text-slate-800 relative selection:bg-blue-100 selection:text-blue-900 overflow-x-hidden bg-[#F7F9FC]">
 
-      {/* Corporate Logo & Brand Header */}
-      <div className="relative z-10 flex flex-col items-center text-center mb-4 sm:mb-5 shrink-0 select-none">
-        <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-white p-2.5 shadow-md shadow-blue-500/10 border border-slate-200/80 flex items-center justify-center mb-2.5">
-          <img
-            src="/sportsfly-logo.png"
-            alt="SportsFly Logo"
-            className="w-full h-full object-contain"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = '/sportsfly-logo.svg';
-            }}
-          />
+      {/* ========================================================================= */}
+      {/* LEFT BRAND PANEL — Midnight Navy + SportsFly Electric Blue & Volt-Lime    */}
+      {/* ========================================================================= */}
+      <aside className="hidden lg:flex flex-col justify-between relative overflow-hidden bg-gradient-to-br from-[#081028] via-[#0D1A42] to-[#12265E] text-white px-12 xl:px-16 py-11 select-none">
+        {/* Fine Architectural Grid Overlay (matches SportsFly website hero) */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage:
+              'linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px)',
+            backgroundSize: '40px 40px',
+          }}
+        />
+        {/* Subtle Electric Royal Blue & Indigo Atmospheric Glow */}
+        <div className="absolute -top-28 -right-24 w-[420px] h-[420px] rounded-full bg-[#2563EB]/20 blur-[110px] pointer-events-none" />
+        <div className="absolute -bottom-32 -left-24 w-[380px] h-[380px] rounded-full bg-[#4F46E5]/15 blur-[110px] pointer-events-none" />
+
+        {/* Top Brand Lockup */}
+        <div className="relative z-10 flex items-center gap-3">
+          <div className="w-14 h-14 flex items-center justify-center shrink-0 overflow-hidden">
+            <img
+              src="/assets/aistudio/images__1___1__907df591.png"
+              alt="SportsFly Logo"
+              className="w-full h-full object-contain scale-[1.85] drop-shadow-[0_4px_14px_rgba(37,99,235,0.35)]"
+            />
+          </div>
+          <span className="text-[26px] font-extrabold tracking-tight leading-none">
+            <span className="text-white">Sports</span>
+            <span className="text-[#4F86FF]">Fly</span>
+          </span>
         </div>
-        <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">SportsFly</h1>
-        <p className="text-xs text-slate-500 font-medium mt-0.5">Kulüp &amp; Spor Yönetim Sistemi</p>
-      </div>
 
-      {/* Main Login Card - Firmly Fixed & Stable Card */}
-      <div className="relative z-10 w-full max-w-[440px] bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-7 shadow-xl shadow-slate-200/60 border border-slate-200/80">
-        
-        {/* 1. Header: Minimal Welcoming Header */}
-        <div className="mb-5 sm:mb-6 text-left pb-3.5 sm:pb-4 border-b border-slate-100">
-          <h2 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">
-            {is2FAStepActive ? 'İki Faktörlü Doğrulama (2FA)' : 'Kulüp Girişi'}
-          </h2>
-          <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-relaxed">
-            {is2FAStepActive
-              ? twoFactorMethod === 'email'
-                ? 'Hesap güvenliğiniz için e-posta adresinize gönderilen doğrulama kodunu girin.'
-                : 'Hesap güvenliğiniz için SMS veya Authenticator kodunu doğrulayın.'
-              : 'Hesabınıza erişmek için aşağıdaki giriş yöntemlerinden birini kullanın.'}
+        {/* Center Hero Value Proposition + Checklist + Geometric Illustration */}
+        <div className="relative z-10 my-auto py-8 max-w-[500px]">
+          <h1 className="text-4xl xl:text-[42px] font-extrabold text-white tracking-tight leading-[1.12]">
+            Spor kulübünüzü tek ekrandan yönetin.
+          </h1>
+          <p className="mt-4 text-[15px] leading-relaxed text-slate-300/90 max-w-[445px]">
+            Aidat tahsilatı, eğitmen ve veli panelleri ile dijital sporcu karneleri, tüm kurumunuz için tek bir yerde.
           </p>
-        </div>
 
-        {/* Tab Switcher */}
-        <div className="flex p-1 bg-slate-100 rounded-xl mb-5 sm:mb-6">
-          <button
-            onClick={() => setLoginType('standard')}
-            className={`flex-1 py-2.5 text-xs sm:text-sm font-bold rounded-lg transition-all cursor-pointer ${
-              loginType === 'standard' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-            }`}
-          >
-            Standart Giriş
-          </button>
-          <button
-            onClick={() => setLoginType('integration')}
-            className={`flex-1 py-2.5 text-xs sm:text-sm font-bold rounded-lg transition-all cursor-pointer ${
-              loginType === 'integration' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-            }`}
-          >
-            Entegrasyon Girişi
-          </button>
-        </div>
-
-        {/* Loading overlay notification */}
-        {isLoading && (
-          <div className="w-full mb-4 py-3 px-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 text-xs flex items-center justify-center gap-2.5 animate-pulse">
-            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-            <span className="font-bold">{loadingText}</span>
-          </div>
-        )}
-
-        {/* Error notification */}
-        {loginError && (
-          <div className="w-full mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex flex-col gap-2">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
-              <span className="font-medium leading-relaxed">{loginError}</span>
-            </div>
-            {(loginError.includes('Vercel') || loginError.includes('Alan Adı') || loginError.includes('unauthorized-domain')) && (
-              <div className="flex flex-wrap gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setShowUnauthorizedDomainModal(true)}
-                  className="px-3 py-1.5 rounded-lg bg-white border border-rose-200 hover:bg-rose-100/60 text-rose-800 font-bold text-[11px] cursor-pointer flex items-center gap-1.5 transition-all"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Yetki Ekleme Adımları</span>
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* 🔐 STEP 2: TWO-FACTOR AUTHENTICATION (EMAIL / SMS OTP)                    */}
-        {/* ========================================================================= */}
-        {is2FAStepActive ? (
-          <div className="space-y-4 text-left animate-in fade-in duration-200">
-            <div className="p-3.5 rounded-xl bg-blue-50/80 border border-blue-200 flex items-center justify-between gap-2">
-              <div className="text-xs text-slate-700 leading-relaxed flex items-center gap-2">
-                {twoFactorMethod === 'email' ? (
-                  <Mail className="w-4 h-4 text-blue-600 shrink-0" />
-                ) : (
-                  <Smartphone className="w-4 h-4 text-blue-600 shrink-0" />
-                )}
-                <div>
-                  {twoFactorMethod === 'email' ? (
-                    <>
-                      <span className="font-bold text-slate-900">{maskedEmailDisplay || pendingIdentifier}</span> e-posta adresinize 6 haneli SportsFly doğrulama kodu gönderildi.
-                    </>
-                  ) : (
-                    <>
-                      <span className="font-bold text-slate-900">{maskedPhoneDisplay}</span> numaralı telefonunuza 6 haneli SMS doğrulama kodu gönderildi.
-                    </>
-                  )}
-                </div>
-              </div>
-              <span
-                className={`px-2.5 py-1 rounded-lg text-xs font-sans tabular-nums font-extrabold shrink-0 ${
-                  smsCountdown <= 20
-                    ? 'bg-rose-100 text-rose-700'
-                    : 'bg-blue-100 text-blue-800'
-                }`}
-              >
-                {String(Math.floor(smsCountdown / 60)).padStart(2, '0')}:
-                {String(smsCountdown % 60).padStart(2, '0')}
+          {/* 3-Item Feature Checklist with Volt-Lime Check Accents */}
+          <ul className="mt-8 space-y-3.5">
+            <li className="flex items-center gap-3.5 text-[14.5px] font-medium text-slate-100">
+              <span className="w-6 h-6 rounded-full bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
+                <Check className="w-3.5 h-3.5 text-[#B4F02E] stroke-[3]" />
               </span>
-            </div>
+              <span>Otomatik aidat tahsilatı ve finans takibi</span>
+            </li>
+            <li className="flex items-center gap-3.5 text-[14.5px] font-medium text-slate-100">
+              <span className="w-6 h-6 rounded-full bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
+                <Check className="w-3.5 h-3.5 text-[#B4F02E] stroke-[3]" />
+              </span>
+              <span>Eğitmen ve veli panelleri ile şeffaf iletişim</span>
+            </li>
+            <li className="flex items-center gap-3.5 text-[14.5px] font-medium text-slate-100">
+              <span className="w-6 h-6 rounded-full bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
+                <Check className="w-3.5 h-3.5 text-[#B4F02E] stroke-[3]" />
+              </span>
+              <span>Sporpuan ile sporcu devamlılığını artırın</span>
+            </li>
+          </ul>
 
-            {/* Email Dispatch Info Badge for Transparency */}
-            {twoFactorMethod === 'email' && sandboxDelivery && (
-              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-[11px] text-slate-600 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 truncate">
-                  <span className="font-bold text-slate-800">Gönderici:</span>
-                  <span className="text-slate-500 truncate">SportsFly Doğrulama Servisi &lt;noreply@sportsfly.com.tr&gt;</span>
-                </div>
-                {sandboxDelivery.smsOtpCode && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const code = sandboxDelivery.smsOtpCode;
-                      if (code && code.length === 6) {
-                        setOtpDigits(code.split(''));
-                      }
-                    }}
-                    className="px-2 py-0.5 rounded-md bg-blue-100 hover:bg-blue-200 text-blue-800 font-extrabold text-[10px] shrink-0 cursor-pointer transition-colors"
-                  >
-                    Kodu Doldur ({sandboxDelivery.smsOtpCode})
-                  </button>
-                )}
-              </div>
-            )}
+          {/* Geometric Sports Trajectory & Performance Chart Illustration */}
+          <div className="mt-10 w-full max-w-[440px]">
+            <svg
+              viewBox="0 0 440 205"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              className="w-full h-auto"
+              aria-hidden="true"
+            >
+              <defs>
+                <linearGradient id="sfBarBlue" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#60A5FA" />
+                  <stop offset="100%" stopColor="#2563EB" />
+                </linearGradient>
+                <linearGradient id="sfBarIndigo" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#818CF8" />
+                  <stop offset="100%" stopColor="#4F46E5" />
+                </linearGradient>
+                <linearGradient id="sfBarLime" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#C8FA4B" />
+                  <stop offset="100%" stopColor="#A3E635" />
+                </linearGradient>
+                <radialGradient id="sfBallGlow" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="#60A5FA" stopOpacity="0.45" />
+                  <stop offset="100%" stopColor="#60A5FA" stopOpacity="0" />
+                </radialGradient>
+              </defs>
 
-            {/* 6-Digit OTP Input Boxes */}
-            <div className="space-y-2">
-              <label className="block text-[11px] font-bold text-slate-700">
-                {twoFactorMethod === 'email' ? '6 Haneli E-Posta Doğrulama Kodu' : '6 Haneli SMS Doğrulama Kodu'}
-              </label>
-              <div className="grid grid-cols-6 gap-1 sm:gap-2">
-                {otpDigits.map((digit, idx) => (
-                  <input
-                    key={idx}
-                    ref={(el) => {
-                      otpInputRefs.current[idx] = el;
-                    }}
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={digit}
-                    onChange={(e) => handleOtpDigitChange(idx, e.target.value)}
-                    onKeyDown={(e) => handleOtpKeyDown(idx, e)}
-                    onPaste={handleOtpPaste}
-                    className="w-full h-11 sm:h-12 text-center text-base sm:text-lg font-extrabold font-sans tabular-nums text-slate-900 bg-slate-50 border-2 border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-100 transition-all p-0"
-                  />
-                ))}
-              </div>
-            </div>
+              {/* Pitch / Court Concentric Ground Rings */}
+              <ellipse cx="195" cy="172" rx="166" ry="26" stroke="rgba(148, 163, 184, 0.22)" strokeWidth="1.2" />
+              <ellipse cx="195" cy="172" rx="104" ry="15" stroke="rgba(148, 163, 184, 0.16)" strokeWidth="1.1" />
+              <line x1="12" y1="172" x2="378" y2="172" stroke="rgba(148, 163, 184, 0.14)" strokeWidth="1" />
 
-            {/* Trust Device Checkbox & Resend */}
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={trustThisDevice}
-                  onChange={(e) => setTrustThisDevice(e.target.checked)}
-                  className="w-4 h-4 accent-blue-600 rounded border-slate-300 cursor-pointer"
+              {/* Dotted Parabolic Trajectory Arc */}
+              <path
+                d="M 46 164 Q 88 26 178 44"
+                stroke="rgba(226, 232, 240, 0.72)"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeDasharray="2.5 8"
+              />
+              {/* Launch Origin Point (Volt-Lime Accent) */}
+              <circle cx="46" cy="164" r="4.5" fill="#B4F02E" />
+              <circle cx="46" cy="164" r="9" fill="#B4F02E" fillOpacity="0.18" />
+
+              {/* Stylized Sports Ball with Soft Blue Halo */}
+              <circle cx="190" cy="48" r="28" fill="url(#sfBallGlow)" />
+              <circle cx="190" cy="48" r="17" fill="#FFFFFF" />
+              <polygon
+                points="190,39.5 197.5,45 194.6,53.8 185.4,53.8 182.5,45"
+                fill="#0D1A42"
+              />
+              <line x1="190" y1="39.5" x2="190" y2="31" stroke="#0D1A42" strokeWidth="1.2" strokeOpacity="0.45" />
+              <line x1="197.5" y1="45" x2="205.5" y2="42" stroke="#0D1A42" strokeWidth="1.2" strokeOpacity="0.45" />
+              <line x1="182.5" y1="45" x2="174.5" y2="42" stroke="#0D1A42" strokeWidth="1.2" strokeOpacity="0.45" />
+
+              {/* Translucent Performance Analytics Card */}
+              <g transform="translate(244, 34)">
+                <rect
+                  x="0"
+                  y="0"
+                  width="156"
+                  height="98"
+                  rx="14"
+                  fill="rgba(255, 255, 255, 0.08)"
+                  stroke="rgba(255, 255, 255, 0.16)"
+                  strokeWidth="1.2"
                 />
-                <span className="text-[11px] font-semibold text-slate-600">
-                  Bu cihazı 30 gün güvenilir hatırla
-                </span>
-              </label>
+                {/* Card Header Bar */}
+                <rect x="18" y="16" width="66" height="6.5" rx="3.25" fill="rgba(226, 232, 240, 0.45)" />
+                <circle cx="132" cy="19.25" r="3.5" fill="#B4F02E" />
 
-              <button
-                type="button"
-                onClick={() =>
-                  initiateTwoFactorChallenge(pendingLoginRole, pendingIdentifier, twoFactorMethod)
-                }
-                className="text-[11px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
-              >
-                <RefreshCw className="w-3 h-3" />
-                <span>{twoFactorMethod === 'email' ? 'Tekrar E-Posta Gönder' : 'Tekrar SMS Gönder'}</span>
-              </button>
-            </div>
+                {/* Analytics Bars */}
+                <rect x="20" y="56" width="20" height="26" rx="4.5" fill="rgba(148, 163, 184, 0.42)" />
+                <rect x="52" y="38" width="20" height="44" rx="4.5" fill="url(#sfBarBlue)" />
+                <rect x="84" y="47" width="20" height="35" rx="4.5" fill="url(#sfBarIndigo)" />
+                <rect x="116" y="30" width="20" height="52" rx="4.5" fill="url(#sfBarLime)" />
+              </g>
 
-            {/* Verify & Complete Login Buttons */}
-            <div className="pt-2 space-y-2">
-              <button
-                type="button"
-                onClick={() => handleVerifyTwoFactorCode()}
-                disabled={isLoading}
-                className="w-full py-3 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm tracking-wide transition-all shadow-md shadow-blue-600/20 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                <ShieldCheck className="w-4 h-4" />
-                <span>Doğrula ve Güvenli Oturumu Aç</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIs2FAStepActive(false);
-                  setLoginError(null);
-                }}
-                className="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Giriş Ekranına Geri Dön</span>
-              </button>
-            </div>
+              {/* Floating Micro Accent Dots */}
+              <circle cx="384" cy="148" r="3.5" fill="#60A5FA" fillOpacity="0.7" />
+              <circle cx="368" cy="162" r="2.2" fill="#B4F02E" fillOpacity="0.85" />
+            </svg>
           </div>
-        ) : loginType === 'integration' ? (
-          <IntegrationLoginView
-            onSuccess={() => {
-              onLoginSuccess({
-                role: 'Entegrasyon Kullanıcısı',
-                email: '',
-                name: 'Entegrasyon Kullanıcısı',
-              });
-            }}
-            onError={(err) => setLoginError(err)}
-            setIsLoading={setIsLoading}
-            onBack={() => setLoginType('standard')}
-          />
-        ) : (
-          <>
-        {/* 2. Google Girişi (Clean White Button with Subtle Border & Brand Colors) */}
-        <button
-          type="button"
-          id="btn-google-login"
-          onClick={handleNativeGooglePopupLogin}
-          disabled={isLoading}
-          className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 font-bold text-xs sm:text-sm tracking-wide transition-all shadow-xs cursor-pointer mb-4 disabled:opacity-50 group"
-        >
-          {/* Official Google 4-Color Icon */}
-          <svg className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" viewBox="0 0 24 24">
-            <path
-              fill="#4285F4"
-              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-            />
-            <path
-              fill="#34A853"
-              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-            />
-            <path
-              fill="#FBBC05"
-              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-            />
-            <path
-              fill="#EA4335"
-              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-            />
-          </svg>
-          <span>Google ile Giriş Yap</span>
-        </button>
-
-        {/* Divider: "veya e-posta / telefon ile" */}
-        <div className="w-full flex items-center gap-3 my-4">
-          <div className="h-[1px] bg-slate-200 flex-1" />
-          <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">veya</span>
-          <div className="h-[1px] bg-slate-200 flex-1" />
         </div>
 
-        {/* 3. Mode Selector Tabs: Telefon Numarası vs E-posta Adresi */}
-        <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-xl mb-4 border border-slate-200/60">
-          <button
-            type="button"
-            onClick={() => setLoginMode('phone')}
-            className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              loginMode === 'phone'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Phone className="w-3.5 h-3.5" />
-            <span>Telefon Numarası</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setLoginMode('email')}
-            className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              loginMode === 'email'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Mail className="w-3.5 h-3.5" />
-            <span>E-posta Adresi</span>
-          </button>
+        {/* Bottom Copyright */}
+        <div className="relative z-10 flex items-center text-xs text-slate-400 pt-4">
+          <span>© 2026 SportsFly</span>
+        </div>
+      </aside>
+
+      {/* ========================================================================= */}
+      {/* RIGHT AUTH CANVAS — Crisp Website Grid Canvas + Elevated Login Card       */}
+      {/* ========================================================================= */}
+      <main className="relative flex flex-col items-center justify-center min-h-screen min-h-[100dvh] px-4 sm:px-8 py-8 sm:py-12 bg-[#F7F9FC]">
+        {/* Crisp Architectural Grid Matching SportsFly Website Hero */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage:
+              'linear-gradient(to right, rgba(15, 23, 42, 0.035) 1px, transparent 1px), linear-gradient(to bottom, rgba(15, 23, 42, 0.035) 1px, transparent 1px)',
+            backgroundSize: '36px 36px',
+          }}
+        />
+
+        {/* Mobile Brand Header (shown only below lg breakpoint) */}
+        <div className="lg:hidden relative z-10 flex items-center gap-2.5 mb-6 select-none">
+          <div className="w-12 h-12 flex items-center justify-center shrink-0 overflow-hidden">
+            <img
+              src="/assets/aistudio/images__1___1__907df591.png"
+              alt="SportsFly Logo"
+              className="w-full h-full object-contain scale-[1.85]"
+            />
+          </div>
+          <span className="text-2xl font-extrabold tracking-tight">
+            <span className="text-[#0B1221]">Sports</span>
+            <span className="text-[#2563EB]">Fly</span>
+          </span>
         </div>
 
-        {/* 4. Form Fields */}
-        <form onSubmit={handleStandardLogin} className="space-y-3.5 text-left">
-          
-          {/* Phone or Email Input */}
-          {loginMode === 'phone' ? (
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-700 ml-0.5">
-                Telefon Numarası
-              </label>
-              <div className="flex gap-2">
-                {/* Country Code Dropdown */}
-                <select
-                  value={countryCode}
-                  onChange={(e) => setCountryCode(e.target.value)}
-                  className="bg-slate-50 border border-slate-300 text-slate-900 text-base sm:text-xs rounded-xl px-2.5 py-2.5 min-h-[44px] focus:outline-none focus:border-blue-600 focus:bg-white cursor-pointer font-bold transition-all shrink-0"
-                >
-                  <option value="+90">🇹🇷 +90</option>
-                  <option value="+49">🇩🇪 +49</option>
-                  <option value="+44">🇬🇧 +44</option>
-                  <option value="+1">🇺🇸 +1</option>
-                </select>
+        {/* Centered White Login Card */}
+        <div className="relative z-10 w-full max-w-[440px] bg-white rounded-2xl p-6 sm:p-9 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.08)] border border-slate-200/80">
+          {/* Card Header */}
+          <div className="mb-6 text-left">
+            <h2 className="text-[22px] sm:text-2xl font-extrabold text-[#0B1221] tracking-tight">
+              {is2FAStepActive
+                ? 'İki Faktörlü Doğrulama'
+                : loginType === 'integration'
+                ? 'Entegrasyon Girişi'
+                : 'Hesabınıza giriş yapın'}
+            </h2>
+            <p className="text-[13px] text-slate-500 mt-1.5 leading-relaxed">
+              {is2FAStepActive
+                ? twoFactorMethod === 'email'
+                  ? 'Hesap güvenliğiniz için e-posta adresinize gönderilen doğrulama kodunu girin.'
+                  : 'Hesap güvenliğiniz için SMS veya Authenticator kodunu doğrulayın.'
+                : loginType === 'integration'
+                ? 'SportsFly Lab veya kurumsal entegrasyon erişim bilgilerinizle devam edin.'
+                : 'Spor kulübünüzün hesabına erişmek için bilgilerinizi girin.'}
+            </p>
+          </div>
 
-                {/* Phone Input */}
-                <div className="relative flex-1">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                    <Phone className="w-4 h-4 text-blue-600" />
-                  </div>
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="5XX XXX XX XX"
-                    className="w-full bg-white border border-slate-300 text-slate-900 text-base sm:text-xs rounded-xl pl-9 pr-3 py-2.5 min-h-[44px] focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400 font-medium"
-                    required
-                  />
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-700 ml-0.5">
-                E-posta Adresi
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                  <Mail className="w-4 h-4 text-blue-600" />
-                </div>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="ornek@sporokulu.com"
-                  className="w-full bg-white border border-slate-300 text-slate-900 text-base sm:text-xs rounded-xl pl-9 pr-3 py-2.5 min-h-[44px] focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400 font-medium"
-                  required
-                />
-              </div>
+          {/* Loading overlay notification */}
+          {isLoading && (
+            <div className="w-full mb-4 py-3 px-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 text-xs flex items-center justify-center gap-2.5">
+              <div className="w-4 h-4 border-2 border-[#2563EB] border-t-transparent rounded-full animate-spin" />
+              <span className="font-bold">{loadingText}</span>
             </div>
           )}
 
-          {/* Password Input */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between ml-0.5">
-              <label className="text-[11px] font-bold text-slate-700">Şifre</label>
-              <button
-                type="button"
-                onClick={() => setShowForgotPasswordModal(true)}
-                className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-              >
-                Şifremi unuttum
-              </button>
-            </div>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                <Lock className="w-4 h-4 text-blue-600" />
+          {/* Error notification */}
+          {loginError && (
+            <div className="w-full mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex flex-col gap-2">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+                <span className="font-medium leading-relaxed">{loginError}</span>
               </div>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-white border border-slate-300 text-slate-900 text-base sm:text-xs rounded-xl pl-9 pr-10 py-2.5 min-h-[44px] focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400 font-medium"
-                required
-              />
+              {(loginError.includes('Vercel') || loginError.includes('Alan Adı') || loginError.includes('unauthorized-domain')) && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowUnauthorizedDomainModal(true)}
+                    className="px-3 py-1.5 rounded-lg bg-white border border-rose-200 hover:bg-rose-100/60 text-rose-800 font-bold text-[11px] cursor-pointer flex items-center gap-1.5 transition-all"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Yetki Ekleme Adımları</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* 🔐 STEP 2: TWO-FACTOR AUTHENTICATION (EMAIL / SMS OTP)                    */}
+          {/* ========================================================================= */}
+          {is2FAStepActive ? (
+            <div className="space-y-4 text-left animate-in fade-in duration-200">
+              <div className="p-3.5 rounded-xl bg-blue-50/80 border border-blue-200 flex items-center justify-between gap-2">
+                <div className="text-xs text-slate-700 leading-relaxed flex items-center gap-2">
+                  {twoFactorMethod === 'email' ? (
+                    <Mail className="w-4 h-4 text-[#2563EB] shrink-0" />
+                  ) : (
+                    <Smartphone className="w-4 h-4 text-[#2563EB] shrink-0" />
+                  )}
+                  <div>
+                    {twoFactorMethod === 'email' ? (
+                      <>
+                        <span className="font-bold text-slate-900">{maskedEmailDisplay || pendingIdentifier}</span> e-posta adresinize 6 haneli SportsFly doğrulama kodu gönderildi.
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-bold text-slate-900">{maskedPhoneDisplay}</span> numaralı telefonunuza 6 haneli SMS doğrulama kodu gönderildi.
+                      </>
+                    )}
+                  </div>
+                </div>
+                <span
+                  className={`px-2.5 py-1 rounded-lg text-xs font-sans tabular-nums font-extrabold shrink-0 ${
+                    smsCountdown <= 20
+                      ? 'bg-rose-100 text-rose-700'
+                      : 'bg-blue-100 text-blue-800'
+                  }`}
+                >
+                  {String(Math.floor(smsCountdown / 60)).padStart(2, '0')}:
+                  {String(smsCountdown % 60).padStart(2, '0')}
+                </span>
+              </div>
+
+              {/* Email Dispatch Info Badge for Transparency */}
+              {twoFactorMethod === 'email' && sandboxDelivery && (
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-[11px] text-slate-600 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className="font-bold text-slate-800">Gönderici:</span>
+                    <span className="text-slate-500 truncate">SportsFly Doğrulama Servisi &lt;noreply@sportsfly.com.tr&gt;</span>
+                  </div>
+                  {sandboxDelivery.smsOtpCode && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const code = sandboxDelivery.smsOtpCode;
+                        if (code && code.length === 6) {
+                          setOtpDigits(code.split(''));
+                        }
+                      }}
+                      className="px-2 py-0.5 rounded-md bg-blue-100 hover:bg-blue-200 text-blue-800 font-extrabold text-[10px] shrink-0 cursor-pointer transition-colors"
+                    >
+                      Kodu Doldur ({sandboxDelivery.smsOtpCode})
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* 6-Digit OTP Input Boxes */}
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-[#0B1221]">
+                  {twoFactorMethod === 'email' ? '6 Haneli E-Posta Doğrulama Kodu' : '6 Haneli SMS Doğrulama Kodu'}
+                </label>
+                <div className="grid grid-cols-6 gap-1.5 sm:gap-2">
+                  {otpDigits.map((digit, idx) => (
+                    <input
+                      key={idx}
+                      ref={(el) => {
+                        otpInputRefs.current[idx] = el;
+                      }}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={digit}
+                      onChange={(e) => handleOtpDigitChange(idx, e.target.value)}
+                      onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                      onPaste={handleOtpPaste}
+                      className="w-full h-11 sm:h-12 text-center text-base sm:text-lg font-extrabold font-sans tabular-nums text-[#0B1221] bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:border-[#2563EB] focus:bg-white focus:ring-2 focus:ring-blue-100 transition-all p-0"
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Trust Device Checkbox & Resend */}
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={trustThisDevice}
+                    onChange={(e) => setTrustThisDevice(e.target.checked)}
+                    className="w-4 h-4 accent-[#2563EB] rounded border-slate-300 cursor-pointer"
+                  />
+                  <span className="text-[11px] font-medium text-slate-600">
+                    Bu cihazı 30 gün güvenilir hatırla
+                  </span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    initiateTwoFactorChallenge(pendingLoginRole, pendingIdentifier, twoFactorMethod)
+                  }
+                  className="text-[11px] font-semibold text-[#1D4ED8] hover:text-[#1E40AF] flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>{twoFactorMethod === 'email' ? 'Tekrar Gönder' : 'Tekrar SMS Gönder'}</span>
+                </button>
+              </div>
+
+              {/* Verify & Complete Login Buttons */}
+              <div className="pt-2 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => handleVerifyTwoFactorCode()}
+                  disabled={isLoading}
+                  className="w-full py-3 px-6 rounded-xl bg-gradient-to-r from-[#1D4ED8] via-[#2563EB] to-[#3B5BDB] hover:from-[#1E40AF] hover:via-[#1D4ED8] hover:to-[#3730A3] text-white font-bold text-sm tracking-wide transition-all shadow-md shadow-blue-600/20 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Doğrula ve Oturumu Aç</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIs2FAStepActive(false);
+                    setLoginError(null);
+                  }}
+                  className="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Giriş Ekranına Geri Dön</span>
+                </button>
+              </div>
+            </div>
+          ) : loginType === 'integration' ? (
+            <IntegrationLoginView
+              onSuccess={() => {
+                onLoginSuccess({
+                  role: 'Entegrasyon Kullanıcısı',
+                  email: '',
+                  name: 'Entegrasyon Kullanıcısı',
+                });
+              }}
+              onError={(err) => setLoginError(err)}
+              setIsLoading={setIsLoading}
+              onBack={() => setLoginType('standard')}
+            />
+          ) : (
+            <>
+              {/* 1. Google Girişi */}
               <button
                 type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                id="btn-google-login"
+                onClick={handleNativeGooglePopupLogin}
+                disabled={isLoading}
+                className="w-full flex items-center justify-center gap-2.5 py-2.5 px-4 min-h-[44px] rounded-xl border border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100 text-[#0B1221] font-semibold text-sm transition-all shadow-2xs cursor-pointer disabled:opacity-50 group"
               >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                <svg className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                  />
+                </svg>
+                <span>Google ile devam et</span>
               </button>
-            </div>
-          </div>
 
-          {/* Checkboxes: Remember Me & Marketing Consent */}
-          <div className="pt-1 space-y-2">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="w-4 h-4 accent-blue-600 rounded border-slate-300 cursor-pointer"
-              />
-              <span className="text-xs font-semibold text-slate-700">Beni hatırla</span>
-            </label>
+              {/* Divider */}
+              <div className="w-full flex items-center gap-3 my-5">
+                <div className="h-[1px] bg-slate-200 flex-1" />
+                <span className="text-xs text-slate-400 font-medium">veya</span>
+                <div className="h-[1px] bg-slate-200 flex-1" />
+              </div>
 
-            <label className="flex items-start gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={marketingConsent}
-                onChange={(e) => setMarketingConsent(e.target.checked)}
-                className="w-4 h-4 mt-0.5 accent-blue-600 rounded border-slate-300 cursor-pointer"
-              />
-              <span className="text-[11px] leading-snug text-slate-600">
-                Kampanya, duyuru ve bilgilendirme SMS / e-postaları almak istiyorum.
-              </span>
-            </label>
-          </div>
+              {/* 2. Unified Form Fields */}
+              <form onSubmit={handleStandardLogin} className="space-y-4 text-left">
+                {/* Unified Email or Phone Input */}
+                <div className="space-y-1.5">
+                  <label htmlFor="login-identifier" className="block text-xs font-semibold text-[#0B1221]">
+                    E-posta veya telefon
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                      <UserIcon className="w-4 h-4" />
+                    </div>
+                    <input
+                      id="login-identifier"
+                      type="text"
+                      autoComplete="username"
+                      value={loginIdentifier}
+                      onChange={(e) => setLoginIdentifier(e.target.value)}
+                      placeholder="ornek@kulup.com veya 05xx xxx xx xx"
+                      className="w-full bg-white border border-slate-200 text-[#0B1221] text-sm rounded-xl pl-10 pr-3.5 py-2.5 min-h-[44px] focus:outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400"
+                      required
+                    />
+                  </div>
+                </div>
 
-          {/* Legal Acceptance Direct Links */}
-          <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 text-[11px] text-slate-600 leading-normal">
-            Giriş yaparak{' '}
-            <button
-              type="button"
-              onClick={() => {
-                setActiveLegalModal('kullanim-kosullari');
-                setLegalSearchQuery('');
-              }}
-              className="text-blue-600 hover:underline font-bold cursor-pointer inline-flex items-center gap-0.5"
-            >
-              Kullanım Koşulları
-            </button>
-            ,{' '}
-            <button
-              type="button"
-              onClick={() => {
-                setActiveLegalModal('kvkk');
-                setLegalSearchQuery('');
-              }}
-              className="text-blue-600 hover:underline font-bold cursor-pointer inline-flex items-center gap-0.5"
-            >
-              KVKK Aydınlatma Metni
-            </button>{' '}
-            ve{' '}
-            <button
-              type="button"
-              onClick={() => {
-                setActiveLegalModal('gizlilik');
-                setLegalSearchQuery('');
-              }}
-              className="text-blue-600 hover:underline font-bold cursor-pointer inline-flex items-center gap-0.5"
-            >
-              Gizlilik Politikası
-            </button>
-            'nı kabul etmiş olursunuz.
-          </div>
+                {/* Password Input */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="login-password" className="text-xs font-semibold text-[#0B1221]">
+                      Şifre
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotPasswordModal(true)}
+                      className="text-xs font-semibold text-[#1D4ED8] hover:text-[#1E40AF] hover:underline cursor-pointer"
+                    >
+                      Şifremi unuttum
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                      <Lock className="w-4 h-4" />
+                    </div>
+                    <input
+                      id="login-password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Şifrenizi girin"
+                      className="w-full bg-white border border-slate-200 text-[#0B1221] text-sm rounded-xl pl-10 pr-10 py-2.5 min-h-[44px] focus:outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-slate-400"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
 
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full mt-2 py-3 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-sm tracking-wide transition-all shadow-md shadow-blue-600/20 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            <span>Giriş Yap</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
+                {/* Remember Session Checkbox */}
+                <label className="flex items-center gap-2.5 cursor-pointer select-none pt-0.5">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 accent-[#2563EB] rounded border-slate-300 cursor-pointer"
+                  />
+                  <span className="text-xs font-medium text-slate-600">Oturumu bu cihazda açık tut</span>
+                </label>
 
+                {/* Primary Submit CTA */}
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full py-3 px-6 rounded-xl bg-gradient-to-r from-[#1D4ED8] via-[#2563EB] to-[#3B5BDB] hover:from-[#1E40AF] hover:via-[#1D4ED8] hover:to-[#3730A3] active:scale-[0.99] text-white font-bold text-sm tracking-wide transition-all shadow-md shadow-blue-600/20 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <span>Giriş yap</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
 
-        </form>
+                {/* Marketing Consent Checkbox */}
+                <label className="flex items-start gap-2.5 cursor-pointer select-none pt-1">
+                  <input
+                    type="checkbox"
+                    checked={marketingConsent}
+                    onChange={(e) => setMarketingConsent(e.target.checked)}
+                    className="w-4 h-4 mt-0.5 accent-[#2563EB] rounded border-slate-300 cursor-pointer shrink-0"
+                  />
+                  <span className="text-[11.5px] leading-snug text-slate-500">
+                    Kampanya, duyuru ve bilgilendirme e-postaları almak istiyorum.
+                  </span>
+                </label>
 
-        {/* 5. Register Link */}
-        <div className="mt-5 pt-4 border-t border-slate-200 text-center">
-          <p className="text-xs text-slate-600 font-medium">
-            Hesabınız yok mu?{' '}
-            <button
-              type="button"
-              onClick={() => setShowRegisterModal(true)}
-              className="text-blue-600 hover:text-blue-800 font-bold hover:underline cursor-pointer"
-            >
-              Hemen Kayıt Olun
-            </button>
-          </p>
+                {/* Legal Acceptance Notice */}
+                <p className="text-[11px] text-slate-500 leading-relaxed text-center pt-1">
+                  Giriş yaparak{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveLegalModal('kullanim-kosullari');
+                      setLegalSearchQuery('');
+                    }}
+                    className="text-slate-700 hover:text-[#1D4ED8] underline underline-offset-2 font-semibold cursor-pointer"
+                  >
+                    Kullanım Koşulları
+                  </button>
+                  ,{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveLegalModal('kvkk');
+                      setLegalSearchQuery('');
+                    }}
+                    className="text-slate-700 hover:text-[#1D4ED8] underline underline-offset-2 font-semibold cursor-pointer"
+                  >
+                    KVKK Aydınlatma Metni
+                  </button>{' '}
+                  ve{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveLegalModal('gizlilik');
+                      setLegalSearchQuery('');
+                    }}
+                    className="text-slate-700 hover:text-[#1D4ED8] underline underline-offset-2 font-semibold cursor-pointer"
+                  >
+                    Gizlilik Politikası
+                  </button>
+                  &apos;nı kabul etmiş olursunuz.
+                </p>
+              </form>
+
+              {/* Register / Demo Footer Link */}
+              <div className="mt-6 pt-5 border-t border-slate-100 text-center">
+                <p className="text-xs text-slate-500 font-medium">
+                  Hesabınız yok mu?{' '}
+                  <button
+                    type="button"
+                    onClick={() => setShowRegisterModal(true)}
+                    className="text-[#1D4ED8] hover:text-[#1E40AF] font-bold hover:underline cursor-pointer"
+                  >
+                    Demo talep edin
+                  </button>
+                </p>
+              </div>
+            </>
+          )}
         </div>
-          </>
+
+        {/* Quiet Secondary Switch for Integration / Lab Login */}
+        {!is2FAStepActive && (
+          <div className="relative z-10 mt-5 flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => {
+                setLoginError(null);
+                setLoginType(loginType === 'standard' ? 'integration' : 'standard');
+              }}
+              className="text-xs font-semibold text-slate-500 hover:text-[#1D4ED8] transition-colors cursor-pointer inline-flex items-center gap-1.5"
+            >
+              {loginType === 'standard' ? (
+                <>
+                  <span>Entegrasyon girişi</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </>
+              ) : (
+                <>
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Standart kulüp girişine dön</span>
+                </>
+              )}
+            </button>
+          </div>
         )}
 
-      </div>
+        {/* Mobile-only footer */}
+        <p className="lg:hidden relative z-10 mt-6 text-[11px] text-slate-400">
+          © 2026 SportsFly
+        </p>
+      </main>
 
       {/* ========================================================================= */}
       {/* MODAL 1: Comprehensive Legal Policy Modal (Tabs, Search, Print, Copy)      */}
@@ -1788,15 +1912,15 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                   <h3 className="text-base font-bold text-slate-900">
                     {regStep === 'form' && "SportsFly'a Kayıt Ol"}
                     {regStep === 'verify' && "E-posta Adresinizi Doğrulayın"}
-                    {regStep === 'package_selection' && "Adım 3/5: Spor Okulu Paketinizi Belirleyin"}
+                    {regStep === 'package_selection' && "Adım 3/5: Spor Kulübü Paketinizi Belirleyin"}
                     {regStep === 'checkout' && "Adım 4/5: Güvenli Ödeme ve Etkinleştirme"}
                     {regStep === 'contracts' && "Adım 5/5: Dijital Sözleşmeler ve KVKK Onayları"}
                     {regStep === 'success' && "Kurulum Başarıyla Tamamlandı! 🎉"}
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    {regStep === 'form' && "Spor kulübünüz / spor okulunuz için hemen kaydolun"}
+                    {regStep === 'form' && "Spor kulübünüz için hemen kaydolun"}
                     {regStep === 'verify' && "E-posta adresinize gönderilen doğrulama kodunu girin"}
-                    {regStep === 'package_selection' && "SportsFly'ın sunduğu en gelişmiş spor okulu yönetim paketlerinden birini seçin."}
+                    {regStep === 'package_selection' && "SportsFly'ın sunduğu en gelişmiş spor kulübü yönetim paketlerinden birini seçin."}
                     {regStep === 'checkout' && "Seçtiğiniz paketi kredi kartı veya havale yöntemiyle onaylayın."}
                     {regStep === 'contracts' && "Yasal uyumluluklar kapsamında kulüp sözleşmelerini dijital olarak imzalayın."}
                     {regStep === 'success' && "Hesabınız başarıyla kuruldu. SportsFly dünyasına hoş geldiniz!"}
@@ -1858,7 +1982,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 onSubmit={async (e) => {
                   e.preventDefault();
                   const form = e.currentTarget;
-                  const clubInput = (form.elements.namedItem('regClubName') as HTMLInputElement)?.value || 'Yeni Spor Okulu';
+                  const clubInput = (form.elements.namedItem('regClubName') as HTMLInputElement)?.value || 'Yeni Spor Kulübü';
                   const emailInput = ((form.elements.namedItem('regEmail') as HTMLInputElement)?.value || '').trim().toLowerCase();
                   const phoneInput = (form.elements.namedItem('regPhone') as HTMLInputElement)?.value || '0532 000 0000';
                   const managerInput = (form.elements.namedItem('regManagerName') as HTMLInputElement)?.value || 'Kulüp Kurucusu';
@@ -1877,7 +2001,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               >
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
-                    Spor Okulu / Kulüp Adı
+                    Spor Kulübü Adı
                   </label>
                   <input
                     type="text"
@@ -2759,13 +2883,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                     Tebrikler! Kurulum Başarıyla Tamamlandı 🎉
                   </h3>
                   <p className="text-xs text-slate-600 leading-relaxed max-w-sm mx-auto">
-                    <strong>{regClubName}</strong> spor okulu için SportsFly kurumsal altyapısı ve veritabanı başarıyla aktif hale getirilmiştir.
+                    <strong>{regClubName}</strong> spor kulübü için SportsFly kurumsal altyapısı ve veritabanı başarıyla aktif hale getirilmiştir.
                   </p>
                 </div>
 
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 text-left space-y-2 text-xs max-w-md mx-auto">
                   <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/60">
-                    <span className="text-slate-500 font-medium">Spor Okulu Adı:</span>
+                    <span className="text-slate-500 font-medium">Spor Kulübü Adı:</span>
                     <span className="font-extrabold text-slate-900">{regClubName}</span>
                   </div>
                   <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/60">
@@ -2837,14 +2961,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 Başvurunuz Alınmıştır!
               </h3>
               <p className="text-xs text-slate-600 leading-relaxed px-2">
-                Spor okulunuz için oluşturduğunuz kurumsal üyelik başvurusu başarıyla sistemimize kaydedilmiştir.
+                Spor kulübünüz için oluşturduğunuz kurumsal üyelik başvurusu başarıyla sistemimize kaydedilmiştir.
               </p>
             </div>
 
             {/* Summary Box */}
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 text-left space-y-2 text-xs">
               <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
-                <span className="text-slate-500 font-medium">Spor Okulu Adı:</span>
+                <span className="text-slate-500 font-medium">Spor Kulübü Adı:</span>
                 <span className="font-extrabold text-slate-900">{pendingApprovalInfo.clubName}</span>
               </div>
               <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
@@ -2860,7 +2984,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             <div className="p-3.5 rounded-xl bg-blue-50/80 border border-blue-200/80 text-left text-[11px] text-blue-900 leading-relaxed flex items-start gap-2.5">
               <Mail className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
               <div>
-                Kurumsal üyelik başvurunuz onaylandıktan sonra spor okulu hesabınız anında aktif edilecek olup, erişim ve onay bilgilendirmesi <strong>{pendingApprovalInfo.email}</strong> e-posta adresinize <strong>SportsFly</strong> tarafından iletilecektir.
+                Kurumsal üyelik başvurunuz onaylandıktan sonra spor kulübü hesabınız anında aktif edilecek olup, erişim ve onay bilgilendirmesi <strong>{pendingApprovalInfo.email}</strong> e-posta adresinize <strong>SportsFly</strong> tarafından iletilecektir.
               </div>
             </div>
 
